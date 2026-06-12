@@ -20,3 +20,15 @@ dotnet_diagnostic.SS006.severity = warning # per-call new Random()
 dotnet_diagnostic.SS007.severity = warning # empty catch swallows the error
 dotnet_diagnostic.SS009.severity = warning # ambient Task.Run / new Thread (route through Ps/Spawn)
 dotnet_diagnostic.SS010.severity = warning # hardcoded absolute path / URL (resolve from Cm)
+
+# The contract gate (docs/CONTRACT.md §3/§6; vocabulary + DAG from src/analyzers/SystemCatalog.json).
+# SS000 is the fail-closed guard: catalog missing/unparsable = the gate is OFF = error, immediately.
+# SS011-SS016 ride at WARNING pending the census (§7 build order: census -> baselines -> THEN errors
+# with shrink-only baselines; severities never soften, baselines absorb the legacy).
+dotnet_diagnostic.SS000.severity = error   # SystemCatalog.json unavailable — the gate is off
+dotnet_diagnostic.SS011.severity = warning # namespace not in the component catalog
+dotnet_diagnostic.SS012.severity = warning # type grammar (banned suffix / context word / platform collision)
+dotnet_diagnostic.SS013.severity = warning # method verb not in the closed verb list
+dotnet_diagnostic.SS014.severity = warning # component DAG (reference direction)
+dotnet_diagnostic.SS015.severity = warning # static field remembers state in a component
+dotnet_diagnostic.SS016.severity = warning # handle value parsed outside the kernel

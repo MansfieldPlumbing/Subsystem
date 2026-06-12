@@ -85,6 +85,10 @@
     <ProjectReference Include="..\analyzers\Subsystem.Analyzers.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
+    <!-- The contract's seed (docs/CONTRACT.md §3): SS011-SS016 read the closed vocabulary and the
+         component DAG from this one file at compile time; the Registrar projects the SAME file into
+         \System\Contract at boot. One seed, two consumers. Missing/unparsable => SS000 (fail-closed). -->
+    <AdditionalFiles Include="..\analyzers\SystemCatalog.json" />
   </ItemGroup>
   <ItemGroup>
     <!-- The shell is COMPILED, not shipped loose: every presenter/support file under src/shell

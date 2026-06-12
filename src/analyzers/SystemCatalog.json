@@ -5,13 +5,16 @@
   "rootToday": "Subsystem",
 
   "components": {
-    "Vom": { "name": "Virtual Object Manager",  "dependsOn": [],            "note": "the kernel; the one node type lives here" },
-    "Dg":  { "name": "Diagnostics",             "dependsOn": [],            "note": "records + ring; sinks are host drivers. Today reaches Hb/Rs/SessionManager - ratchet R3" },
-    "Cm":  { "name": "Configuration Manager",   "dependsOn": ["Vom", "Dg"], "note": "volatile + durable planes; durable plane is a driver grant. Today probes MainActivity - ratchet R3" },
-    "Pp":  { "name": "Plug-and-Play Manager",   "dependsOn": ["Cm", "Dg"],  "note": "provisioning engine: Extract/Apply templates" },
-    "Hb":  { "name": "Heuristic Broker",        "dependsOn": ["Vom", "Cm", "Dg"], "note": "model lifecycle + inference; the LiteRT seam" },
-    "Rs":  { "name": "Remote Sessions",         "dependsOn": ["Vom", "Cm", "Dg"], "note": "the PSRP subsystem (Rs.cs:14)" }
+    "Vom": { "name": "Virtual Object Manager",  "dependsOn": ["Dg"],        "folder": "src/runspace/Vom/",             "note": "the kernel; the one node type lives here; logs through Dg" },
+    "Dg":  { "name": "Diagnostics",             "dependsOn": [],            "folder": "src/runspace/Diagnostics/",     "note": "records + ring; sinks are host drivers. Today reaches Hb/Rs/SessionManager - ratchet R3" },
+    "Cm":  { "name": "Configuration Manager",   "dependsOn": ["Vom", "Dg"], "folder": "src/runspace/Cm/",              "note": "volatile + durable planes; durable plane is a driver grant. Today probes MainActivity - ratchet R3" },
+    "Pp":  { "name": "Plug-and-Play Manager",   "dependsOn": ["Cm", "Dg"],  "folder": "src/runspace/Pp/",              "note": "provisioning engine: Extract/Apply templates" },
+    "Hb":  { "name": "Heuristic Broker",        "dependsOn": ["Vom", "Cm", "Dg"], "folder": "src/runspace/HeuristicBroker/", "note": "model lifecycle + inference; the LiteRT seam" },
+    "Rs":  { "name": "Remote Sessions",         "dependsOn": ["Vom", "Cm", "Dg"], "folder": "src/runspace/Host/Rs.cs",       "note": "the PSRP subsystem (Rs.cs:14); single file pending Host/ assignment" }
   },
+
+  "hostPaths": ["src/host-windows/", "src/runspace/MainActivity.cs", "src/runspace/Services/",
+                "src/runspace/Widgets/", "src/tools/", "src/analyzers/"],
 
   "unassigned": {
     "_about": "Code that exists but whose component registration is a pending deliberate decision - do NOT coin codes for these in PRs.",

@@ -21,8 +21,13 @@ static class Runner
         var projectPath = Path.Combine(repoRoot, "src", "runspace", "Subsystem.csproj");
 
         string? refsSymbol = null;
+        bool gate = false, writeBaseline = false;
         for (int i = 0; i < args.Length; i++)
+        {
             if (args[i] is "--refs" or "-r") { refsSymbol = i + 1 < args.Length ? args[i + 1] : null; }
+            if (args[i] is "--gate") gate = true;
+            if (args[i] is "--write-baseline") writeBaseline = true;
+        }
 
         Console.Error.WriteLine($"check: loading {Path.GetFileName(projectPath)} (semantic load — first run is slow)…");
         using var ws = Microsoft.CodeAnalysis.MSBuild.MSBuildWorkspace.Create();
@@ -46,18 +51,72 @@ static class Runner
         var compilation = await project.GetCompilationAsync();
         if (compilation is null) { Console.Error.WriteLine("check: no compilation."); return 2; }
 
+        if (gate || writeBaseline)
+            return await GateMode(project, compilation, Path.Combine(repoRoot, "src", "analyzers", "SS-BASELINE.txt"), writeBaseline);
         return refsSymbol is null
             ? await CheckMode(project, compilation)
             : await RefsMode(project, compilation, refsSymbol);
+    }
+
+    // --gate: fail on any SS finding NOT in the baseline (the ratchet — new code bleeds red, legacy
+    // is tracked). --write-baseline: regenerate the baseline from the current tree (shrink-only by
+    // policy: regenerating to a LARGER file is the drift the gate exists to refuse — review the diff).
+    // Keys are "SSxxx|file|message" WITHOUT line numbers, so unrelated edits don't false-positive;
+    // duplicate keys are counted (N identical findings in a file = N baseline entries).
+    static async Task<int> GateMode(Microsoft.CodeAnalysis.Project project, Microsoft.CodeAnalysis.Compilation compilation, string baselinePath, bool write)
+    {
+        var analyzers = LoadSubsystemAnalyzers();
+        var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
+        var diags = await withAnalyzers.GetAnalyzerDiagnosticsAsync();
+
+        var keys = diags.Where(d => d.Id.StartsWith("SS"))
+                        .Select(d => $"{d.Id}|{Path.GetFileName(d.Location.GetLineSpan().Path)}|{d.GetMessage()}")
+                        .OrderBy(k => k, StringComparer.Ordinal)
+                        .ToList();
+
+        if (write)
+        {
+            File.WriteAllLines(baselinePath, keys);
+            Console.WriteLine($"gate: baseline written — {keys.Count} entries -> {baselinePath}");
+            return 0;
+        }
+
+        var baseline = File.Exists(baselinePath)
+            ? File.ReadAllLines(baselinePath).ToList()
+            : new List<string>();
+        var budget = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var k in baseline) budget[k] = budget.TryGetValue(k, out var n) ? n + 1 : 1;
+
+        var fresh = new List<string>();
+        foreach (var k in keys)
+        {
+            if (budget.TryGetValue(k, out var n) && n > 0) budget[k] = n - 1;
+            else fresh.Add(k);
+        }
+
+        int retired = budget.Values.Where(v => v > 0).Sum();
+        Console.WriteLine($"gate: {keys.Count} findings; baseline {baseline.Count}; new {fresh.Count}; retired {retired}");
+        if (retired > 0)
+            Console.WriteLine("gate: baseline entries no longer firing — shrink the baseline (--write-baseline) and commit the diff.");
+        if (fresh.Count > 0)
+        {
+            Console.WriteLine("\ngate: NEW violations (not in baseline) — the gate bleeds red here:");
+            foreach (var k in fresh) Console.WriteLine("  " + k);
+            return 1;
+        }
+        Console.WriteLine("gate: GREEN — no new violations.");
+        return 0;
     }
 
     // Default: run SS001-009 over the whole project, grouped report.
     static async Task<int> CheckMode(Microsoft.CodeAnalysis.Project project, Microsoft.CodeAnalysis.Compilation compilation)
     {
         var analyzers = LoadSubsystemAnalyzers();
-        Console.Error.WriteLine($"check: running {analyzers.Length} analyzers (SS001-009)…");
+        Console.Error.WriteLine($"check: running {analyzers.Length} analyzers (SS000-SS016)…");
 
-        var withAnalyzers = compilation.WithAnalyzers(analyzers);
+        // AnalyzerOptions carries the AdditionalFiles — SystemCatalog.json, the seed SS011-SS016
+        // read. Without it the catalog-fed rules are blind and SS000 fires (fail-closed).
+        var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
         var diags = await withAnalyzers.GetAnalyzerDiagnosticsAsync();
 
         var ss = diags.Where(d => d.Id.StartsWith("SS"))
