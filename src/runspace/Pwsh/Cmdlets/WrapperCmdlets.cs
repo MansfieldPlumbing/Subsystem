@@ -88,22 +88,22 @@ public sealed class GetAgentSessionCmdlet : WrapperCmdlet
     [Parameter(Position = 0)] public string? Id { get; set; }
     protected override void ProcessRecord()
         => Emit(string.IsNullOrEmpty(Id)
-            ? Subsystem.HeuristicBroker.AgentSessionStore.ListSummaries()
-            : Subsystem.HeuristicBroker.AgentSessionStore.LoadJson(Id));
+            ? Subsystem.HeuristicBroker.AgentSessionTable.ListSummaries()
+            : Subsystem.HeuristicBroker.AgentSessionTable.LoadJson(Id));
 }
 
 [Cmdlet(VerbsCommon.New, "AgentSession")]
 public sealed class NewAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Position = 0)] public string? Title { get; set; }
-    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionStore.Create(Title));
+    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionTable.Create(Title));
 }
 
 [Cmdlet(VerbsCommon.Remove, "AgentSession")]
 public sealed class RemoveAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)] public string Id { get; set; } = string.Empty;
-    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionStore.Delete(Id));
+    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionTable.Delete(Id));
 }
 
 [Cmdlet(VerbsCommon.Rename, "AgentSession")]
@@ -111,7 +111,7 @@ public sealed class RenameAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)] public string Id { get; set; } = string.Empty;
     [Parameter(Mandatory = true, Position = 1)] public string Title { get; set; } = string.Empty;
-    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionStore.Rename(Id, Title));
+    protected override void ProcessRecord() => Emit(Subsystem.HeuristicBroker.AgentSessionTable.Rename(Id, Title));
 }
 
 // --- Package metadata ---

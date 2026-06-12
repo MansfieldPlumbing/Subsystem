@@ -20,7 +20,7 @@ SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report t
 SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|AgentSessionStore.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
+SS007|AgentSessionTable.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|AgentTools.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|AgentTools.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|AgentTools.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
@@ -147,7 +147,7 @@ SS011|AdbMdnsDiscoverer.cs|Namespace 'Subsystem' carries no component segment (r
 SS011|AdbObjectCmdlets.cs|Namespace 'Subsystem.Pwsh.Cmdlets' segment 'Pwsh' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AdbPairingClient.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentCmdlets.cs|Namespace 'Subsystem.Pwsh.Cmdlets' segment 'Pwsh' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
-SS011|AgentSessionStore.cs|Namespace 'Subsystem.HeuristicBroker' segment 'HeuristicBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
+SS011|AgentSessionTable.cs|Namespace 'Subsystem.HeuristicBroker' segment 'HeuristicBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentSettings.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentTools.cs|Namespace 'Subsystem.HeuristicBroker' segment 'HeuristicBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AndroidPubKey.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -212,7 +212,6 @@ SS012|AdbObjectCmdlets.cs|Type 'GetAndroidProcessTreeCmdlet' encodes context 'An
 SS012|AdbObjectCmdlets.cs|Type 'GetAndroidStartupCmdlet' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|AdbObjectCmdlets.cs|Type 'SetAndroidStartupCmdlet' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|AdbObjectCmdlets.cs|Type 'StopAndroidProcessCmdlet' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
-SS012|AgentSessionStore.cs|Type 'AgentSessionStore' carries banned suffix 'Store' — name the mechanism (approved suffixes live in SystemCatalog.json)
 SS012|AndroidPubKey.cs|Type 'AndroidPubKey' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|AndroidSubsystemHost.cs|Type 'AndroidSubsystemHost' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|AndroidSubsystemHost.cs|Type 'AndroidSubsystemRawUserInterface' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
@@ -251,9 +250,9 @@ SS012|SurfaceCmdlets.cs|Type 'GetAndroidMessageCmdlet' encodes context 'Android'
 SS012|SurfaceCmdlets.cs|Type 'SendAndroidNotificationCmdlet' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|SurfaceCmdlets.cs|Type 'StartAndroidIntentCmdlet' encodes context 'Android' in the name — context belongs to the handle/host, not the identifier
 SS012|WrapperCmdlets.cs|Type 'NewAgentSessionCmdlet' encodes context 'New' in the name — context belongs to the handle/host, not the identifier
-SS013|AgentSessionStore.cs|Method 'AppendTurn' starts with 'Append', which is not in the verb catalog — register the verb deliberately or use an approved one
-SS013|AgentSessionStore.cs|Method 'Delete' starts with 'Delete', which is not in the verb catalog — register the verb deliberately or use an approved one
-SS013|AgentSessionStore.cs|Method 'Rename' starts with 'Rename', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|AgentSessionTable.cs|Method 'AppendTurn' starts with 'Append', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|AgentSessionTable.cs|Method 'Delete' starts with 'Delete', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|AgentSessionTable.cs|Method 'Rename' starts with 'Rename', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|AgentSettings.cs|Method 'AutoListenAssist' starts with 'Auto', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|AgentSettings.cs|Method 'SpeakReplies' starts with 'Speak', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|AgentSettings.cs|Method 'UseChatContext' starts with 'Use', which is not in the verb catalog — register the verb deliberately or use an approved one

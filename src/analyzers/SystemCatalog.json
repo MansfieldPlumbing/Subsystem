@@ -22,7 +22,7 @@
       "Host/ (ObpHost, ProjectionServer, Registrar, SubsystemApi, ModelsApi, Firewall) - ratchet R7",
       "Pwsh/ (SessionManager, ReplEngine, Translator, HelpSystem, cmdlet families)",
       "Device/ (drivers: Torch, Morse, VomInterop, ...)",
-      "Adb/", "Widgets/ (Android head)", "Services/ (Android head)", "HeuristicBroker satellites (ModelManager, ModelCatalog, AgentSessionStore, Hud)"
+      "Adb/", "Widgets/ (Android head)", "Services/ (Android head)", "HeuristicBroker satellites (ModelManager, ModelCatalog, AgentSessionTable, Hud)"
     ]
   },
 

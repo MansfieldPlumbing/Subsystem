@@ -49,7 +49,7 @@ namespace Subsystem.Analyzers
 
             var name = type.Name;
 
-            // 1. Banned suffix (longest match) — "AgentSessionStore" -> Store.
+            // 1. Banned suffix (longest match wins when suffixes nest).
             string? hit = null;
             foreach (var s in cat.BannedSuffixes)
                 if (name.Length > s.Length && name.EndsWith(s, StringComparison.Ordinal) && (hit == null || s.Length > hit.Length))

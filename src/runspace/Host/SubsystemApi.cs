@@ -195,11 +195,11 @@ public static class SubsystemApi
             try
             {
                 // --- Saved-chat commands (Cm \Agent\Session\*) ---
-                if (action == "sessions") { await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionStore.ListSummaries() }, token); continue; }
-                if (action == "new")      { sessionId = Subsystem.HeuristicBroker.AgentSessionStore.Create(title); await SendFrame(ws, new { type = "session", id = sessionId }, token); continue; }
-                if (action == "load")     { sessionId = id; await SendFrame(ws, new { type = "transcript", id, json = Subsystem.HeuristicBroker.AgentSessionStore.LoadJson(id) }, token); continue; }
-                if (action == "delete")   { Subsystem.HeuristicBroker.AgentSessionStore.Delete(id); if (sessionId == id) sessionId = ""; await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionStore.ListSummaries() }, token); continue; }
-                if (action == "rename")   { Subsystem.HeuristicBroker.AgentSessionStore.Rename(id, title); await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionStore.ListSummaries() }, token); continue; }
+                if (action == "sessions") { await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionTable.ListSummaries() }, token); continue; }
+                if (action == "new")      { sessionId = Subsystem.HeuristicBroker.AgentSessionTable.Create(title); await SendFrame(ws, new { type = "session", id = sessionId }, token); continue; }
+                if (action == "load")     { sessionId = id; await SendFrame(ws, new { type = "transcript", id, json = Subsystem.HeuristicBroker.AgentSessionTable.LoadJson(id) }, token); continue; }
+                if (action == "delete")   { Subsystem.HeuristicBroker.AgentSessionTable.Delete(id); if (sessionId == id) sessionId = ""; await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionTable.ListSummaries() }, token); continue; }
+                if (action == "rename")   { Subsystem.HeuristicBroker.AgentSessionTable.Rename(id, title); await SendFrame(ws, new { type = "sessions", items = Subsystem.HeuristicBroker.AgentSessionTable.ListSummaries() }, token); continue; }
 
                 if (action == "profile")
                 {
@@ -227,8 +227,8 @@ public static class SubsystemApi
 
                 // Persist the user turn into the active saved chat (create one lazily on first message so
                 // every conversation is durable in Cm without the user asking). Announce the session id once.
-                if (string.IsNullOrEmpty(sessionId)) { sessionId = Subsystem.HeuristicBroker.AgentSessionStore.Create(); await SendFrame(ws, new { type = "session", id = sessionId }, token); }
-                Subsystem.HeuristicBroker.AgentSessionStore.AppendTurn(sessionId,
+                if (string.IsNullOrEmpty(sessionId)) { sessionId = Subsystem.HeuristicBroker.AgentSessionTable.Create(); await SendFrame(ws, new { type = "session", id = sessionId }, token); }
+                Subsystem.HeuristicBroker.AgentSessionTable.AppendTurn(sessionId,
                     "user", audioBytes != null && text.Length == 0 ? "🎤 (voice message)" : text);
                 var answerBuf = new StringBuilder();
 
@@ -284,7 +284,7 @@ public static class SubsystemApi
                 }, token);
 
                 // Persist her answer (append-only transcript in Cm).
-                if (answerBuf.Length > 0) Subsystem.HeuristicBroker.AgentSessionStore.AppendTurn(sessionId, "assistant", answerBuf.ToString());
+                if (answerBuf.Length > 0) Subsystem.HeuristicBroker.AgentSessionTable.AppendTurn(sessionId, "assistant", answerBuf.ToString());
             }
             catch (Exception ex)
             {

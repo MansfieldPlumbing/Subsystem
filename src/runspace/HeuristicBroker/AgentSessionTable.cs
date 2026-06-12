@@ -11,7 +11,7 @@ namespace Subsystem.HeuristicBroker
     // store). A conversation is a Cm capability at `\Agent\Session\<id>`, Type="Session"; its ManifestJson IS
     // the transcript. Append-only turns. No sibling DB, no files
     // — the durable SQLite plane under Cm already gives us persistence + rehydrate-on-boot for free.
-    public static class AgentSessionStore
+    public static class AgentSessionTable
     {
         private const string Prefix = "\\Agent\\Session\\";
         private const int MaxTurns = 400;   // bound the manifest; a phone chat doesn't need infinite scrollback
