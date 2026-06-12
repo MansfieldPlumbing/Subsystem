@@ -14,7 +14,7 @@ namespace Subsystem.Analyzers
     /// it is a pure constant map.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
-    public sealed class SS003StaticDictionaryStoreAnalyzer : DiagnosticAnalyzer
+    public sealed class SS003StaticDictionaryAnalyzer : DiagnosticAnalyzer
     {
         public const string DiagnosticId = "SS003";
 
