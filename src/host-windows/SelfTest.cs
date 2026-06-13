@@ -23,6 +23,10 @@ internal static class SelfTest
         ok &= RunTest(VomKernel.SpawnKillTest(), "rootRemoved", "childRemoved", "grandchildRemoved", "childObservedCancel");
 
         Console.WriteLine();
+        Console.WriteLine("--- Vom.WaitPhaseLockTest (WaitAny switchboard + WaitAll tensor barrier) ---");
+        ok &= RunTest(VomKernel.WaitPhaseLockTest(), "waitAnyCorrect", "barrierHeldForLaggard", "phaseLocked");
+
+        Console.WriteLine();
         Console.WriteLine("--- Cm.SelfTest (register probe, confirm in BOTH planes, unregister) ---");
         ok &= RunTest(JsonSerializer.Serialize(Subsystem.Cm.Cm.SelfTest()), "ok", "inMemory", "inDurable");
 

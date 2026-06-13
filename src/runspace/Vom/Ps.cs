@@ -101,4 +101,40 @@ public static unsafe partial class Vom
             note = "cascade Terminate: linked-token cancel -> Thread.Interrupt() -> bulk native reclaim down the owner tree; the grandchild parks in a managed Sleep, so Interrupt unwinds it (see the INTERRUPT log) — a busy/native wedge would stay resourceless residual.",
         });
     }
+
+    // Phase-lock self-test (the multiplexer is a phase lock, not a switchboard). Two producer fences feed a
+    // consumer that uses WaitAny (switchboard: first worker to its phase) then WaitAll (barrier: parks until
+    // EVERY fence reaches phase N). Proves the barrier holds for the laggard — async/ThreadPool jitter can't
+    // tear it. Synchronous, futex-parked, no async; the fence value IS the clock.
+    public static string WaitPhaseLockTest()
+    {
+        var vision = new CpuFence();
+        var audio  = new CpuFence();
+        var fences = new Fence[] { vision, audio };
+
+        // WaitAny (control): only audio advances -> WaitAny returns audio's index.
+        var t0 = new Thread(() => { Thread.Sleep(25); audio.Signal(1); }) { IsBackground = true };
+        t0.Start();
+        int who = Fence.WaitAny(fences, new ulong[] { 1, 1 });
+        t0.Join();
+
+        // WaitAll (data): vision reaches phase 5 first; the barrier must NOT release until audio also hits 5.
+        var t1 = new Thread(() => { Thread.Sleep(25); vision.Signal(5); }) { IsBackground = true };
+        var t2 = new Thread(() => { Thread.Sleep(75); audio.Signal(5);  }) { IsBackground = true };
+        t1.Start(); t2.Start();
+        Fence.WaitAll(fences, new ulong[] { 5, 5 });
+        bool laggardBehindAtRelease = audio.CompletedValue < 5;   // MUST be false — the barrier held for the laggard
+        t1.Join(); t2.Join();
+
+        return JsonSerializer.Serialize(new
+        {
+            waitAnyIndex          = who,                                 // expect 1 (audio)
+            waitAnyCorrect        = who == 1,
+            visionPhase           = vision.CompletedValue,               // 5
+            audioPhase            = audio.CompletedValue,                // 5
+            barrierHeldForLaggard = !laggardBehindAtRelease,             // expect true
+            phaseLocked           = vision.CompletedValue == 5 && audio.CompletedValue == 5,
+            note = "WaitAny = switchboard (first worker to its phase); WaitAll = barrier (parks until ALL at phase N). Futex-parked, synchronous, no async — the fence value is the clock.",
+        });
+    }
 }
