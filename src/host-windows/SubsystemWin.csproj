@@ -20,7 +20,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>subsystem-win</AssemblyName>
+    <AssemblyName>sswin</AssemblyName>
     <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
@@ -34,6 +34,16 @@
   <ItemGroup>
     <!-- Same version the ship target pins; brings the bundled e_sqlite3 native for win-x64. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <!-- Layer 3: the PowerShell runspace. sswin becomes a pwsh SUPERSET — every built-in plus the
+         project's own cmdlets (CodeContext, the gate, the vom: provider) in one hosted runspace. -->
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.7.0-preview.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The project's own cmdlets, loaded into sswin's runspace so the shell dogfoods them
+         (Get-CodeContext, Get-GitGraphContext, ...). Built against PowerShellStandard, run against
+         the real SDK above — the facade pattern, exactly what it's for. -->
+    <ProjectReference Include="..\tools\CodeContext\CodeContext.csproj" />
   </ItemGroup>
 
 </Project>

@@ -7,11 +7,12 @@ node_modules/
 **/prefab/
 src/runspace/boringssl/
 
-# Binary artifacts
+# Binary artifacts — including the root-delivered full-fat builds (subsystem-win.exe, subsystem.apk)
 *.apk
 *.aar
 *.zip
 *.tar.gz
+*.exe
 
 # Local-only siblings at the repo ROOT — NOT in the repo (kept as <drive>\ siblings).
 # Root-anchored (leading /) so they NEVER collaterally ignore an in-tree dir of the same
