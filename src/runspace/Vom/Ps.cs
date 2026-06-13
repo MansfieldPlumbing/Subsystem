@@ -8,8 +8,9 @@ namespace Subsystem.Vom;
 // Ps — the dispatcher (VOM-SPEC §4d). The VOM owns thread creation: Spawn(parent, name, work)
 // replaces ambient Task.Run with a TRACKED, quota'd, token-wired child Sub-VOM on its own thread.
 // The child's cancellation token is LINKED to the parent's (see Owner), so Terminate(parent) cascades
-// the termination down the owner tree. Honest CoreCLR limit (VOM-SPEC §5): a wedged managed thread cannot be
-// aborted — Terminate makes it resourceless (handles revoked, owner dropped) + cooperatively cancelled.
+// the termination down the owner tree. Escalation on Terminate (VOM-SPEC §5): cooperative token cancel →
+// Thread.Interrupt() (wakes a thread parked in a managed wait so it unwinds cleanly) → resourceless quarantine
+// (handles revoked, owner dropped) for a busy/native wedge CoreCLR still cannot abort.
 public static unsafe partial class Vom
 {
     // Spawn a child Sub-VOM under `parent` and run `work` on its own thread. Delegated quota can't
@@ -33,8 +34,19 @@ public static unsafe partial class Vom
             catch (Exception ex) { Dg.Log("vom", $"SPAWN {path} faulted: {ex.GetType().Name}: {ex.Message}"); }
             finally { Terminate(child); }             // self-cleanup once work returns
         }) { IsBackground = background, Name = path };
-        // Task Manager, reclaimed by the same Terminate loop. onReclaim flags a still-alive thread as a residual context.
-        Register(child, "Thread", t, onReclaim: () => { if (t.IsAlive) Dg.Log("vom", $"RESIDUAL {path}\\Thread: still alive at reclaim"); }, subdir: "Thread");
+        // onReclaim is the thread's kill escalation, run AFTER Terminate cancelled the token (rung 1). Rung 2:
+        // Thread.Interrupt() wakes a thread parked in a MANAGED wait (Sleep/Monitor.Wait/WaitHandle) so it throws
+        // ThreadInterruptedException and unwinds cleanly (finallys run). A busy/native wedge ignores it (the
+        // exception only lands at a managed wait) and stays resourceless residual — CoreCLR cannot abort it.
+        // Skip self-reclaim: a thread finishing its own work is already leaving (joining self only burns the grace).
+        Register(child, "Thread", t, subdir: "Thread", onReclaim: () =>
+        {
+            if (!t.IsAlive || t == Thread.CurrentThread) return;
+            try { t.Interrupt(); } catch (Exception ex) { Dg.Log("vom", $"INTERRUPT {path}\\Thread: {ex.GetType().Name} (raced to exit)"); }
+            Dg.Log("vom", t.Join(50)
+                ? $"INTERRUPT {path}\\Thread: unwound on interrupt"
+                : $"RESIDUAL {path}\\Thread: still alive at reclaim (interrupt unreached — busy/native wedge)");
+        });
         t.Start();
         return child;
     }
@@ -86,7 +98,7 @@ public static unsafe partial class Vom
             grandchildRemoved = GetOwner($"{root}\\Ps\\child\\Ps\\grandchild") == null,
             childObservedCancel,                               // linked token cascaded to the parked child
             ownersAfter       = OwnerCount,
-            note = "cascade Terminate: linked-token cancel + bulk native reclaim down the owner tree; the wedged grandchild is made resourceless (CoreCLR cannot abort it).",
+            note = "cascade Terminate: linked-token cancel -> Thread.Interrupt() -> bulk native reclaim down the owner tree; the grandchild parks in a managed Sleep, so Interrupt unwinds it (see the INTERRUPT log) — a busy/native wedge would stay resourceless residual.",
         });
     }
 }

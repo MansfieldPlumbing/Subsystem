@@ -39,6 +39,7 @@ namespace Subsystem.Analyzers
         public readonly HashSet<string> VerbsApproved = new HashSet<string>(StringComparer.Ordinal);
         public readonly HashSet<string> VerbsTriage = new HashSet<string>(StringComparer.Ordinal);
         public readonly List<string> HostPaths = new List<string>();
+        public readonly HashSet<string> SynchronousCore = new HashSet<string>(StringComparer.Ordinal);
 
         // Per-compilation parse cache (the catalog text object is stable across analyzer callbacks).
         private static readonly ConcurrentDictionary<SourceText, (SystemCatalogFile? Catalog, string? Error)> Cache =
@@ -110,6 +111,7 @@ namespace Subsystem.Analyzers
                 foreach (var s in Strings(Get(verbs, "triage"))) c.VerbsTriage.Add(s);
             }
             foreach (var s in Strings(Get(root, "hostPaths"))) c.HostPaths.Add(Norm(s));
+            foreach (var s in Strings(Get(root, "synchronousCore"))) c.SynchronousCore.Add(s);
 
             // Required sections for the rules to mean anything — fail closed if absent.
             if (c.ApprovedSuffixes.Count == 0 || c.BannedSuffixes.Count == 0 || c.VerbsApproved.Count == 0)

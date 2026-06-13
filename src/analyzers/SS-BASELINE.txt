@@ -408,3 +408,4 @@ SS015|Rs.cs|Static field '_appBaseGrounded' (mutable) — statics compute, never
 SS015|Rs.cs|Static field '_bootstrap' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Rs.cs|Static field '_sessions' (readonly ConcurrentDictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Vom.cs|Static field '_owners' (readonly ConcurrentDictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS018|PackageInfoDb.cs|.GetAwaiter().GetResult() in core component code — the core is synchronous (real threads + Fence handoff, push/best-effort); async colors callers, hides the owning thread, and enables the sync-over-async deadlock. Make it synchronous, or move it to the host/seam

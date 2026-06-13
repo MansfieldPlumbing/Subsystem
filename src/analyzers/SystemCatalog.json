@@ -16,6 +16,9 @@
   "hostPaths": ["src/host-windows/", "src/runspace/MainActivity.cs", "src/runspace/Services/",
                 "src/runspace/Widgets/", "src/tools/", "src/analyzers/"],
 
+  "_synchronousCore_about": "Components that are brutally synchronous — SS018 refuses async/await + sync-over-async here. The core is real threads + Fence handoff (push, best-effort, copy-then-share); async legitimately lives at the seams (Hb=LLM, Rs=pwsh, Host=web, Adb=network). This list ratchets OUTWARD deliberately as a seam is made synchronous — it never silently widens.",
+  "synchronousCore": ["Vom", "Dg", "Cm", "Pp"],
+
   "unassigned": {
     "_about": "Code that exists but whose component registration is a pending deliberate decision - do NOT coin codes for these in PRs.",
     "areas": [
