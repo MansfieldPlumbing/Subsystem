@@ -120,6 +120,11 @@ internal static class SelfSource
         return count;
     }
 
+    // Suite-facing accessors (the `ss diag` self-carry fundamentals): the embedded source dump and icon,
+    // the payloads that let a dropped ss.exe reconstitute itself. Null when this build carries neither.
+    internal static string? EmbeddedDumpText() => ReadResourceText("ss-source.dump");
+    internal static byte[]? EmbeddedIconBytes() => ReadResourceBytes("app.ico");
+
     private static string? ReadResourceText(string logicalName)
     {
         var asm = Assembly.GetExecutingAssembly();

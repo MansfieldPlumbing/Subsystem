@@ -25,6 +25,7 @@ internal static class Build
         {
             "-help" or "--help" or "-h" or "/?" or "help" => PrintHelp(),
             "apk" or "android"                            => BuildApk(args[1..]),
+            "self" or "ss"                                => SelfBuild.Run(args[1..]),
             "win" or "windows" or "exe"                   => BuildWindows(args[1..]),
             _                                             => BuildWindows(args),
         };

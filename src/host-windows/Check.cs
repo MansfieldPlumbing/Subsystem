@@ -59,13 +59,32 @@ internal static class Check
         psi.Environment["DOTNET_ROOT"] = Path.GetDirectoryName(dotnet)!;
 
         if (!list) Console.WriteLine($"ss check: {Path.GetFileName(dll)} over {root}");
+        // Capture the checker's `gate:` summary lines (findings/baseline/new/retired + the verdict) so the
+        // smoke-log carries the real numbers, not a paraphrase.
+        var gateLines = new List<string>();
         using var p = Process.Start(psi)!;
-        p.OutputDataReceived += (_, e) => { if (e.Data is { } s) Console.WriteLine(s); };
+        p.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is { } s)
+            {
+                Console.WriteLine(s);
+                if (s.StartsWith("gate:", StringComparison.Ordinal)) gateLines.Add(s.Trim());
+            }
+        };
         p.ErrorDataReceived  += (_, e) => { if (e.Data is { } s) Console.Error.WriteLine(s); };
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         p.WaitForExit();
         int code = p.ExitCode;
+
+        // --gate is the smoke test for the analyzer ratchet: record its verdict (DERIVED from this run) before
+        // applying the hard-stop UX. pass = the true gate result (code 0), even when --override forces a red
+        // build through — the log tells the truth regardless.
+        if (Build.HasFlag(args, "--gate"))
+        {
+            if (gateLines.Count == 0) gateLines.Add($"gate: exit {code} (no summary line captured)");
+            SmokeLog.Record(root, "check --gate", code == 0, gateLines);
+        }
 
         // The gate is a HARD STOP: a red --gate prints (Build Failed). --override/-o downgrades to a warning.
         if (Build.HasFlag(args, "--gate") && code != 0)

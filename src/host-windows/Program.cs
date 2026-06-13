@@ -5,7 +5,8 @@ using Subsystem.Windows;
 //   ss -Command "..."         explicit command (pwsh-compatible)
 //   ss -EncodedCommand <b64>  base64 UTF-16LE command — quoting-proof, the agent's door
 //   ss -File <path>           run a script file
-//   ss selftest               VOM + Cm kernel self-tests (Layers 1-2)
+//   ss selftest               VOM + Cm kernel self-tests (Layers 1-2), logged to smoketest-log.md
+//   ss diag                   the living diagnostic suite (kernel + toolchain + self-carry), logged to the ledger
 //   ss describe [--map|--json] self-describe the system (contract, components, cmdlets, source map)
 //   ss help                   usage
 //   (no args)                 help — first contact teaches the modes
@@ -15,7 +16,8 @@ if (args.Length == 0) { var rc = Help.Print(); Interactive.KeepOpenIfDoubleClick
 var mode = args[0].ToLowerInvariant();
 return mode switch
 {
-    "selftest"                                                       => SelfTest.Run(),
+    "selftest"                                                       => SelfTest.Run(args[1..]),
+    "diag" or "-diag" or "--diag" or "selfcheck"                     => Diag.Run(args[1..]),
     "help" or "-help" or "--help" or "-h" or "/help" or "-?" or "/?"  => Help.Print(),
     "describe" or "-describe" or "--describe"
         or "contextualize" or "--contextualize" or "-c"              => Describe.Run(args[1..]),
