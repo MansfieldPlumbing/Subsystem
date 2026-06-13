@@ -8,41 +8,72 @@ using System.Text;
 
 namespace Subsystem.Windows;
 
-// Layer 3: sswin as a PowerShell SUPERSET. Run argv (or -Command / -EncodedCommand / -File) in a
+// Layer 3: ss as a PowerShell SUPERSET. Run argv (or -Command / -EncodedCommand / -File) in a
 // hosted runspace and print the formatted result. One-shot today (a warm `serve` runspace over the
 // named pipe comes later). The runspace is where the project's own cmdlets — CodeContext, the gate,
-// the vom: provider — load beside every built-in, so `sswin gci`, `sswin get-codecontext`, and
-// `sswin gci vom:\` are one shell. -EncodedCommand is the quoting-proof door for the agent.
+// the vom: provider — load beside every built-in, so `ss gci`, `ss get-codecontext`, and
+// `ss gci vom:\` are one shell. -EncodedCommand is the quoting-proof door for the agent.
 internal static class Shim
 {
     public static int Run(string[] args)
     {
-        var script = ResolveScript(args);
-        if (string.IsNullOrWhiteSpace(script)) { Console.Error.WriteLine("sswin: nothing to run"); return 2; }
-
         var iss = InitialSessionState.CreateDefault();   // full built-in cmdlet set (Management, Utility, ...)
         iss.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
         LoadProjectCmdlets(iss);                         // the dogfood surface, beside the built-ins
 
-        using var rs = RunspaceFactory.CreateRunspace(iss);
+        // Render exactly like the pwsh console: a real PSHost wired to Console + Out-Default. This
+        // fixes two output defects at once — (1) `exit` no longer swallows output (Out-Default writes
+        // to the host DURING invocation, not in a terminal end-block); (2) Write-Host / Write-Warning /
+        // the information stream now appear (a bare RunspaceFactory runspace drops the host streams —
+        // friction F8). ConsoleHost.SetShouldExit also captures `exit N`, so ss returns the script's code.
+        var host = new ConsoleHost();
+        using var rs = RunspaceFactory.CreateRunspace(host, iss);
         rs.Open();
         using var ps = PowerShell.Create();
         ps.Runspace = rs;
-        // Pipe results through Out-String so objects render the way pwsh's console does, not raw ToString.
-        ps.AddScript(script).AddCommand("Out-String");
+
+        // -File <path> [args…] — invoke the FILE as a script command so $PSScriptRoot / $PSCommandPath /
+        // $args resolve exactly like `pwsh -File`. Running the file's TEXT via AddScript loses that file
+        // context (friction: a script that anchors on $PSScriptRoot — e.g. build-ss.ps1 — broke under
+        // `ss -File`). Everything else (bare passthrough, -Command, -EncodedCommand) stays AddScript.
+        int fileIdx = Array.FindIndex(args, a => a.Equals("-File", StringComparison.OrdinalIgnoreCase));
+        if (fileIdx >= 0 && fileIdx + 1 < args.Length)
+        {
+            ps.AddCommand(args[fileIdx + 1], useLocalScope: false);
+            for (int i = fileIdx + 2; i < args.Length; i++) ps.AddArgument(args[i]);
+        }
+        else
+        {
+            var script = ResolveScript(args);
+            if (string.IsNullOrWhiteSpace(script)) { Console.Error.WriteLine("ss: nothing to run"); return 2; }
+            ps.AddScript(script);
+        }
+        ps.AddCommand("Out-Default");
 
         int code = 0;
         try
         {
-            foreach (var r in ps.Invoke()) Console.Write(r?.ToString());
+            ps.Invoke();
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("sswin: " + ex.Message);
+            Console.Error.WriteLine("ss: " + ex.Message);
             return 1;
         }
-        foreach (var e in ps.Streams.Error) { Console.Error.WriteLine(e.ToString()); code = 1; }
-        return code;
+        // A real PowerShell error fails the run; a NATIVE command writing to stderr does NOT. git, dotnet
+        // and adb all chatter on stderr while succeeding — friction F9: every `ss "<native>"` looked failed
+        // because PowerShell surfaces native stderr as NativeCommandError records. Those don't set the code.
+        foreach (var e in ps.Streams.Error)
+        {
+            Console.Error.WriteLine(e.ToString());
+            if (!(e.FullyQualifiedErrorId ?? string.Empty).Contains("NativeCommand", StringComparison.OrdinalIgnoreCase))
+                code = 1;
+        }
+        // For a passthrough shell, a native command's OWN exit code is the truth: a real failure surfaces,
+        // a success (exit 0) stays green even after stderr chatter. `exit N` (host.ExitCode) still wins.
+        if (rs.SessionStateProxy.GetVariable("LASTEXITCODE") is int nativeExit && nativeExit != 0)
+            code = nativeExit;
+        return host.ExitCode ?? code;
     }
 
     // Register the project's cmdlets from the in-memory assembly by their [Cmdlet] attribute —
@@ -64,10 +95,10 @@ internal static class Shim
                     iss.Commands.Add(new SessionStateCmdletEntry($"{attr.VerbName}-{attr.NounName}", type, null));
             }
         }
-        catch (Exception ex) { Console.Error.WriteLine("sswin: project cmdlets failed to load: " + ex.Message); }
+        catch (Exception ex) { Console.Error.WriteLine("ss: project cmdlets failed to load: " + ex.Message); }
     }
 
-    // pwsh-compatible argument resolution; bare passthrough (`sswin gci`) is the default.
+    // pwsh-compatible argument resolution; bare passthrough (`ss gci`) is the default.
     static string ResolveScript(string[] args)
     {
         for (int i = 0; i < args.Length; i++)

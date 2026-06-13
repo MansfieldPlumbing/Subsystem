@@ -20,10 +20,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>sswin</AssemblyName>
+    <AssemblyName>ss</AssemblyName>
     <RollForward>LatestMajor</RollForward>
-    <!-- The Windows exe (taskbar / Explorer) icon — the same S-within-S mark as the Android launcher. -->
-    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- The Windows exe (taskbar / Explorer) icon — the same S-within-S mark as the Android launcher.
+         The binary .ico can't ride in the TEXT source dump, so it's also embedded as its OWN binary resource
+         (below) and SelfSource.RestoreBinaryAssets writes it back beside this csproj on extract — so an
+         extract-and-rebuild from a dropped ss.exe keeps the icon. Conditional so a direct `dotnet build`
+         still succeeds when the file is absent. -->
+    <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Layer 1: the VOM kernel. Pure System.* (verified) except the Dg sink, supplied by WinDg.cs.
@@ -46,6 +50,21 @@
          (Get-CodeContext, Get-GitGraphContext, ...). Built against PowerShellStandard, run against
          the real SDK above — the facade pattern, exactly what it's for. -->
     <ProjectReference Include="..\tools\CodeContext\CodeContext.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Self-description payload: ONLY the contract catalog (data, gated, can't rot) rides inside the
+         binary. The architecture MAP is NOT embedded: the live map flag on `ss describe` re-derives it
+         from the source tree (LiveMap.cs) every call, so a dropped ss.exe describes CURRENT source. -->
+    <EmbeddedResource Include="..\analyzers\SystemCatalog.json"><LogicalName>SystemCatalog.json</LogicalName></EmbeddedResource>
+    <!-- ss carries its OWN source: build-ss.ps1 dumps the repo (♦/♠ CodeContext) to ss-source.dump just
+         before publish; `ss extract` writes it back out. A dropped ss.exe reconstitutes its own code.
+         Conditional so a direct `dotnet build` (no dump staged) still succeeds. -->
+    <EmbeddedResource Include="ss-source.dump" Condition="Exists('ss-source.dump')"><LogicalName>ss-source.dump</LogicalName></EmbeddedResource>
+    <!-- The launcher icon as a BINARY resource so it rides inside ss.exe (the text source dump can't carry
+         it). SelfSource.RestoreBinaryAssets writes it back to src/host-windows/app.ico on extract, so a
+         blind rebuild (no repo) still satisfies <ApplicationIcon> above and produces an icon-bearing exe. -->
+    <EmbeddedResource Include="app.ico" Condition="Exists('app.ico')"><LogicalName>app.ico</LogicalName></EmbeddedResource>
   </ItemGroup>
 
 </Project>

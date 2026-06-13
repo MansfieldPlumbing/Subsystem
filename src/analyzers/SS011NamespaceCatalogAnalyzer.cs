@@ -44,6 +44,7 @@ namespace Subsystem.Analyzers
         private static void Analyze(SyntaxNodeAnalysisContext ctx, SystemCatalogFile cat)
         {
             var path = ctx.Node.SyntaxTree.FilePath;
+            if (SystemCatalogFile.IsGeneratedPath(path)) return;   // foreign generated bindings (obj/) — external surface
             if (cat.IsHostPath(path)) return;
 
             var nameSyntax = ctx.Node is FileScopedNamespaceDeclarationSyntax fs ? fs.Name

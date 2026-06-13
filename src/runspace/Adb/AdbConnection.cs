@@ -143,7 +143,7 @@ public class AdbConnection : IDisposable
         Android.Util.Log.Info("SubsystemAdb", "ADB elevated channel ESTABLISHED");
     }
 
-    // A hacky block specifically for the initial handshake before full routing starts
+    // A dedicated queue for the initial handshake, before full routing starts.
     private BlockingCollection<AdbMessage> _handshakeQueue = new();
     private async Task<AdbMessage> ReadFromLoopAsync(CancellationToken ct)
     {

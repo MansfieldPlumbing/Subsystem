@@ -13,6 +13,10 @@ src/runspace/boringssl/
 *.zip
 *.tar.gz
 *.exe
+# rename-aside debris from `ss build` self-replace
+*.exe.old
+# the embedded source payload — regenerated on every build, free to recreate
+ss-source.dump
 
 # Local-only siblings at the repo ROOT — NOT in the repo (kept as <drive>\ siblings).
 # Root-anchored (leading /) so they NEVER collaterally ignore an in-tree dir of the same

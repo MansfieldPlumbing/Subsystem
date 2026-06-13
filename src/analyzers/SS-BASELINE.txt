@@ -1,9 +1,12 @@
 SS003|AudioStreamCmdlets.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Cm.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
+SS003|HelpSystem.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|ModelManager.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|ModelManager.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|NotificationService.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|ObpHost.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
+SS003|ObpHost.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
+SS003|PackageInfoDb.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Pp.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Registrar.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Registrar.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
@@ -134,6 +137,47 @@ SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg
 SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AdbPairingClient.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AssistDispatch.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|AudioStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|HeuristicBroker.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|MainActivity.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|MainActivity.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|PairAdbReceiver.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ReplEngine.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ReplEngine.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|ScreenStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|SubsystemApi.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|SubsystemApi.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|SubsystemVoiceInteractionSession.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|SubsystemVoiceInteractionSession.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
+SS009|WpService.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS010|Cm.cs|Hardcoded POSIX path '/data/local/tmp' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|ProjectionServer.cs|Hardcoded URL 'http://127.0.0.1:8080/' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Registrar.cs|Hardcoded URL 'https://huggingface.co/litert-community/gemma-4-…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
@@ -312,6 +356,7 @@ SS013|Vom.cs|Method 'SelfTest' starts with 'Self', which is not in the verb cata
 SS013|Vom.cs|Method 'Totals' starts with 'Totals', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Vom.cs|Method 'TryGetByPath' starts with 'Try', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Vom.cs|Method 'TryResolve' starts with 'Try', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS014|AgentTools.cs|Hb may not reference the unassigned core ('SubsystemApi') — dependsOn: [Cm, Dg, Vom]; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Cm.cs|Cm may not reference host code ('MainActivity') — dependsOn: [Dg, Vom]; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Cm ('Cm') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Cm ('Cm') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
@@ -319,6 +364,10 @@ SS014|Dg.cs|Dg may not reference component Hb ('Hb') — dependsOn: []; grant th
 SS014|Dg.cs|Dg may not reference component Hb ('Hb') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Hb ('Hb') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Hb ('Hb') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Hb ('ModelCatalog') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Hb ('ModelCatalog') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Hb ('ModelCatalog') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Hb ('ModelManager') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Hb ('ModelSpec') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rs ('PsrpSession') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rs ('PsrpSession') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam

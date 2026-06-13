@@ -53,6 +53,9 @@
     "contextWords": ["Global", "Local", "Legacy", "New", "Old", "V2", "Win", "Windows",
                      "Android", "Droid", "Compat", "Ex2", "Temp"],
     "nouns": ["Endpoint", "Service2", "Mesh"],
+    "alwaysFlag": ["brain", "membrane", "neuron", "synapse", "soul"],
+    "commentPatterns": ["lol", "lmao", "wtf", "hacky", "kludge", "blazingly", "supercharged", "obviously", "duh", "magic number"],
+    "_noteHygiene": "SS017 lexical hygiene (the anti-slop dict). alwaysFlag = anthropomorphic/metaphor words refused EVERYWHERE (identifiers, strings, comments) — the big-brother list. commentPatterns = casual/inflammatory comment tells refused in comments. Both ride the census ratchet: existing hits baseline, NEW slop bleeds red at the gate. Starter set — tune it as deliberately as any vocabulary edit.",
     "_note": "Manager is NT-canonical and allowed. Banned applies to OUR public type names in core components; SDK attribute types (CmdletProviderAttribute etc.) are foreign surface, not ours. Hosts (heads) are exempt entirely - the host IS the context, and Android-mandated names (Services/*Service, *Activity) live there. 'Endpoint' refused per CONTRACT.md section 4. 'Store' refused: commandment 1 is 'no second store' - the sin's name cannot be a blessed suffix; use Hive (Cm-canonical) for durable planes, Table/Record/Block for data structures. Existing core violations (Pp's IProvisioningHandler, Hb's AgentSessionStore) ride the ratchet baseline."
   },
 

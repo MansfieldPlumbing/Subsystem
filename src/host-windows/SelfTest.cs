@@ -11,7 +11,7 @@ internal static class SelfTest
 {
     public static int Run()
     {
-        Console.WriteLine("sswin — Windows head (self-test)");
+        Console.WriteLine("ss — Windows head (self-test)");
         Console.WriteLine();
         bool ok = true;
 

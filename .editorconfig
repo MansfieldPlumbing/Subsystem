@@ -32,3 +32,4 @@ dotnet_diagnostic.SS013.severity = warning # method verb not in the closed verb 
 dotnet_diagnostic.SS014.severity = warning # component DAG (reference direction)
 dotnet_diagnostic.SS015.severity = warning # static field remembers state in a component
 dotnet_diagnostic.SS016.severity = warning # handle value parsed outside the kernel
+dotnet_diagnostic.SS017.severity = warning # banned word (alwaysFlag) anywhere; casual/inflammatory comment (commentPatterns)

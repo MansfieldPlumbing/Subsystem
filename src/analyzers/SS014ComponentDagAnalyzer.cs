@@ -54,6 +54,7 @@ namespace Subsystem.Analyzers
                                     ConcurrentDictionary<string, string?> pathCache)
         {
             var sourcePath = ctx.Operation.Syntax.SyntaxTree.FilePath;
+            if (SystemCatalogFile.IsGeneratedPath(sourcePath)) return;   // generated code isn't bound by the DAG
             var source = pathCache.GetOrAdd(sourcePath, p => cat.ComponentOfPath(p));
             if (source == null || source == "(host)") return;   // only registered components are bound by the DAG
 
@@ -70,6 +71,7 @@ namespace Subsystem.Analyzers
             // Resolve the TARGET's home by its source location; metadata (BCL/SDK) has none -> always allowed.
             var targetTree = targetType.Locations.FirstOrDefault(l => l.IsInSource)?.SourceTree;
             if (targetTree == null) return;
+            if (SystemCatalogFile.IsGeneratedPath(targetTree.FilePath)) return;   // ref to a foreign generated binding = external, like the BCL
             var targetHome = pathCache.GetOrAdd(targetTree.FilePath, p => cat.ComponentOfPath(p));
 
             string? offense = null;

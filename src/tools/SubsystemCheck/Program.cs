@@ -21,13 +21,18 @@ static class Runner
         var projectPath = Path.Combine(repoRoot, "src", "runspace", "Subsystem.csproj");
 
         string? refsSymbol = null;
-        bool gate = false, writeBaseline = false;
+        bool gate = false, writeBaseline = false, list = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] is "--refs" or "-r") { refsSymbol = i + 1 < args.Length ? args[i + 1] : null; }
             if (args[i] is "--gate") gate = true;
             if (args[i] is "--write-baseline") writeBaseline = true;
+            if (args[i] is "--list" or "-l") list = true;
         }
+
+        // --list: the analyzer roster (id + what it enforces) — no project load, so it is instant. The
+        // count is exactly the suite the gate runs, so "how many / what" is answered by the binary itself.
+        if (list) return ListMode();
 
         Console.Error.WriteLine($"check: loading {Path.GetFileName(projectPath)} (semantic load — first run is slow)…");
         using var ws = Microsoft.CodeAnalysis.MSBuild.MSBuildWorkspace.Create();
@@ -174,6 +179,21 @@ static class Runner
         foreach (var t in ns.GetTypeMembers()) yield return t;
         foreach (var child in ns.GetNamespaceMembers())
             foreach (var t in AllTypes(child)) yield return t;
+    }
+
+    // The analyzer roster: every rule this published checker enforces, id + title. No semantic load.
+    static int ListMode()
+    {
+        var analyzers = LoadSubsystemAnalyzers();
+        var rules = analyzers
+            .SelectMany(a => a.SupportedDiagnostics)
+            .GroupBy(d => d.Id).Select(g => g.First())
+            .OrderBy(d => d.Id, StringComparer.Ordinal)
+            .ToList();
+        Console.WriteLine($"Subsystem analyzers — {analyzers.Length} loaded, {rules.Count} rules (this IS the gate's suite):");
+        foreach (var d in rules)
+            Console.WriteLine($"  {d.Id}  [{d.DefaultSeverity}]  {d.Title}");
+        return 0;
     }
 
     static ImmutableArray<Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer> LoadSubsystemAnalyzers()

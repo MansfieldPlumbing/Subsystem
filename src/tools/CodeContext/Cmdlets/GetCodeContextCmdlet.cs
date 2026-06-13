@@ -89,7 +89,7 @@ public class GetCodeContextCmdlet : PSCmdlet
     {
         var files = new List<FileInfo>();
         var blockedDirs = new[] { "node_modules", "bin", "obj", "dist", "build", ".git", ".vs", "packages", "vendor", "reference" };
-        var whitelistedExts = new[] { ".cs", ".ps1", ".js", ".ts", ".html", ".css", ".json", ".md", ".csproj", ".xml" };
+        var whitelistedExts = new[] { ".cs", ".ps1", ".js", ".ts", ".html", ".css", ".json", ".md", ".csproj", ".xml", ".config", ".props", ".targets", ".sln" };
 
         var queue = new Queue<DirectoryInfo>();
         queue.Enqueue(root);
