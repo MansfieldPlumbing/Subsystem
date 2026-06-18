@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AppWidget provider metadata (referenced by SubsystemWidgetProvider's [MetaData] attribute). Conservative
+     attributes only (no API-31-only targetCell*), so it advertises on any supported launcher. updatePeriod 0
+     = no system polling; the widget updates on placement (and later via an explicit push). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/subsystem_widget"
+    android:previewImage="@mipmap/appicon"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

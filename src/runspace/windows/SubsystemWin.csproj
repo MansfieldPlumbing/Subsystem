@@ -1,0 +1,104 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    subsystem-win — the Windows head: the platform-agnostic core (VOM + Cm + runspace + projection)
+    compiled as a plain console exe so the system can be RUN and INTERROGATED on the dev box
+    (curl /diag, /apps, /api/exec; query Cm + VOM; run cmdlets) without a device. Eyes, not parity:
+    no agent/LiteRT, no hardware drivers, no Android services.
+
+    Discipline: portable core files are LINKED from src/runspace (never copied); Windows-only seams
+    (Dg sink, DB path, no-op drivers) live HERE as separate files — no #if in shared files unless
+    unavoidable, and the Android build must stay green. Built bottom-up, a layer at a time:
+      1. Vom/*           — kernel self-tests (this layer)
+      2. + Cm            — registry against a %LocalAppData% DB
+      3. + runspace      — InitialSessionState + portable cmdlets
+      4. + projection    — HTTP on 127.0.0.1:8080
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net11.0-windows + WinForms: the shell window hosts a WebView2 that consumes DirectPort regions
+         (the WebView DirectPort adapter — a producer/consumer peer, no loopback). WinForms is on WITHOUT
+         its ApplicationConfiguration source generator (the ouroboros runs none): WinShellUi sets visual
+         styles by hand and builds the Form in code. -->
+    <TargetFramework>net11.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ss</AssemblyName>
+    <RollForward>LatestMajor</RollForward>
+    <!-- The Windows exe (taskbar / Explorer) icon — the same S-within-S mark as the Android launcher.
+         The binary .ico can't ride in the TEXT source dump, so it's also embedded as its OWN binary resource
+         (below) and SelfSource.RestoreBinaryAssets writes it back beside this csproj on extract — so an
+         extract-and-rebuild from a dropped ss.exe keeps the icon. Conditional so a direct `dotnet build`
+         still succeeds when the file is absent. -->
+    <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- UseWindowsForms injects project-wide implicit usings (System.Drawing, System.Windows.Forms) that
+       collide with the head's own types (System.Drawing.Size/Rectangle vs the PSHost surface in ConsoleHost;
+       System.Windows.Forms.Help/View vs our Help/View). Drop both — WinShellUi declares its own
+       `using System.Windows.Forms;`, so WinForms stays scoped to the UI file. -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <!-- Layer 1: the VOM kernel. Pure System.* (verified) except the Dg sink, supplied by WinDg.cs.
+       Layer 2: Cm (volatile + SQLite registry). Data dir resolves through the WinMainActivity seam. -->
+  <ItemGroup>
+    <Compile Include="..\Vom\*.cs" LinkBase="Vom" />
+    <Compile Include="..\Cm\*.cs" LinkBase="Cm" />
+    <!-- VomInterop: the native Float32-region surface (256-aligned, row-major) — pure Vom + Marshal, no
+         Android. The producer side of the WebView DirectPort adapter publishes/reads regions through it. -->
+    <Compile Include="..\Device\VomInterop.cs" LinkBase="Device" />
+  </ItemGroup>
+
+  <!-- The vendored DirectPort D3D12 binding (src/native/directport, built by its build.ps1). Copied
+       beside ss.exe so [DllImport("directport")] resolves it. Windows-only; conditional so a build on a
+       box without the DLL still succeeds (ss surface then degrades with a clear "not found"). -->
+  <ItemGroup>
+    <None Include="..\..\native\directport\directport.dll" Condition="Exists('..\..\native\directport\directport.dll')">
+      <Link>directport.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same version the ship target pins; brings the bundled e_sqlite3 native for win-x64. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <!-- Layer 3: the PowerShell runspace. ss becomes a pwsh SUPERSET — every built-in plus the
+         project's own cmdlets (CodeContext, the gate, the vom: provider) in one hosted runspace. -->
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.7.0-preview.2" />
+    <!-- WebView2 — the Chromium control that hosts the shell + consumes DirectPort regions via a shared
+         buffer (CreateSharedBuffer/PostSharedBufferToScript). Pure managed binding + a CopyToOutput native
+         loader (no source generator); the Evergreen runtime ships with Win11. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
+    <!-- Roslyn syntax API for `ss refs` (the grep-killer). 5.3.0 = the exact version the PowerShell SDK 7.7
+         already carries (Commands.Utility), so it unifies with no downgrade and adds no new assembly. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The project's own cmdlets, loaded into ss's runspace so the shell dogfoods them
+         (Get-CodeContext, Get-GitGraphContext, ...). Built against PowerShellStandard, run against
+         the real SDK above — the facade pattern, exactly what it's for. -->
+    <ProjectReference Include="..\..\tools\CodeContext\CodeContext.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Self-description payload: ONLY the contract catalog (data, gated, can't rot) rides inside the
+         binary. The architecture MAP is NOT embedded: the live map flag on `ss describe` re-derives it
+         from the source tree (LiveMap.cs) every call, so a dropped ss.exe describes CURRENT source. -->
+    <EmbeddedResource Include="..\..\analyzers\SystemCatalog.json"><LogicalName>SystemCatalog.json</LogicalName></EmbeddedResource>
+    <!-- ss carries its OWN source: build-ss.ps1 dumps the repo (♦/♠ CodeContext) to ss-source.dump just
+         before publish; `ss extract` writes it back out. A dropped ss.exe reconstitutes its own code.
+         Conditional so a direct `dotnet build` (no dump staged) still succeeds. -->
+    <EmbeddedResource Include="ss-source.dump" Condition="Exists('ss-source.dump')"><LogicalName>ss-source.dump</LogicalName></EmbeddedResource>
+    <!-- The launcher icon as a BINARY resource so it rides inside ss.exe (the text source dump can't carry
+         it). SelfSource.RestoreBinaryAssets writes it back to src/runspace/windows/app.ico on extract, so a
+         blind rebuild (no repo) still satisfies <ApplicationIcon> above and produces an icon-bearing exe. -->
+    <EmbeddedResource Include="app.ico" Condition="Exists('app.ico')"><LogicalName>app.ico</LogicalName></EmbeddedResource>
+  </ItemGroup>
+
+</Project>

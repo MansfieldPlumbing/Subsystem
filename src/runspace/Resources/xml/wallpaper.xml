@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wp — the system live-wallpaper descriptor (WpService [MetaData] points here). The picker's
+     thumbnail/description; settings stays in-app (the Cm-backed picker), so no settingsActivity. -->
+<wallpaper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:thumbnail="@mipmap/appicon"
+    android:description="@string/wp_description"
+    android:showMetadataInPreview="true" />
