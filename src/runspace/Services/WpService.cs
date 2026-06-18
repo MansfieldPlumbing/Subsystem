@@ -125,7 +125,18 @@ void main(){
   gl_FragColor = vec4(mix(sky, vec3(1.0), n*0.7), 1.0);
 }";
         private const string Vs = "attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }";
-        private const int FrameMs = 1000 / 15;   // Po: the same 15fps cap as the in-app renderer
+
+        // Cadence rungs (ms per frame) — the heat surge-protector. The render thread reads the
+        // EFFECTIVE interval each frame; nothing here is a const it can't override at runtime.
+        //   ACTIVE  15fps — full cadence (cool device, interacting / freshly interacted)
+        //   MODERATE 6fps — thermal got warm; back the GPU off without freezing the clouds
+        //   IDLE     2fps — no interaction for a while; the home screen is just sitting there
+        //   PARK   sentinel — SEVERE+ thermal: stop swapping; the phone cooling down is the point
+        private const int ActiveMs   = 1000 / 15;   // 66ms — the same 15fps cap as the in-app renderer
+        private const int ModerateMs = 1000 / 6;    // ~166ms
+        private const int IdleMs     = 1000 / 2;    // 500ms — clouds still drift, GPU near-idle
+        private const int ParkMs     = int.MaxValue;// thermal-derived sentinel: park the loop
+        private const long IdleAfterMs = 8000;      // settle to IDLE after this long with no interaction
 
         private Thread? _thread;
         private CancellationTokenSource? _cts;
@@ -136,12 +147,22 @@ void main(){
         private volatile int _w = 1, _h = 1;
         private float _camX, _camY;   // offsets/zoom feed; read by the render thread per frame
 
-        public WpEngine(WpService svc) : base(svc) { }
+        // Thermal throttle: the listener fires on the MAIN thread and only stores this volatile
+        // interval; the render thread reads it per frame (ParkMs ⇒ stop swapping). Idle-settle:
+        // _lastInteractionMs is bumped by every interaction callback; the loop derives IdleMs from it.
+        private readonly WpService _svc;
+        private volatile int _thermalMs = ActiveMs;
+        private long _lastInteractionMs = Environment.TickCount64;
+        private Android.OS.PowerManager? _power;
+        private ThermalListener? _thermalListener;
+
+        public WpEngine(WpService svc) : base(svc) { _svc = svc; }
 
         public override void OnCreate(ISurfaceHolder? surfaceHolder)
         {
             base.OnCreate(surfaceHolder);
             try { SetOffsetNotificationsEnabled(true); } catch { /* launcher may not support offsets */ }
+            RegisterThermal();
         }
 
         public override void OnSurfaceChanged(ISurfaceHolder? holder, Android.Graphics.Format format, int width, int height)
@@ -172,19 +193,21 @@ void main(){
         public override void OnDestroy()
         {
             StopRender();
+            FreeThermal();   // a leaked thermal listener outlives the engine — free it here
             base.OnDestroy();
         }
 
         public override void OnVisibilityChanged(bool visible)
         {
             _visible = visible;
-            if (visible) _kick.Set();   // hidden needs no signal — the loop parks itself
+            if (visible) { SignalInteraction(); }   // hidden needs no signal — the loop parks itself
         }
 
         public override void OnSurfaceRedrawNeeded(ISurfaceHolder? holder)
         {
             // Unlock/resume composites the wallpaper synchronously — produce one frame now or the
             // user sees stale pixels. Signal the loop and wait briefly for the swap.
+            SignalInteraction();
             _redrawPending = true;
             _frameDone.Reset();
             _kick.Set();
@@ -196,6 +219,7 @@ void main(){
             // Launcher page scroll → the same parallax camera the boundless Surface feeds in-app.
             // One UI's stock launcher pins this at 0.5 (no scroll) — that's a constant, not a bug.
             _camX = (xOffset - 0.5f) * 4000f;
+            SignalInteraction();
         }
 
         public override void OnZoomChanged(float zoom)
@@ -203,6 +227,15 @@ void main(){
             // The launcher zoom-out gesture (drawer/recents) — a depth nudge; reliable on Samsung
             // where offsets are not.
             _camY = zoom * 1500f;
+            SignalInteraction();
+        }
+
+        // An interaction (or thermal change) refreshes the idle clock and wakes the loop so the
+        // active cadence resumes immediately instead of waiting out the current idle sleep.
+        private void SignalInteraction()
+        {
+            Volatile.Write(ref _lastInteractionMs, Environment.TickCount64);
+            _kick.Set();
         }
 
         private void StopRender()
@@ -215,6 +248,78 @@ void main(){
             }
             catch { }
             finally { _thread = null; _cts?.Dispose(); _cts = null; }
+        }
+
+        // ---- thermal throttle (API 29+) ----
+
+        // The OS thermal headroom signal. Registered once on engine create; the callback runs on
+        // the MAIN thread and only writes the volatile _thermalMs (never touches GL). Pre-Q has no
+        // listener — _thermalMs stays at ActiveMs and the idle clock alone governs cadence.
+        private void RegisterThermal()
+        {
+            try
+            {
+                if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.Q) return;
+                _power = _svc.GetSystemService(Android.Content.Context.PowerService) as Android.OS.PowerManager;
+                if (_power == null) return;
+                _thermalListener = new ThermalListener(this);
+                // Inline executor: the callback only stores a volatile field, so running it on the
+                // delivering (main) thread is correct and avoids holding an extra worker.
+                _power.AddThermalStatusListener(new InlineExecutor(), _thermalListener);
+                SetThermalStatus((int)_power.CurrentThermalStatus);   // seed from the present status
+            }
+            catch (Exception ex) { Dg.Log("wp", "thermal register failed: " + ex.Message); }
+        }
+
+        private void FreeThermal()
+        {
+            try
+            {
+                if (_power != null && _thermalListener != null)
+                    _power.RemoveThermalStatusListener(_thermalListener);
+            }
+            catch (Exception ex) { Dg.Log("wp", "thermal unregister failed: " + ex.Message); }
+            finally { _thermalListener = null; _power = null; }
+        }
+
+        // status → target interval. SEVERE and above ⇒ ParkMs (the loop stops swapping). Called on
+        // the main thread (listener) and once at register time; only ever writes _thermalMs + kicks.
+        private void SetThermalStatus(int status)
+        {
+            int ms = status switch
+            {
+                >= 3 /* Severe, Critical, Emergency, Shutdown */ => ParkMs,
+                2    /* Moderate */                              => ModerateMs,
+                _    /* None, Light */                           => ActiveMs,
+            };
+            _thermalMs = ms;
+            _kick.Set();   // wake the loop so a new throttle (or un-park) takes effect at once
+        }
+
+        // Effective per-frame interval. Idle-settle stretches the cadence after a quiet spell;
+        // thermal can only ever SLOW it further (max of the two), and SEVERE+ parks outright.
+        private int ResolveFrameMs(long nowMs)
+        {
+            int thermal = _thermalMs;
+            if (thermal == ParkMs) return ParkMs;          // SEVERE+ always wins → park
+            bool idle = (nowMs - Volatile.Read(ref _lastInteractionMs)) >= IdleAfterMs;
+            int interactive = idle ? IdleMs : ActiveMs;
+            return Math.Max(interactive, thermal);         // the slower (cooler) cadence governs
+        }
+
+        // The Java-side thermal callback. Bounces the int status onto the engine's volatile field.
+        private sealed class ThermalListener : Java.Lang.Object, Android.OS.PowerManager.IOnThermalStatusChangedListener
+        {
+            private readonly WpEngine _engine;
+            public ThermalListener(WpEngine engine) { _engine = engine; }
+            public void OnThermalStatusChanged(int status) => _engine.SetThermalStatus(status);
+        }
+
+        // Runs the submitted command synchronously on the calling thread — the listener body is a
+        // single volatile write, so no thread hop is wanted.
+        private sealed class InlineExecutor : Java.Lang.Object, Java.Util.Concurrent.IExecutor
+        {
+            public void Execute(Java.Lang.IRunnable? command) => command?.Run();
         }
 
         // ---- the render thread ----
@@ -309,6 +414,7 @@ void main(){
                 if (!Recompile()) return false;
                 var epoch = Environment.TickCount64;
 
+                bool thermalParked = false;   // true once we've drawn the last frame and stopped swapping
                 while (!ct.IsCancellationRequested)
                 {
                     if (!_visible && !_redrawPending)
@@ -317,6 +423,24 @@ void main(){
                         continue;
                     }
                     var t0 = Environment.TickCount64;
+                    var frameMs = ResolveFrameMs(t0);
+
+                    // SEVERE+ thermal: draw the last frame ONCE, then park on the kick handle until
+                    // the device cools (SetThermalStatus re-kicks) — the cooldown is the whole point.
+                    // A synchronous unlock composite (_redrawPending) still gets its one frame below.
+                    if (frameMs == ParkMs && !_redrawPending)
+                    {
+                        if (thermalParked)
+                        {
+                            WaitHandle.WaitAny(new WaitHandle[] { _kick, ct.WaitHandle });
+                            continue;
+                        }
+                        thermalParked = true;   // fall through to draw one settling frame, then park next pass
+                    }
+                    else
+                    {
+                        thermalParked = false;
+                    }
 
                     // selection changed (Set-SystemWallpaper) or the playlist clock advanced?
                     if (gen != Generation) { if (!Recompile()) return false; }
@@ -347,9 +471,13 @@ void main(){
                     }
                     if (redraw) _frameDone.Set();
 
+                    // Pace to the effective interval. A redraw-forced frame while thermally parked
+                    // uses ActiveMs for the clock/sleep (ParkMs is a sentinel, not a real duration);
+                    // the next pass with no redraw will park properly.
+                    var paceMs = frameMs == ParkMs ? ActiveMs : frameMs;
                     var elapsed = (int)(Environment.TickCount64 - t0);
-                    if (_visible) visibleMs += Math.Max(elapsed, FrameMs);
-                    var sleep = FrameMs - elapsed;
+                    if (_visible) visibleMs += Math.Max(elapsed, paceMs);
+                    var sleep = paceMs - elapsed;
                     if (sleep > 2 && !_redrawPending) ct.WaitHandle.WaitOne(sleep);
                 }
                 return true;

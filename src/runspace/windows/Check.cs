@@ -1,6 +1,6 @@
 namespace Subsystem.Windows;
 
-// `ss check` — the anti-drift / anti-slop analyzer ratchet (SS000-SS021), run IN-PROCESS: no dotnet, no
+// `ss check` — the anti-drift / anti-slop analyzer ratchet (the live SS rule set; `ss check --list`), run IN-PROCESS: no dotnet, no
 // MSBuild, no pre-published checker. The work lives in InProcGate — ss.exe compiles its own analyzer suite
 // from the source it carries (src/analyzers/*.cs) with the bundled Roslyn and runs it over an in-proc
 // compilation of the runspace tree, the ouroboros gating itself from itself. Flags pass straight through:

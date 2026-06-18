@@ -4,10 +4,11 @@ using Subsystem.Cm;
 
 namespace Subsystem.Windows;
 
-// Open-Ticket / Get-Ticket / Close-Ticket — the PowerShell front door to the registry's ticket table
-// (Cm's durable plane). Call-center lifecycle: a ticket is OPENED, queried, and CLOSED with a mandatory
-// disposition. Thin bindings: parse params, call the approved-verb TicketTable methods, emit the row as an
-// object — so `Get-Ticket | ConvertTo-Json` renders flat JSON on demand while the truth stays dense in
+// Open-Ticket / Get-Ticket / Close-Ticket / Add-EosLog — the PowerShell front door to the registry's ticket
+// table (Cm's durable plane), named after BMC Remedy ITSM. Call-center lifecycle: a ticket (an Incident or a
+// Change) is OPENED, worked (Add-EosLog appends append-only end-of-session entries), queried, and CLOSED with a
+// mandatory disposition. Thin bindings: parse params, call the approved-verb TicketHive methods, emit the row
+// as an object — so `Get-Ticket | ConvertTo-Json` renders flat JSON on demand while the truth stays dense in
 // SQLite. Tickets live in the binary and are queried from it; there is no workorder file.
 
 [Cmdlet(VerbsCommon.Open, "Ticket")]
@@ -19,7 +20,7 @@ public sealed class OpenTicketCmdlet : PSCmdlet
 
     [Parameter(Mandatory = true)]
     [Alias("t")]
-    [ValidateSet("TroubleTicket", "FeatureRequest")]
+    [ValidateSet("Incident", "Change")]
     public string Type { get; set; } = "";
 
     [Parameter(Mandatory = true)]
@@ -36,7 +37,7 @@ public sealed class OpenTicketCmdlet : PSCmdlet
     public int Severity { get; set; } = 2;
 
     protected override void ProcessRecord()
-        => WriteObject(TicketTable.Create(Type, Category, Summary, RelatedFiles, Severity));
+        => WriteObject(TicketHive.Create(Type, Category, Summary, RelatedFiles, Severity));
 }
 
 [Cmdlet(VerbsCommon.Get, "Ticket")]
@@ -49,7 +50,7 @@ public sealed class GetTicketCmdlet : PSCmdlet
 
     [Parameter]
     [Alias("t")]
-    [ValidateSet("TroubleTicket", "FeatureRequest")]
+    [ValidateSet("Incident", "Change")]
     public string? Type { get; set; }
 
     [Parameter]
@@ -82,7 +83,7 @@ public sealed class GetTicketCmdlet : PSCmdlet
         if (status == null && !All.IsPresent && !byId) status = "Open";   // default = the open queue
         long since  = Since.HasValue  ? new DateTimeOffset(Since.Value.ToUniversalTime()).ToUnixTimeSeconds()  : 0;
         long before = Before.HasValue ? new DateTimeOffset(Before.Value.ToUniversalTime()).ToUnixTimeSeconds() : 0;
-        foreach (var t in TicketTable.Query(Type, Category, status, id, Search, since, before)) WriteObject(t);
+        foreach (var t in TicketHive.Query(Type, Category, status, id, Search, since, before)) WriteObject(t);
     }
 }
 
@@ -102,11 +103,42 @@ public sealed class CloseTicketCmdlet : PSCmdlet
 
     protected override void ProcessRecord()
     {
-        var t = TicketTable.Close(Id, Disposition);
+        var t = TicketHive.Close(Id, Disposition);
         if (t == null)
             WriteError(new ErrorRecord(new ItemNotFoundException($"no ticket #{Id}"),
                 "TicketNotFound", ErrorCategory.ObjectNotFound, Id));
         else
             WriteObject(t);
+    }
+}
+
+// Add-EosLog — append an End-Of-Session entry to a ticket's append-only EOS log: a disposition (how the
+// session left it) plus the session report. The durable record that lets the raw chat be thrown away.
+// Append-only; entries are never edited or deleted.
+[Cmdlet(VerbsCommon.Add, "EosLog")]
+[OutputType(typeof(EosLogEntry))]
+public sealed class AddEosLogCmdlet : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    public long Id { get; set; }
+
+    [Parameter(Mandatory = true, Position = 1)]
+    [ValidateNotNullOrEmpty]
+    [Alias("d")]
+    public string Disposition { get; set; } = "";
+
+    [Parameter(Mandatory = true, Position = 2)]
+    [ValidateNotNullOrEmpty]
+    [Alias("b")]
+    public string Body { get; set; } = "";
+
+    protected override void ProcessRecord()
+    {
+        var e = TicketHive.WriteEosLog(Id, Disposition, Body);
+        if (e == null)
+            WriteError(new ErrorRecord(new ItemNotFoundException($"no ticket #{Id}"),
+                "TicketNotFound", ErrorCategory.ObjectNotFound, Id));
+        else
+            WriteObject(e);
     }
 }

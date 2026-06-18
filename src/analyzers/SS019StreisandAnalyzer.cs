@@ -7,16 +7,16 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Subsystem.Analyzers
 {
     /// <summary>
-    /// SS021 — the Streisand effect. Removing a name and then NARRATING the removal in a comment
+    /// SS019 — the Streisand effect. Removing a name and then NARRATING the removal in a comment
     /// ("renamed from X", "formerly X", "(was: …)") re-introduces the dead name into the source — the
     /// exact thing the removal meant to kill. The clean delete IS the point; rename/removal history
     /// lives in git + the records (memory), never in a comment. Syntax-only (comments), so it runs
     /// everywhere — including the host-windows tree the checker scans separately. Census-pending ratchet.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
-    public sealed class SS021StreisandAnalyzer : DiagnosticAnalyzer
+    public sealed class SS019StreisandAnalyzer : DiagnosticAnalyzer
     {
-        public const string DiagnosticId = "SS021";
+        public const string DiagnosticId = "SS019";
 
         private static readonly DiagnosticDescriptor Rule = new DiagnosticDescriptor(
             DiagnosticId, "Streisand effect — a comment narrates a removal/rename",

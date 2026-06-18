@@ -189,19 +189,11 @@ internal static class Mcp
     {
         var iss = InitialSessionState.CreateDefault();
         iss.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
-        try
-        {
-            var asm = typeof(Subsystem.Tools.CodeContext.Cmdlets.GetCodeContextCmdlet).Assembly;
-            Type[] types;
-            try { types = asm.GetTypes(); }
-            catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray()!; }
-            foreach (var t in types)
-            {
-                var attr = t.GetCustomAttribute<CmdletAttribute>();
-                if (attr != null) iss.Commands.Add(new SessionStateCmdletEntry($"{attr.VerbName}-{attr.NounName}", t, null));
-            }
-        }
-        catch (Exception ex) { Console.Error.WriteLine("ss mcp: project cmdlets failed to load: " + ex.Message); }
+        // The SAME loader the console host uses — it scans both the CodeContext assembly AND this host assembly
+        // (where Open/Get/Close-Ticket + Add-EosLog live), so the MCP cmdlet surface matches the shell. This
+        // used to scan only the CodeContext assembly, which is why the ticket/EOS cmdlets were invisible over
+        // MCP — the agent could not drive a ticket or write an EOS log. That was #39.
+        Shim.LoadProjectCmdlets(iss);
         var rs = RunspaceFactory.CreateRunspace(iss);
         rs.Open();
         return rs;

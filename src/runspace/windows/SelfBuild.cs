@@ -222,7 +222,11 @@ internal static class SelfBuild
 
         // SubsystemWin.csproj's exact compile set: host-windows + the linked runspace Vom/Cm. CodeContext is
         // a separate bundled assembly — referenced above, NOT recompiled.
-        var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/runspace/Device/VomInterop.cs" };
+        var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/runspace/Device/VomInterop.cs",
+                            // the portable ADB core wired onto the Windows head (#75) — the IAdbTransport seam +
+                            // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
+                            // lives in windows/ (already covered by the windows/ root above).
+                            "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs" };
         var sources = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
             .Where(p =>
             {

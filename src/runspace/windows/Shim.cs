@@ -91,10 +91,11 @@ internal static class Shim
     // Register the project's cmdlets from the in-memory assemblies by their [Cmdlet] attribute —
     // the single-file-safe path (Assembly.Location is empty in a single-file bundle, so ImportPSModule
     // by path fails; this is the same attribute-reflection SubsystemAliases uses on Android). Two assemblies:
-    // the CodeContext cmdlets live in their own assembly; the ticket cmdlets (Submit/Get/Resolve-Ticket)
-    // live in THIS host assembly. Dedup by command name. Additive: a load failure is reported, never
-    // swallowed, and the shell still works as plain pwsh.
-    static void LoadProjectCmdlets(InitialSessionState iss)
+    // the CodeContext cmdlets live in their own assembly; the ticket/EOS cmdlets (Open/Get/Close-Ticket,
+    // Add-EosLog) live in THIS host assembly. Dedup by command name. Additive: a load failure is reported,
+    // never swallowed, and the shell still works as plain pwsh. SHARED: the MCP host (Mcp.OpenRunspace) calls
+    // this too — one loader, both faces, so the console and MCP cmdlet surfaces can never drift (#39).
+    internal static void LoadProjectCmdlets(InitialSessionState iss)
     {
         var assemblies = new[]
         {

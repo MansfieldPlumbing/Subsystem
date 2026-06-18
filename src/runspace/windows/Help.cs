@@ -53,7 +53,7 @@ USAGE
   ss -EncodedCommand <b64>  base64 (UTF-16LE) command — quoting-proof, the agent door
   ss selftest               run the VOM kernel + Cm registry self-tests (Layers 1-2)
   ss build [apk] [-o]       rebuild this exe (Windows head); `apk` builds+signs the Android head, then gates (-o forces a red gate)
-  ss check [--gate|--list]  analyzer ratchet (SS000-017); --gate = fail-closed (Build Failed); --list = the analyzer roster
+  ss check [--gate|--list]  analyzer ratchet (SS000-SS022; run --list for the authoritative live roster); --gate = fail-closed (Build Failed); --list = the roster
   ss chat ""<prompt>""        run a prompt through the in-process LiteRT-LM CPU backend
   ss contextualize  (-c)    contextualize the system from the binary — add --json | --map
   ss contextualize --map    the live architecture map, subsystem by subsystem

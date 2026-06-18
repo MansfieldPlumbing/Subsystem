@@ -16,7 +16,7 @@ Shown the architecture cold, a frontier model placed it in the canon unprompted 
 
 - **Plan 9** — one namespace; a thread, a Sub-VOM, a managed object, and native memory all become the *same* path'd handle in one owner table, and the foreign world is **mounted** as structured objects, never streamed. (`src/runspace/Vom/Vom.cs` — `Register`)
 - **Erlang — let it crash** — terminating an owner cancels its token, cascades depth-first to its children, and revokes every handle; a wedged thread is left *resourceless* and quarantined while the whole keeps running. (`Vom.cs` — `Terminate`)
-- **The Lisp/Smalltalk machine** — a living image that **builds its own build with its own build**: the running binary compiles its own carried source in-process with Roslyn — no external toolchain — regenerates its own source dump, and self-reproduces generation to generation. (`src/host-windows/SelfBuild.cs` — `CSharpCompilation.Create`)
+- **The Lisp/Smalltalk machine** — a living image that **builds its own build with its own build**: the running binary compiles its own carried source in-process with Roslyn — no external toolchain — regenerates its own source dump, and self-reproduces generation to generation. (`src/runspace/windows/SelfBuild.cs` — `CSharpCompilation.Create`)
 - **Memory** — NT handle semantics, deterministic and owner-scoped: refcount, free-at-zero reclaim, per-owner quota; the native-engine path reclaims gigabytes through `SafeHandle` before the GC ever sees the wrapper. Determinism where every comparable runtime has a garbage collector.
 
 As far as the record shows, this is the **first native in-process CoreCLR + PowerShell runspace on Android**, and it goes harder on NT, objects, and memory than anything else in the on-device space — which is otherwise inference plumbing and apps, not an operating substrate.
@@ -46,7 +46,7 @@ One rule, applied without exception: **everything is an object in one typed name
 - **The UI is a presenter.** It renders objects and holds nothing. The shell reads the registry's orders and assembles chrome from them; a presenter contributes verbs at runtime instead of owning a menu. State lives in the namespace; the DOM is a projection of it.
 - **Behaviors are verbs on objects**, not inline functions — registrable, token-gated, enumerable.
 
-The codebase is held to this mechanically: a suite of Roslyn analyzers (`SS001`–`SS010`) flag truth held outside the namespace — PowerShell baked into C# strings, static dictionaries as parallel stores, fabricated namespace-path literals, raw memory crossing a cmdlet boundary — and the build gates on them. The driver and UI layers are still being brought fully into line; the analyzers are how that work is measured rather than asserted.
+The codebase is held to this mechanically: a suite of Roslyn analyzers flag truth held outside the namespace — PowerShell baked into C# strings, static dictionaries as parallel stores, fabricated namespace-path literals, raw memory crossing a cmdlet boundary — and the build gates on them. The driver and UI layers are still being brought fully into line; the analyzers are how that work is measured rather than asserted.
 
 ## Security posture
 

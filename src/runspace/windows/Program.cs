@@ -39,5 +39,6 @@ return mode switch
     "git"                                                            => Git.Run(args[1..]),
     "status" or "st"                                                 => Status.Run(args[1..]),
     "refs"                                                           => Refs.Run(args[1..]),
+    "adb"                                                            => Adb.Run(args[1..]),
     _                                                                => Shim.Run(args),
 };

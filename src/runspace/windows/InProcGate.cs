@@ -130,7 +130,7 @@ internal static class InProcGate
         var trees = SourceTrees(hostDir);
         if (trees.Count == 0) return new List<Diagnostic>();
         var hostAnalyzers = analyzers
-            .Where(a => a.GetType().Name is "SS020ModelPromptHardcodeAnalyzer" or "SS021StreisandAnalyzer")
+            .Where(a => a.GetType().Name is "SS020ModelPromptHardcodeAnalyzer" or "SS019StreisandAnalyzer")
             .ToImmutableArray();
         if (hostAnalyzers.IsEmpty) return new List<Diagnostic>();
         var comp = CSharpCompilation.Create("hostwin-scan", trees, refs,

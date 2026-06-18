@@ -85,8 +85,15 @@ internal static class Refs
 
     private static IEnumerable<string> EnumerateCs(string root)
     {
+        // IgnoreInaccessible: a walk from a drive root (e.g. S:\) steps into protected dirs like
+        // System Volume Information / $RECYCLE.BIN. EnumerateFiles is LAZY, so an UnauthorizedAccessException
+        // surfaces mid-iteration and would escape an outer try; this option makes the walk skip such dirs
+        // instead of throwing. (Ticket #46: ss refs crashed with UnauthorizedAccessException from a drive root.)
+        var opts = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
         IEnumerable<string> all;
-        try { all = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories); } catch { yield break; }
+        try { all = Directory.EnumerateFiles(root, "*.cs", opts); }
+        catch (UnauthorizedAccessException) { yield break; } // root itself unreadable — nothing to walk
+        catch (IOException) { yield break; }                 // root vanished / device error — nothing to walk
         foreach (var p in all)
         {
             var n = p.Replace('\\', '/');

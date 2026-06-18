@@ -52,6 +52,13 @@
     <!-- VomInterop: the native Float32-region surface (256-aligned, row-major) — pure Vom + Marshal, no
          Android. The producer side of the WebView DirectPort adapter publishes/reads regions through it. -->
     <Compile Include="..\Device\VomInterop.cs" LinkBase="Device" />
+    <!-- The PORTABLE ADB protocol core, shared with the Android head: the IAdbTransport seam + the AdbConnection
+         wire protocol (CNXN/STLS/AUTH/OPEN/WRTE) + the AndroidPubKey encoder — pure System.*. The Android-only
+         Conscrypt binding is NOT included; the Windows binding is SslStreamAdbTransport.cs in this head. Wires
+         `ss adb` onto the Windows head (#75). -->
+    <Compile Include="..\Adb\IAdbTransport.cs" LinkBase="Adb" />
+    <Compile Include="..\Adb\AdbConnection.cs" LinkBase="Adb" />
+    <Compile Include="..\Adb\AndroidPubKey.cs" LinkBase="Adb" />
   </ItemGroup>
 
   <!-- The vendored DirectPort D3D12 binding (src/native/directport, built by its build.ps1). Copied
