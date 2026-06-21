@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <base href="/">
+    <link rel="stylesheet" href="/theme.css">
+    <script src="/themes.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Broker</title>
+    <style>
+        /* Agent local names are ALIASES of the canonical theme.css vars (THEMES.md anti-drift): the presenter
+           keeps a readable local vocabulary but holds NO color truth — it inherits the active theme. */
+        :root {
+            --bg-base: var(--bg);
+            --bg-surface: var(--surface);
+            --bg-surface-glass: rgba(var(--mica-rgb), calc(var(--mica-opacity) * var(--transparency)));
+            --user-bubble: var(--accent);
+            --user-text: var(--accent-fg);
+            --sys-bubble: color-mix(in srgb, var(--fg) 9%, transparent);
+            --sys-text: var(--fg);
+            --border-subtle: var(--border);
+            --input-bg: color-mix(in srgb, var(--fg) 7%, transparent);
+            --input-focus: color-mix(in srgb, var(--fg) 13%, transparent);
+            --accent-blue: var(--accent);
+            --safe-bottom: env(safe-area-inset-bottom, 20px);
+            --safe-top: env(safe-area-inset-top, 20px);
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            background-color: var(--bg-base);
+            font-family: var(--font-sans);
+            display: flex; flex-direction: column; overflow: hidden;
+            overscroll-behavior-x: none; color: var(--fg);
+        }
+        /* When collapsed to a chat head, the panel hides and the backdrop goes transparent so only the
+           floating bubble shows (the DOM-first half of a Messenger chat head; a true cross-app overlay is
+           a native TYPE_APPLICATION_OVERLAY window — that's the follow-up slice). */
+        body.collapsed { background: transparent; }
+        body.collapsed #panel { opacity: 0; transform: scale(.96) translateY(8px); pointer-events: none; }
+
+        #panel {
+            display: flex; flex-direction: column; height: 100%;
+            transition: opacity .25s cubic-bezier(.16,1,.3,1), transform .25s cubic-bezier(.16,1,.3,1);
+        }
+
+        /* --- Header --- */
+        .chat-header {
+            padding: calc(var(--safe-top) + 16px) 20px 16px 20px;
+            background: var(--bg-surface-glass);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex; align-items: center; gap: 12px;
+            position: relative; z-index: 10; justify-content: space-between;
+        }
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        .header-avatar {
+            width: 36px; height: 36px; border-radius: 50%;
+            background: var(--surface) url('/icon.png') center/cover;
+            box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent); transition: box-shadow .3s;
+        }
+        .header-info { display: flex; flex-direction: column; }
+        .header-title { font-weight: 600; font-size: 15px; letter-spacing: -.3px; }
+        .header-status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+        .status-dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
+        .header-btn {
+            width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border-subtle);
+            background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg);
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+            font-size: 16px; transition: .15s;
+        }
+        .header-btn:active { transform: scale(.9); }
+
+        /* --- Chat window --- */
+        #chat-window {
+            flex: 1; padding: 20px 16px; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none;
+            display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth;
+        }
+        #chat-window::-webkit-scrollbar { display: none; }
+
+        .bubble-wrapper {
+            display: flex; flex-direction: column; max-width: 88%;
+            animation: slideUp .4s cubic-bezier(.16,1,.3,1) forwards; opacity: 0; transform: translateY(10px);
+        }
+        .bubble-wrapper.user-wrap { align-self: flex-end; align-items: flex-end; }
+        .bubble-wrapper.sys-wrap { align-self: flex-start; align-items: flex-start; flex-direction: row; gap: 8px; }
+        .sys-avatar {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: var(--surface) url('/icon.png') center/cover; flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,.3);
+        }
+        .sys-col { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 0; }
+
+        .message {
+            padding: 12px 18px; font-size: 15px; line-height: 1.5; word-wrap: break-word; position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,.25), inset 0 1px 1px color-mix(in srgb, var(--fg) 15%, transparent);
+            transition: transform .2s cubic-bezier(.34,1.56,.64,1);
+        }
+        .message:active { transform: scale(.98); }
+        .message.user {
+            background: var(--user-bubble); color: var(--user-text); border-radius: 20px 20px 4px 20px;
+            font-weight: 500; border: 1px solid color-mix(in srgb, var(--accent-fg) 20%, transparent);
+            box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 2px 2px color-mix(in srgb, var(--accent-fg) 30%, transparent);
+            text-shadow: 0 1px 2px rgba(0,0,0,.1);
+        }
+        .message.system {
+            background: var(--sys-bubble); color: var(--sys-text); border-radius: 20px 20px 20px 4px;
+            border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+            box-shadow: 0 10px 30px rgba(0,0,0,.4), inset 0 1px 1px color-mix(in srgb, var(--fg) 8%, transparent);
+        }
+        .msg-foot { font-size: 11px; color: var(--muted); margin: 2px 0 0 2px; display: flex; gap: 6px; align-items: center; }
+        .msg-foot .spark { color: var(--accent); }
+
+        /* --- Thinking disclosure (streams live, collapses when done) --- */
+        .think-block {
+            align-self: stretch; border: 1px solid var(--border-subtle); border-radius: 14px;
+            background: color-mix(in srgb, var(--fg) 4%, transparent); overflow: hidden;
+        }
+        .think-head {
+            display: flex; align-items: center; gap: 8px; padding: 9px 13px; cursor: pointer;
+            font-size: 13px; color: var(--muted); font-weight: 600; user-select: none;
+        }
+        .think-head .chev { transition: transform .2s; font-size: 10px; }
+        .think-block.collapsed .chev { transform: rotate(-90deg); }
+        .think-head .glow { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .think-block.busy .think-head .glow { animation: think-pulse 1.1s infinite ease-in-out; }
+        .think-body {
+            padding: 0 13px 12px 13px; font-size: 13px; line-height: 1.55; color: var(--muted);
+            white-space: pre-wrap; font-family: var(--font-sans); max-height: 220px; overflow-y: auto;
+        }
+        .think-block.collapsed .think-body { display: none; }
+        @keyframes think-pulse { 0%,100% { opacity:.3; transform: scale(.85);} 50% { opacity:1; transform: scale(1);} }
+
+        /* typing dots (pre-first-token) */
+        .message.thinking { display: inline-flex; gap: 5px; align-items: center; }
+        .think-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity:.35; animation: dotp 1.2s infinite ease-in-out; }
+        .think-dot:nth-child(2){animation-delay:.2s} .think-dot:nth-child(3){animation-delay:.4s}
+        @keyframes dotp { 0%,100%{opacity:.3;transform:translateY(0)} 50%{opacity:1;transform:translateY(-3px)} }
+
+        /* --- Tool activity cards --- */
+        .tool-card {
+            align-self: stretch; border: 1px solid var(--border-subtle); border-radius: 14px;
+            background: color-mix(in srgb, var(--accent) 7%, transparent); overflow: hidden;
+        }
+        .tool-head {
+            display: flex; align-items: center; gap: 8px; padding: 10px 13px; font-size: 13px; font-weight: 600;
+        }
+        .tool-head .ic { width: 22px; height: 22px; border-radius: 7px; background: color-mix(in srgb,var(--accent) 22%, transparent);
+            display: flex; align-items: center; justify-content: center; color: var(--accent); }
+        .tool-head .nm { color: var(--fg); }
+        .tool-head .st { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 500; }
+        .tool-head .st.spin::after { content: '·'; animation: dots 1.2s steps(4) infinite; }
+        @keyframes dots { 0%{content:''} 25%{content:'·'} 50%{content:'··'} 75%{content:'···'} }
+        .tool-args { padding: 0 13px 10px 13px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; }
+        .tool-result { padding: 0 13px 12px 13px; }
+
+        /* --- PowerShell console lane ('>' prefix) — client-side console traffic, never a model turn --- */
+        .pwsh-wrap { align-self: stretch; max-width: 100%; }
+        .pwsh-echo { font-family: var(--font-mono); }
+        .pwsh-card {
+            border: 1px solid var(--border-subtle); border-radius: 14px; padding: 10px 13px;
+            background: color-mix(in srgb, var(--fg) 5%, transparent); color: var(--fg);
+            font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+            white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto;
+        }
+        .pwsh-card.err {
+            color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, transparent);
+            background: color-mix(in srgb, var(--error) 8%, transparent);
+        }
+
+        /* --- Rich card / JSON hero (reused for tool results) --- */
+        .rich-card { background: color-mix(in srgb, var(--fg) 5%, transparent); border-radius: 12px; padding: 12px; font-size: 13px; border: 1px solid var(--border-subtle); overflow-x: auto; }
+        .json-row { display:flex; font-family: var(--font-mono); font-size:13px; line-height:1.6; padding:2px 0; border-radius:4px; }
+        .json-toggle { cursor:pointer; color:var(--muted); width:16px; text-align:center; display:inline-block; user-select:none; font-size:10px; line-height:1.6; transition:transform .2s; margin-right:4px; flex-shrink:0; }
+        .json-toggle.collapsed { transform: rotate(-90deg); }
+        .json-toggle-spacer { width:20px; display:inline-block; flex-shrink:0; }
+        .json-key { color: var(--accent); font-weight:500; } .json-string { color: var(--success); } .json-number { color: var(--accent-2); }
+        .json-boolean { color: var(--neon); font-weight:bold; } .json-null { color: var(--muted); font-style:italic; }
+        .json-colon { color:var(--muted); margin-right:6px; } .json-bracket,.json-comma { color:var(--muted); }
+        .json-children { margin-left:20px; border-left:1px solid color-mix(in srgb, var(--fg) 12%, transparent); padding-left:4px; }
+        .json-summary { color:var(--accent-2); font-size:11px; cursor:pointer; background:color-mix(in srgb, var(--accent-2) 12%, transparent); padding:0 6px; border-radius:10px; margin:0 4px; }
+
+        /* --- Suggestion chips (natural-language asks she handles via tools) --- */
+        .suggestions-bar {
+            padding: 8px 16px 0 16px; background: var(--bg-base); display: flex; gap: 8px; overflow-x: auto;
+            border-top: 1px solid var(--border-subtle); -webkit-overflow-scrolling: touch;
+        }
+        .suggestions-bar::-webkit-scrollbar { display: none; }
+        .btn-action {
+            background: color-mix(in srgb, var(--fg) 5%, transparent); border: 1px solid var(--border-subtle);
+            color: var(--sys-text); padding: 8px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all .2s cubic-bezier(.16,1,.3,1); white-space: nowrap; flex-shrink: 0;
+        }
+        .btn-action:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); transform: translateY(-1px); }
+        .btn-action:active { transform: scale(.96); }
+        /* Contextual offers Broker pushes mid-turn — accent-tinted so they read as "her suggestions". */
+        .btn-action-sug {
+            background: color-mix(in srgb, var(--accent) 16%, transparent);
+            border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--fg);
+            animation: chipIn .3s cubic-bezier(.16,1,.3,1) both;
+        }
+        @keyframes chipIn { from { opacity:0; transform: translateY(6px) scale(.92); } to { opacity:1; transform: none; } }
+
+        @keyframes slideUp { 0%{opacity:0;transform:translateY(20px) scale(.9)} 60%{opacity:1;transform:translateY(-3px) scale(1.02)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+
+        /* --- Input --- */
+        #input-area {
+            padding: 12px 16px calc(var(--safe-bottom) + 12px) 16px; background: var(--bg-surface-glass);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            display: flex; align-items: flex-end; gap: 10px;
+        }
+        .input-container {
+            flex: 1; display: flex; align-items: center; background: var(--input-bg);
+            backdrop-filter: blur(12px); border-radius: 24px; padding: 6px 6px 6px 18px; border: 1px solid var(--border);
+            transition: all .2s cubic-bezier(.16,1,.3,1);
+        }
+        .input-container:focus-within {
+            background: var(--input-focus); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+        }
+        #cmd-input {
+            flex: 1; background: transparent; color: var(--fg); border: none; padding: 10px 0; font-size: 15px;
+            outline: none; font-family: inherit; line-height: 1.4; max-height: 100px; resize: none;
+        }
+        #cmd-input::placeholder { color: var(--muted); }
+        .send-btn {
+            width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+            background: var(--accent); color: var(--accent-fg); display: flex; align-items: center; justify-content: center;
+        }
+        .send-btn:active { transform: scale(.9); }
+        .send-btn svg { width: 16px; height: 16px; fill: currentColor; margin-left: 2px; }
+        /* Mic — voice-in (multimodal). Pulses red while recording. */
+        .mic-btn {
+            width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; margin-right: 6px;
+            background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg);
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .mic-btn svg { width: 18px; height: 18px; fill: currentColor; }
+        .mic-btn.recording { background: var(--error); color: #fff; animation: mic-pulse 1s infinite; }
+        @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 60%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+
+        /* --- The chat head (floating bubble) --- */
+        #chat-head {
+            position: fixed; right: 18px; bottom: calc(var(--safe-bottom) + 18px); z-index: 100;
+            width: 60px; height: 60px; border-radius: 50%;
+            background: var(--surface) url('/icon.png') center/cover;
+            box-shadow: 0 12px 30px rgba(0,0,0,.45), 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent);
+            display: none; cursor: grab; touch-action: none;
+            animation: headPop .3s cubic-bezier(.16,1,.3,1);
+        }
+        body.collapsed #chat-head { display: block; }
+        #chat-head .badge {
+            position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; border-radius: 9px;
+            background: var(--error); color: var(--accent-fg); font-size: 11px; font-weight: 700; display: none;
+            align-items: center; justify-content: center; padding: 0 5px; box-shadow: 0 2px 6px rgba(0,0,0,.4);
+        }
+        @keyframes headPop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        /* --- Saved-chats drawer --- */
+        #drawer-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; opacity: 0; pointer-events: none; transition: opacity .2s; }
+        #drawer-scrim.open { opacity: 1; pointer-events: auto; }
+        #drawer {
+            position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px; z-index: 201;
+            background: var(--bg-surface); border-right: 1px solid var(--border-subtle);
+            transform: translateX(-104%); transition: transform .25s cubic-bezier(.16,1,.3,1);
+            display: flex; flex-direction: column; box-shadow: 12px 0 40px rgba(0,0,0,.4);
+        }
+        #drawer.open { transform: translateX(0); }
+        .drawer-head { padding: calc(var(--safe-top) + 14px) 16px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); }
+        .drawer-head b { font-size: 15px; }
+        #new-chat { border: 1px solid var(--border-subtle); background: color-mix(in srgb,var(--accent) 14%,transparent); color: var(--fg); border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        #session-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .sess { display: flex; align-items: center; gap: 8px; padding: 10px 11px; border-radius: 10px; cursor: pointer; }
+        .sess:hover { background: color-mix(in srgb,var(--fg) 7%,transparent); }
+        .sess.active { background: color-mix(in srgb,var(--accent) 16%,transparent); }
+        .sess .t { flex: 1; min-width: 0; }
+        .sess .t .nm { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sess .t .mt { font-size: 11px; color: var(--muted); }
+        .sess .del { opacity: .5; font-size: 14px; padding: 4px; border-radius: 6px; }
+        .sess .del:hover { opacity: 1; background: color-mix(in srgb, var(--error) 20%, transparent); }
+    </style>
+  <style>
+    /* The avatar as the context surface: a status dot rides it (connection state); long-press or tap
+       opens #avatar-menu — the model router (populated from /models, holds no model truth) plus the
+       minimize-to-bubble verb. */
+    .header-avatar { position: relative; cursor: pointer; }
+    .avatar-dot {
+        position: absolute; right: -2px; bottom: -2px; width: 11px; height: 11px; border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 8px var(--accent);
+        border: 2px solid var(--bg); box-sizing: border-box;
+    }
+    #avatar-menu {
+        position: fixed; top: calc(var(--safe-top) + 64px); left: 14px; z-index: 300;
+        min-width: 220px; border-radius: 14px; border: 1px solid var(--border-subtle);
+        background: var(--bg-surface); box-shadow: 0 18px 50px rgba(0,0,0,.45);
+        padding: 6px; font-size: 14px;
+    }
+    #avatar-menu .am-item {
+        display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+        background: transparent; border: none; color: var(--fg); font-size: 14px; font-family: inherit;
+        padding: 10px 12px; border-radius: 9px; cursor: pointer;
+    }
+    #avatar-menu .am-item:active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+    #avatar-menu .am-item .chk { width: 14px; color: var(--accent); font-weight: 700; }
+    #avatar-menu .am-div { height: 1px; margin: 5px 8px; background: var(--border-subtle); }
+  </style>
+  <script src="/shell/presenter.js"></script>
+  <!-- Optional TTS (lib/speech.js exposes window.Speech); every call site guards its absence. -->
+  <script src="/lib/speech.js"></script>
+</head>
+<body>
+  <div id="panel">
+    <!-- Minimal chrome (user directive): a hamburger and HER — no model title, no stray buttons
+         (the old collapse circle sat right under the shell's red-X). The avatar IS the context
+         surface: long-press (or tap) opens her menu — model switch, minimize to bubble. -->
+    <div class="chat-header">
+        <div class="header-left">
+            <button class="header-btn" id="drawer-btn" title="Saved chats">☰</button>
+            <div class="header-avatar" id="avatar" title="Broker — hold for options">
+                <span class="avatar-dot" id="avatar-dot"></span>
+            </div>
+        </div>
+    </div>
+    <div id="avatar-menu" hidden></div>
+
+    <div id="chat-window">
+        <div class="bubble-wrapper sys-wrap">
+            <div class="sys-avatar"></div>
+            <div class="sys-col">
+              <div class="message system">
+                <div style="font-size:16px;font-weight:600;margin-bottom:4px;">Hi, I'm Broker 👋</div>
+                <div style="color:var(--muted);font-size:14px;line-height:1.5;">I live on your phone and I can actually operate it for you — check the <b>battery</b>, toggle the <b>flashlight</b>, read <b>memory</b>, set <b>volume</b>, <b>vibrate</b>, send <b>notifications</b>, or run any phone command. Just ask in plain words.</div>
+              </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Surface (AGENT-SPEC §3/§4): chips are a live projection of the agent-tool registry,
+         not a held list. Default chips render from each tool's `chip` field; Broker can also push a
+         `suggestions` frame to offer contextual follow-ups. The bar holds NO truth of its own. -->
+    <div class="suggestions-bar" id="suggestions-bar"></div>
+
+    <div id="input-area">
+        <div class="input-container">
+            <textarea id="cmd-input" rows="1" placeholder="Message Broker… ('>' runs PowerShell)" title="Start a message with '>' to run it as a PowerShell command"></textarea>
+            <button class="mic-btn" id="mic-btn" title="Hold to record a voice message"><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg></button>
+            <button class="send-btn" id="send-btn"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+        </div>
+    </div>
+  </div>
+
+  <div id="chat-head" title="Open chat"><span class="badge" id="head-badge"></span></div>
+
+  <div id="drawer-scrim"></div>
+  <aside id="drawer">
+    <div class="drawer-head"><b>Chats</b><button id="new-chat">+ New chat</button></div>
+    <div id="session-list"></div>
+  </aside>
+
+    <script type="module">
+        import { WebSocketClient, executeCommand } from '/lib/api.js';
+        import { getConfig, setConfig } from '/lib/store.js';
+
+        const WS_BASE = `ws://${location.hostname || '127.0.0.1'}:${location.port || '8080'}`;
+        const MOCK = new URLSearchParams(location.search).has('mock');  // ?mock = no backend, canned stream
+        const chatWindow = document.getElementById('chat-window');
+        const inputField = document.getElementById('cmd-input');
+        const sendBtn = document.getElementById('send-btn');
+        let wsApi = null;
+        let isLocalBridge = !!window.AndroidBridge;
+
+        // 'Speak replies' (avatar menu): default OFF; the value lives in the config store
+        // (lib/store — backend truth, localStorage cache), not in this presenter.
+        let speakReplies = false;
+        getConfig('agent.speak').then(v => { speakReplies = (v === 'true' || v === '1'); });
+        function setSpeakReplies(on) { speakReplies = !!on; setConfig('agent.speak', on ? 'true' : 'false'); }
+
+        // ===== Connection =====
+        // Status is the avatar's dot + tooltip now — no header text (minimal chrome).
+        const avatarDot = document.getElementById('avatar-dot');
+        function setStatus(state, detail) {
+            const c = state === 'ok' ? 'var(--success)' : state === 'err' ? 'var(--error)' : 'var(--accent)';
+            avatarDot.style.background = c; avatarDot.style.boxShadow = '0 0 8px ' + c;
+            if (detail) document.getElementById('avatar').title = 'Broker — ' + detail;
+        }
+        function apiSend(obj) { if (wsApi) wsApi.send(obj); }
+        function connectApi() {
+            if (MOCK) { setStatus('ok', 'Mock · Gemma 4'); renderSessions(mockSessions); return; }
+            wsApi = new WebSocketClient('/agent', {
+                onOpen: () => {
+                    setStatus('ok', 'Connected');
+                    apiSend({ type: 'sessions' });
+                    if (isLocalBridge) window.AndroidBridge.notifyReady();
+                },
+                onMessage: (data) => handleFrame(data),
+                onReconnecting: () => { setStatus('err', 'Reconnecting…'); }
+            });
+            wsApi.connect();
+        }
+
+        function handleFrame(data) {
+            let f; try { f = JSON.parse(data); } catch { appendMessage(data, 'system'); return; }
+            if (!f || !f.type) { renderRichCard(f); return; }
+            switch (f.type) {
+                case 'status':
+                    if (f.state === 'ready') removeProgress();
+                    else if (f.state === 'thinking') showTyping();
+                    else updateProgress(f.text || 'Loading…', f.pct != null ? f.pct : null);
+                    break;
+                case 'meta': window.__hbModel = f.model || 'Connected'; setStatus('ok', `${f.model || 'Connected'} · ${f.backend || ''}`); break;
+                case 'token': onToken(f.text || ''); break;
+                case 'think': onThink(f.text || ''); break;
+                case 'tool': onTool(f.name || 'tool', f.args || '{}'); break;
+                case 'tool_result': onToolResult(f.name || 'tool', f.result || ''); break;
+                case 'done': finalizeTurn(f); if (f.backend) setStatus('ok', `${window.__hbModel || 'Connected'} · ${f.backend}`); break;
+                case 'benchmark': finalizeTurn(f); renderRichCard(f); break;
+                case 'error': finalizeTurn(f); appendMessage('⚠️ ' + (f.text || 'error'), 'system'); break;
+                case 'sessions': renderSessions(f.items || []); break;
+                case 'session': currentSessionId = f.id || ''; renderSessions(lastSessions); break;
+                case 'transcript': replayTranscript(f.json); break;
+                case 'suggestions': renderSuggestions(f.items || [], f.replace !== false); break;
+            }
+        }
+
+        window.receiveMessage = function(tabIdAndData) {
+            const idx = tabIdAndData.indexOf(':');
+            if (idx > -1) { const data = tabIdAndData.substring(idx + 1); try { renderRichCard(JSON.parse(data)); } catch { appendMessage(data, 'system'); } }
+        };
+
+        // ===== Turn rendering =====
+        // One assistant turn = an avatar + a column holding (in order): a thinking block, tool cards, and
+        // the answer bubble. We build the column lazily as frames arrive.
+        let turn = null;
+        function newTurn() {
+            const wrap = document.createElement('div'); wrap.className = 'bubble-wrapper sys-wrap';
+            const avatar = document.createElement('div'); avatar.className = 'sys-avatar';
+            const col = document.createElement('div'); col.className = 'sys-col';
+            wrap.appendChild(avatar); wrap.appendChild(col); chatWindow.appendChild(wrap);
+            turn = { col, think: null, thinkBody: null, answer: null, foot: null, tools: {}, answered: false };
+            return turn;
+        }
+        function ensureTurn() { return turn || newTurn(); }
+
+        function onThink(text) {
+            removeTyping();
+            const t = ensureTurn();
+            if (!t.think) {
+                const b = document.createElement('div'); b.className = 'think-block busy';
+                b.innerHTML = `<div class="think-head"><span class="chev">▼</span><span class="glow"></span><span class="lbl">Thinking…</span></div><div class="think-body"></div>`;
+                b.querySelector('.think-head').onclick = () => b.classList.toggle('collapsed');
+                t.col.appendChild(b); t.think = b; t.thinkBody = b.querySelector('.think-body');
+            }
+            t.thinkBody.textContent += text;
+            scrollToBottom();
+        }
+
+        function onToken(text) {
+            removeTyping();
+            const t = ensureTurn();
+            // First answer token → collapse the thinking block into a quiet "Thought process" summary.
+            if (!t.answered && t.think) {
+                t.think.classList.remove('busy'); t.think.classList.add('collapsed');
+                t.think.querySelector('.lbl').textContent = 'Thought process';
+            }
+            t.answered = true;
+            if (!t.answer) {
+                // A new token stream preempts any reply still being spoken.
+                if (window.Speech && window.Speech.stop) { try { window.Speech.stop(); } catch (e) {} }
+                const m = document.createElement('div'); m.className = 'message system'; m.textContent = ''; t.col.appendChild(m); t.answer = m;
+            }
+            t.answer.textContent += text;
+            scrollToBottom();
+        }
+
+        function onTool(name, argsJson) {
+            removeTyping();
+            const t = ensureTurn();
+            const card = document.createElement('div'); card.className = 'tool-card';
+            let argsPretty = argsJson; try { argsPretty = JSON.stringify(JSON.parse(argsJson)); } catch {}
+            const showArgs = argsPretty && argsPretty !== '{}' && argsPretty !== 'null';
+            card.innerHTML = `<div class="tool-head"><span class="ic">⚙</span><span class="nm">${esc(name)}</span><span class="st spin">running</span></div>` +
+                (showArgs ? `<div class="tool-args">${esc(argsPretty)}</div>` : '') + `<div class="tool-result"></div>`;
+            t.col.appendChild(card); t.tools[name] = card; scrollToBottom();
+        }
+
+        function onToolResult(name, resultJson) {
+            const t = ensureTurn();
+            const card = t.tools[name] || (() => { onTool(name, '{}'); return t.tools[name]; })();
+            const st = card.querySelector('.st'); st.classList.remove('spin'); st.textContent = '✓ done'; st.style.color = 'var(--success)';
+            const slot = card.querySelector('.tool-result');
+            let obj = null; try { obj = JSON.parse(resultJson); } catch {}
+            if (obj && typeof obj === 'object') slot.appendChild(richCardEl(obj));
+            else { slot.style.fontFamily = 'var(--font-mono)'; slot.style.fontSize = '12px'; slot.textContent = resultJson; }
+            scrollToBottom();
+        }
+
+        function finalizeTurn(f) {
+            removeTyping();
+            const t = turn;
+            if (t && t.think && t.think.classList.contains('busy')) { t.think.classList.remove('busy'); t.think.querySelector('.lbl').textContent = 'Thought process'; t.think.classList.add('collapsed'); }
+            if (t && t.answer && f && f.decodeTokensPerSecond != null) {
+                const foot = document.createElement('div'); foot.className = 'msg-foot';
+                const tps = Math.round(f.decodeTokensPerSecond);
+                foot.innerHTML = `<span class="spark">✦</span> ${tps} tok/s${f.backend ? ' · ' + esc(f.backend) : ''}`;
+                t.col.appendChild(foot);
+            }
+            if (speakReplies && t && t.answer && window.Speech && window.Speech.say) {
+                try { window.Speech.say(t.answer.textContent); } catch (e) {}
+            }
+            turn = null;
+            scrollToBottom();
+        }
+
+        // ===== Typing indicator (pre-first-token) =====
+        function showTyping() {
+            if (document.getElementById('typing')) return;
+            const wrap = document.createElement('div'); wrap.className = 'bubble-wrapper sys-wrap'; wrap.id = 'typing';
+            wrap.innerHTML = `<div class="sys-avatar"></div><div class="message system thinking"><span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span></div>`;
+            chatWindow.appendChild(wrap); scrollToBottom();
+        }
+        function removeTyping() { const e = document.getElementById('typing'); if (e) e.remove(); }
+
+        function removeProgress() { const e = document.getElementById('model-progress'); if (e) e.remove(); }
+        function updateProgress(text, pct) {
+            let el = document.getElementById('model-progress');
+            if (!el) { el = document.createElement('div'); el.id = 'model-progress';
+                el.style.cssText = 'margin:14px auto;width:88%;padding:14px 16px;border-radius:14px;background:var(--surface);color:var(--fg);font-size:13px;';
+                el.innerHTML = '<div id="mp-label" style="margin-bottom:9px"></div><div style="height:9px;background:color-mix(in srgb,var(--fg) 12%,transparent);border-radius:5px;overflow:hidden"><div id="mp-bar" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>';
+                chatWindow.appendChild(el); }
+            document.getElementById('mp-label').textContent = text;
+            if (pct != null) document.getElementById('mp-bar').style.width = Math.min(100, pct) + '%';
+            scrollToBottom();
+        }
+
+        // ===== Plain messages =====
+        function appendMessage(text, sender) {
+            if (!text || !String(text).trim()) return;
+            const wrap = document.createElement('div'); wrap.className = `bubble-wrapper ${sender === 'system' ? 'sys-wrap' : 'user-wrap'}`;
+            if (sender === 'system') { const a = document.createElement('div'); a.className = 'sys-avatar'; wrap.appendChild(a); }
+            const m = document.createElement('div'); m.className = `message ${sender}`; m.textContent = text;
+            wrap.appendChild(m); chatWindow.appendChild(wrap); scrollToBottom();
+        }
+
+        function scrollToBottom() { setTimeout(() => chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' }), 30); }
+        const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+        // ===== Send =====
+        function sendMessage() { const c = inputField.value.trim(); if (c) sendCmd(c); }
+        function sendCmd(cmd) {
+            // '>' prefix = console lane: the line goes to /api/exec, not the model, and stays
+            // client-side only (never enters the saved session transcript — it's console traffic).
+            const line = String(cmd).trim();
+            if (line.startsWith('>')) { runPwshTurn(line.slice(1).trim()); return; }
+            appendMessage(cmd, 'user'); inputField.value = ''; inputField.style.height = 'auto';
+            if (typeof restoreDefaultChips === 'function') restoreDefaultChips(); // contextual offers are now stale
+            if (MOCK) { mockRespond(cmd); return; }
+            if (wsApi) {
+                const sent = wsApi.send(cmd);
+                if (!sent) appendMessage('Connection offline.', 'system');
+            } else {
+                appendMessage('Connection offline.', 'system');
+            }
+        }
+        window.sendCmd = sendCmd;
+        sendBtn.addEventListener('click', sendMessage);
+
+        // ===== PowerShell lane ('>' prefix) =====
+        // POST the line to /api/exec and render the result as a monospace card. /api/exec never
+        // 404s on data lanes — errors arrive as an {error} envelope, which executeCommand throws.
+        function pwshText(result) {
+            if (result == null) return '(no output)';
+            if (typeof result === 'string') return result;
+            try { const s = JSON.stringify(result, null, 2); return s === '{}' ? '(no output)' : s; }
+            catch (e) { return String(result); }
+        }
+        function runPwshTurn(command) {
+            inputField.value = ''; inputField.style.height = 'auto';
+            if (!command) return;
+            const echoWrap = document.createElement('div'); echoWrap.className = 'bubble-wrapper user-wrap';
+            const echo = document.createElement('div'); echo.className = 'message user pwsh-echo'; echo.textContent = '> ' + command;
+            echoWrap.appendChild(echo); chatWindow.appendChild(echoWrap);
+            const cardWrap = document.createElement('div'); cardWrap.className = 'bubble-wrapper pwsh-wrap';
+            const card = document.createElement('div'); card.className = 'pwsh-card'; card.textContent = 'running…';
+            cardWrap.appendChild(card); chatWindow.appendChild(cardWrap); scrollToBottom();
+            executeCommand(command)
+                .then(result => { card.textContent = pwshText(result); scrollToBottom(); })
+                .catch(e => { card.classList.add('err'); card.textContent = (e && e.message) ? e.message : String(e); scrollToBottom(); });
+        }
+
+        // ===== Action Surface (AGENT-SPEC §3/§4) =====
+        // The chip bar is a live projection of the agent-tool registry — it holds no list of its own.
+        // Default chips come from each tool's `chip` field in /agent-tools.json (the same manifest the
+        // backend tool-loop reads), so a new capability appears here by construction. Broker can also
+        // push a `suggestions` frame mid-turn to offer contextual follow-ups; those take over the bar
+        // until the next user turn, then it reverts to the default tool chips.
+        const sugBar = document.getElementById('suggestions-bar');
+        let defaultChips = [];
+
+        function makeChip(label, prompt, contextual) {
+            const b = document.createElement('button');
+            b.className = 'btn-action' + (contextual ? ' btn-action-sug' : '');
+            b.textContent = label;
+            b.onclick = () => sendCmd(prompt);
+            return b;
+        }
+        function paintChips(chips) {
+            sugBar.innerHTML = '';
+            chips.forEach(c => sugBar.appendChild(makeChip(c.label, c.prompt, c.contextual)));
+        }
+        // Broker-offered follow-ups: items may be plain strings or { label, prompt }.
+        function renderSuggestions(items, replace) {
+            const chips = items.map(it => typeof it === 'string'
+                ? { label: it, prompt: it, contextual: true }
+                : { label: it.label || it.prompt || '', prompt: it.prompt || it.label || '', contextual: true });
+            paintChips(replace ? chips : defaultChips.concat(chips));
+        }
+        function restoreDefaultChips() { paintChips(defaultChips); }
+
+        async function loadActionSurface() {
+            // A chip's click text strips the leading emoji/symbol so Broker gets a clean phrase.
+            const cleanPhrase = (s) => s.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+            if (MOCK) {
+                defaultChips = [{ label: '🔋 Battery?', prompt: 'Battery?' }, { label: '📳 Vibrate', prompt: 'Vibrate' }];
+                restoreDefaultChips(); return;
+            }
+            try {
+                const tools = await (await fetch('/agent-tools.json')).json();
+                defaultChips = tools.filter(t => t.chip)
+                    .map(t => ({ label: t.chip, prompt: cleanPhrase(t.chip) }));
+                // Lead with an always-useful capabilities prompt — derived, not a hardcoded tool.
+                defaultChips.unshift({ label: '✦ What can you do?', prompt: 'What can you do?' });
+            } catch (e) { defaultChips = []; }
+            restoreDefaultChips();
+        }
+        loadActionSurface();
+
+        // ===== Avatar context menu (long-press or tap on HER) =====
+        // The model router + the minimize verb, hung off the avatar instead of header chrome.
+        // Models come from /models (the manifest is the truth; this menu holds none of its own).
+        const avatar = document.getElementById('avatar'), avatarMenu = document.getElementById('avatar-menu');
+        let modelManifest = [], mws = null;
+        function setupModelRouter() {
+            if (MOCK) { modelManifest = [{ id: 'e2b', name: 'Gemma 4 E2B', present: true, active: true }]; return; }
+            mws = new WebSocketClient('/models', {
+                onOpen: () => mws.send({ action: 'list' }),
+                onMessage: (data) => {
+                    let f; try { f = JSON.parse(data); } catch { return; }
+                    if (f.type === 'manifest') modelManifest = (f.models || []).filter(m => m.present);
+                }
+            });
+            mws.connect();
+        }
+        setupModelRouter();
+
+        function renderAvatarMenu() {
+            avatarMenu.innerHTML = '';
+            const add = (label, chk, fn) => {
+                const b = document.createElement('button'); b.className = 'am-item';
+                b.innerHTML = `<span class="chk">${chk ? '✓' : ''}</span><span></span>`;
+                b.lastElementChild.textContent = label;
+                b.onclick = () => { closeAvatarMenu(); fn && fn(); };
+                avatarMenu.appendChild(b); return b;
+            };
+            modelManifest.forEach(m => add(m.name, m.active, () => {
+                if (m.active || !mws) return;
+                mws.send({ action: 'select', id: m.id });
+                setStatus('busy', 'Switching model…');
+            }));
+            if (modelManifest.length) { const d = document.createElement('div'); d.className = 'am-div'; avatarMenu.appendChild(d); }
+            add('Speak replies', speakReplies, () => setSpeakReplies(!speakReplies));
+            add('Minimize to bubble', false, collapseToHead);
+        }
+        function openAvatarMenu() { renderAvatarMenu(); avatarMenu.hidden = false; }
+        function closeAvatarMenu() { avatarMenu.hidden = true; }
+        // Long-press (450ms) or plain tap both open — discoverability on a touch screen.
+        (function () {
+            let t = null;
+            avatar.addEventListener('pointerdown', () => { t = setTimeout(() => { t = null; openAvatarMenu(); }, 450); });
+            const up = () => { if (t) { clearTimeout(t); t = null; openAvatarMenu(); } };
+            avatar.addEventListener('pointerup', up);
+            avatar.addEventListener('pointercancel', () => { if (t) { clearTimeout(t); t = null; } });
+            document.addEventListener('pointerdown', (e) => {
+                if (!avatarMenu.hidden && !avatarMenu.contains(e.target) && e.target !== avatar && !avatar.contains(e.target)) closeAvatarMenu();
+            });
+        })();
+
+        // ===== Voice in (multimodal) =====
+        // Capture mic audio, resample to 16 kHz mono 16-bit PCM (the format on-device speech models
+        // expect), and send it on the chat socket as an `audio` frame. Vanilla Web Audio — no deps;
+        // ScriptProcessorNode is deprecated but the reliable capture path in the Android WebView.
+        const micBtn = document.getElementById('mic-btn');
+        let micStream = null, micCtx = null, micNode = null, micSrc = null, micChunks = [], recording = false;
+
+        async function startRecording() {
+            if (recording) return;
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+            } catch (e) { appendMessage('Microphone unavailable — grant the mic permission.', 'system'); return; }
+            micCtx = new (window.AudioContext || window.webkitAudioContext)();
+            micSrc = micCtx.createMediaStreamSource(micStream);
+            micNode = micCtx.createScriptProcessor(4096, 1, 1);
+            micChunks = [];
+            micNode.onaudioprocess = (e) => micChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+            micSrc.connect(micNode); micNode.connect(micCtx.destination);
+            recording = true;
+            micBtn.classList.add('recording');
+        }
+
+        async function stopRecording() {
+            if (!recording) return;
+            recording = false;
+            micBtn.classList.remove('recording');
+            try { micNode.disconnect(); micSrc.disconnect(); } catch (e) {}
+            micStream.getTracks().forEach(t => t.stop());
+            const srcRate = micCtx.sampleRate;
+            try { await micCtx.close(); } catch (e) {}
+
+            let total = micChunks.reduce((n, b) => n + b.length, 0);
+            if (total < srcRate * 0.3) return;             // < 0.3s — a stray tap, ignore
+            const flat = new Float32Array(total);
+            let o = 0; for (const b of micChunks) { flat.set(b, o); o += b.length; }
+            const b64 = pcm16ToBase64(resampleTo16k(flat, srcRate));
+
+            appendMessage('🎤 Voice message', 'user');
+            if (MOCK) { mockRespond('(voice)'); return; }
+            if (wsApi) wsApi.send({ type: 'chat', text: '', audio: b64 });
+            else appendMessage('Connection offline.', 'system');
+        }
+
+        // Linear resample float[-1,1] @ srcRate → 16 kHz, then float→int16→base64 (chunked).
+        function resampleTo16k(input, srcRate) {
+            if (srcRate === 16000) return input;
+            const ratio = srcRate / 16000, outLen = Math.floor(input.length / ratio);
+            const out = new Float32Array(outLen);
+            for (let i = 0; i < outLen; i++) {
+                const pos = i * ratio, i0 = Math.floor(pos), frac = pos - i0;
+                out[i] = (input[i0] || 0) * (1 - frac) + (input[i0 + 1] || 0) * frac;
+            }
+            return out;
+        }
+        function pcm16ToBase64(floats) {
+            const buf = new ArrayBuffer(floats.length * 2), view = new DataView(buf);
+            for (let i = 0; i < floats.length; i++) {
+                const s = Math.max(-1, Math.min(1, floats[i]));
+                view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            const bytes = new Uint8Array(buf); let bin = '';
+            for (let i = 0; i < bytes.length; i += 0x8000)
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            return btoa(bin);
+        }
+
+        // Push-to-talk: hold the mic. Pointer events cover touch + mouse.
+        micBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); startRecording(); });
+        micBtn.addEventListener('pointerup', (e) => { e.preventDefault(); stopRecording(); });
+        micBtn.addEventListener('pointercancel', () => stopRecording());
+        micBtn.addEventListener('pointerleave', () => { if (recording) stopRecording(); });
+
+        inputField.addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 100) + 'px'; });
+        inputField.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+
+        // ===== Chat head (collapse/expand + drag) =====
+        const head = document.getElementById('chat-head'), headBadge = document.getElementById('head-badge');
+        // On device: become the REAL chat head — a system-overlay bubble (FloatingChatManager) floating
+        // over every app; the app hands the screen back. Tapping the head reopens onto this presenter
+        // (open=agent). In dev/browser (no bridge): the in-page DOM head below. Invoked from the
+        // avatar's context menu (the old dedicated header button sat under the shell's red-X).
+        function collapseToHead() {
+            if (window.AndroidBridge && window.AndroidBridge.showChatHead) {
+                try { window.AndroidBridge.showChatHead(); window.AndroidBridge.minimizeApp(); return; } catch (e) {}
+            }
+            document.body.classList.add('collapsed');
+        }
+        (function () {
+            let dragging = false, moved = false, sx, sy, ox, oy;
+            head.addEventListener('pointerdown', (e) => { dragging = true; moved = false; sx = e.clientX; sy = e.clientY; const r = head.getBoundingClientRect(); ox = r.left; oy = r.top; head.setPointerCapture(e.pointerId); head.style.cursor = 'grabbing'; });
+            head.addEventListener('pointermove', (e) => {
+                if (!dragging) return; const dx = e.clientX - sx, dy = e.clientY - sy;
+                if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+                head.style.left = Math.max(6, Math.min(window.innerWidth - 66, ox + dx)) + 'px';
+                head.style.top = Math.max(6, Math.min(window.innerHeight - 66, oy + dy)) + 'px';
+                head.style.right = 'auto'; head.style.bottom = 'auto';
+            });
+            head.addEventListener('pointerup', (e) => { dragging = false; head.style.cursor = 'grab'; if (!moved) { document.body.classList.remove('collapsed'); headBadge.style.display = 'none'; } });
+        })();
+
+        // ===== JSON hero (reused to render tool results) =====
+        function richCardEl(obj) {
+            const card = document.createElement('div'); card.className = 'rich-card';
+            const abs = abstractionFor(obj);
+            if (abs) card.appendChild(abs);
+            const tree = document.createElement('div'); tree.innerHTML = buildJsonTree(null, obj, true, true);
+            card.appendChild(tree);
+            return card;
+        }
+        function renderRichCard(obj) {
+            const wrap = document.createElement('div'); wrap.className = 'bubble-wrapper sys-wrap';
+            const a = document.createElement('div'); a.className = 'sys-avatar';
+            const col = document.createElement('div'); col.className = 'sys-col';
+            if (typeof obj === 'string') { const m = document.createElement('div'); m.className = 'message system'; m.textContent = obj; col.appendChild(m); }
+            else col.appendChild(richCardEl(obj));
+            wrap.appendChild(a); wrap.appendChild(col); chatWindow.appendChild(wrap); scrollToBottom();
+        }
+        // Pretty abstractions for the device objects she returns (battery / volume).
+        function abstractionFor(obj) {
+            if (obj && obj.Level !== undefined && obj.IsCharging !== undefined) {
+                const color = obj.Level > 20 ? (obj.IsCharging ? 'var(--success)' : 'var(--accent)') : 'var(--error)';
+                const d = document.createElement('div'); d.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 4px 12px';
+                d.innerHTML = `<div style="position:relative;width:54px;height:26px;border:3px solid color-mix(in srgb,var(--fg) 20%,transparent);border-radius:6px;padding:2px"><div style="position:absolute;right:-6px;top:7px;width:4px;height:12px;background:color-mix(in srgb,var(--fg) 20%,transparent);border-radius:0 4px 4px 0"></div><div style="height:100%;width:${obj.Level}%;background:${color};border-radius:3px;transition:1s width"></div></div><div style="display:flex;flex-direction:column"><span style="font-size:18px;font-weight:bold">${obj.Level}% ${obj.IsCharging ? '⚡' : '🔋'}</span><span style="font-size:12px;color:var(--muted)">${obj.IsCharging ? 'Charging' : 'Discharging'}${obj.Temperature ? ' • ' + obj.Temperature + '°C' : ''}</span></div>`;
+                return d;
+            }
+            return null;
+        }
+        function buildJsonTree(key, value, isLast, isRoot = false) {
+            const isObj = value !== null && typeof value === 'object', isArray = Array.isArray(value);
+            let html = `<div class="json-row">`;
+            if (isObj && Object.keys(value).length > 0) html += `<span class="json-toggle" onclick="toggleJsonNode(this)">▼</span>`;
+            else html += `<span class="json-toggle-spacer"></span>`;
+            if (key !== null) html += `<span class="json-key">"${key}"</span><span class="json-colon">:</span>`;
+            if (isObj) {
+                const keys = Object.keys(value), bo = isArray ? '[' : '{', bc = isArray ? ']' : '}';
+                html += `<span class="json-bracket">${bo}</span>`;
+                if (keys.length) { html += `<div class="json-children">`; keys.forEach((k, i) => html += buildJsonTree(isArray ? null : k, value[k], i === keys.length - 1)); html += `</div>`; }
+                html += `<span class="json-bracket">${bc}</span>`;
+            } else if (typeof value === 'string') html += `<span class="json-string">"${esc(value)}"</span>`;
+            else if (typeof value === 'number') html += `<span class="json-number">${value}</span>`;
+            else if (typeof value === 'boolean') html += `<span class="json-boolean">${value}</span>`;
+            else if (value === null) html += `<span class="json-null">null</span>`;
+            if (!isLast && !isRoot) html += `<span class="json-comma">,</span>`;
+            html += `</div>`; return html;
+        }
+        window.toggleJsonNode = function (el) { el.classList.toggle('collapsed'); const row = el.closest('.json-row'); const ch = row.querySelector('.json-children'); if (ch) ch.style.display = ch.style.display === 'none' ? 'block' : 'none'; };
+
+        // ===== Saved-chats drawer =====
+        let currentSessionId = '', lastSessions = [];
+        let mockSessions = [
+            { id: 'm1', title: 'What is my battery level?', updated: new Date(Date.now() - 3600e3).toISOString(), turns: 2 },
+            { id: 'm2', title: 'Turn on the flashlight', updated: new Date(Date.now() - 7200e3).toISOString(), turns: 2 },
+        ];
+        const drawer = document.getElementById('drawer'), scrim = document.getElementById('drawer-scrim');
+        function openDrawer() { drawer.classList.add('open'); scrim.classList.add('open'); if (!MOCK) apiSend({ type: 'sessions' }); }
+        function closeDrawer() { drawer.classList.remove('open'); scrim.classList.remove('open'); }
+        document.getElementById('drawer-btn').onclick = openDrawer;
+        scrim.onclick = closeDrawer;
+        document.getElementById('new-chat').onclick = () => { startNewChat(); closeDrawer(); };
+
+        function startNewChat() {
+            chatWindow.innerHTML = ''; turn = null; currentSessionId = '';
+            appendMessage("New chat — ask me anything, or tell me to do something on your phone.", 'system');
+            if (MOCK) { mockSessions.unshift({ id: 'm' + Date.now(), title: 'New chat', updated: new Date().toISOString(), turns: 0 }); renderSessions(mockSessions); }
+            else apiSend({ type: 'new' });
+        }
+        function loadChat(id) {
+            if (MOCK) { const s = mockSessions.find(x => x.id === id); chatWindow.innerHTML = ''; appendMessage('(mock) ' + (s ? s.title : id), 'system'); currentSessionId = id; renderSessions(mockSessions); closeDrawer(); return; }
+            apiSend({ type: 'load', id }); currentSessionId = id; closeDrawer();
+        }
+        function deleteChat(id, ev) {
+            ev.stopPropagation();
+            if (MOCK) { mockSessions = mockSessions.filter(x => x.id !== id); renderSessions(mockSessions); return; }
+            apiSend({ type: 'delete', id });
+        }
+        function renderSessions(items) {
+            lastSessions = items || [];
+            const list = document.getElementById('session-list');
+            if (!lastSessions.length) { list.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">No saved chats yet.</div>'; return; }
+            list.innerHTML = '';
+            lastSessions.forEach(s => {
+                const el = document.createElement('div');
+                el.className = 'sess' + (s.id === currentSessionId ? ' active' : '');
+                const when = s.updated ? new Date(s.updated).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                el.innerHTML = `<div class="t"><div class="nm">${esc(s.title || 'Chat')}</div><div class="mt">${when} · ${s.turns || 0} msgs</div></div><div class="del" title="Delete">🗑</div>`;
+                el.onclick = () => loadChat(s.id);
+                el.querySelector('.del').onclick = (ev) => deleteChat(s.id, ev);
+                list.appendChild(el);
+            });
+        }
+        function replayTranscript(json) {
+            let s = null; try { s = JSON.parse(json); } catch {}
+            chatWindow.innerHTML = ''; turn = null;
+            if (!s || !s.turns) { appendMessage('(empty chat)', 'system'); return; }
+            currentSessionId = s.id || currentSessionId;
+            s.turns.forEach(t => appendMessage(t.text, t.role === 'assistant' ? 'system' : 'user'));
+            renderSessions(lastSessions);
+        }
+
+        // Prefill from Shell.open params (?prompt= on first open, `open-params` postMessage after) —
+        // SET the input, never auto-send: the user finishes the thought ("Make me a card that …").
+        const _pf = new URLSearchParams(location.search).get('prompt');
+        if (_pf) { inputField.value = _pf; setTimeout(() => { try { inputField.focus(); } catch (e) {} }, 150); }
+        window.addEventListener('message', (e) => {
+            const d = e.data;
+            if (d && d.type === 'open-params' && d.params && d.params.prompt) {
+                inputField.value = d.params.prompt;
+                try { inputField.focus(); } catch (err) {}
+            }
+        });
+
+        connectApi();
+
+        // ===== Mock harness (?mock): canned streams to iterate the UI without the device =====
+        function mockStream(frames) {
+            let i = 0; (function tick() { if (i >= frames.length) return; const [delay, fr] = frames[i++]; setTimeout(() => { handleFrame(JSON.stringify(fr)); tick(); }, delay); })();
+        }
+        function mockRespond(cmd) {
+            const low = cmd.toLowerCase();
+            if (low.includes('battery')) return mockStream([
+                [200, { type: 'status', state: 'thinking' }],
+                [400, { type: 'think', text: 'The user wants the battery level. ' }],
+                [300, { type: 'think', text: 'I should call get_battery.' }],
+                [300, { type: 'tool', name: 'get_battery', args: '{}' }],
+                [600, { type: 'tool_result', name: 'get_battery', result: '{"Level":74,"IsCharging":true,"Temperature":29.5,"Voltage":4302}' }],
+                [200, { type: 'token', text: "You're at " }], [120, { type: 'token', text: '74% ' }], [120, { type: 'token', text: 'and charging ⚡' }],
+                [200, { type: 'done', backend: 'GPU', decodeTokensPerSecond: 23.4 }],
+            ]);
+            if (low.includes('flashlight')) return mockStream([
+                [200, { type: 'status', state: 'thinking' }],
+                [300, { type: 'tool', name: 'set_flashlight', args: '{"state":"On"}' }],
+                [500, { type: 'tool_result', name: 'set_flashlight', result: '{"flashlight":"On"}' }],
+                [150, { type: 'token', text: 'Flashlight is on 🔦' }],
+                [200, { type: 'done', backend: 'GPU', decodeTokensPerSecond: 25.1 }],
+            ]);
+            return mockStream([
+                [200, { type: 'status', state: 'thinking' }],
+                [300, { type: 'think', text: 'A general question — I can answer directly.' }],
+                [200, { type: 'token', text: 'I can check your battery, ' }], [120, { type: 'token', text: 'toggle the flashlight, ' }],
+                [120, { type: 'token', text: 'read memory, set volume, vibrate, ' }], [120, { type: 'token', text: 'send notifications, and run any phone command. Just ask!' }],
+                [200, { type: 'done', backend: 'GPU', decodeTokensPerSecond: 21.0 }],
+            ]);
+        }
+    </script>
+</body>
+</html>

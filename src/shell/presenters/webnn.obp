@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <base href="/">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebNN Probe</title>
+    <link rel="stylesheet" href="/theme.css">
+    <script src="/themes.js"></script>
+    <script src="/shell/presenter.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--bg); color: var(--fg);
+            font-family: var(--font-sans); overflow: hidden; }
+        .app { display: flex; flex-direction: column; height: 100%; }
+        .header { padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+        .header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+        .body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+        .row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .row .k { flex: 1; font-size: 14px; }
+        .row .v { font-family: var(--font-mono); font-size: 13px; }
+        .badge { padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+        .ok { background: color-mix(in srgb, var(--success) 22%, transparent); color: var(--success); }
+        .no { background: color-mix(in srgb, var(--error) 22%, transparent); color: var(--error); }
+        .pending { background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--muted); }
+        .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 6px; font-weight: 600; }
+        pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px;
+            font-family: var(--font-mono); overflow-x: auto; white-space: pre-wrap; color: var(--muted); margin: 8px 0 0; }
+        .note { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="header">
+            <h1>WebNN Probe</h1>
+            <p>Capability smoke test — does this engine expose the Web Neural Network API, and on what device?</p>
+        </div>
+        <div class="body" id="body"></div>
+    </div>
+
+    <script type="module">
+        const body = document.getElementById('body');
+        const rows = [];
+        function row(k, state, v) {
+            const cls = state === true ? 'ok' : state === false ? 'no' : 'pending';
+            const label = v != null ? v : (state === true ? 'yes' : state === false ? 'no' : '…');
+            rows.push(`<div class="row"><span class="k">${k}</span><span class="v"><span class="badge ${cls}">${label}</span></span></div>`);
+        }
+        function title(t) { rows.push(`<div class="section-title">${t}</div>`); }
+        function flush() { body.innerHTML = rows.join(''); }
+
+        async function probe() {
+            // 1. API presence — is navigator.ml exposed at all?
+            title('API surface');
+            const hasML = typeof navigator !== 'undefined' && 'ml' in navigator && navigator.ml;
+            row('navigator.ml (WebNN)', !!hasML);
+            const hasBuilder = typeof window.MLGraphBuilder === 'function';
+            row('MLGraphBuilder', hasBuilder);
+            flush();
+
+            if (!hasML) {
+                rows.push(`<div class="note">WebNN is not exposed in this engine. In the Android System WebView it ships behind a
+                    Chromium flag and is not on by default, so this is the expected result on-device today. The probe will light up
+                    in a browser/projection with WebNN enabled, or once the WebView build carries it. WebNN's <code>deviceType:'npu'</code>
+                    is the cross-platform NPU path we'd target when it's available — it routes to NNAPI / the platform NN stack
+                    without leaving the renderer.</div>`);
+                flush();
+                return;
+            }
+
+            // 2. Which device types can create a context? (cpu / gpu / npu)
+            title('Context by device');
+            for (const dev of ['cpu', 'gpu', 'npu']) {
+                row(dev.toUpperCase(), null, '…'); flush();
+                try {
+                    const ctx = await navigator.ml.createContext({ deviceType: dev });
+                    rows[rows.length - 1] = `<div class="row"><span class="k">${dev.toUpperCase()}</span><span class="v"><span class="badge ok">available</span></span></div>`;
+                } catch (e) {
+                    rows[rows.length - 1] = `<div class="row"><span class="k">${dev.toUpperCase()}</span><span class="v"><span class="badge no">${String(e.name || 'no')}</span></span></div>`;
+                }
+                flush();
+            }
+
+            // 3. Run a tiny graph: c = a + b, on the default context. Proves end-to-end compute.
+            title('Compute');
+            row('add([1,2,3,4] + 10)', null, '…'); flush();
+            try {
+                const ctx = await navigator.ml.createContext();
+                const builder = new MLGraphBuilder(ctx);
+                const desc = { dataType: 'float32', shape: [4] };           // newer spec: shape
+                const descLegacy = { type: 'float32', dimensions: [4] };    // older spec: dimensions
+                let a, b;
+                try { a = builder.input('a', desc); b = builder.constant(desc, new Float32Array([10, 10, 10, 10])); }
+                catch (_) { a = builder.input('a', descLegacy); b = builder.constant(descLegacy, new Float32Array([10, 10, 10, 10])); }
+                const c = builder.add(a, b);
+                const graph = await builder.build({ c });
+                const aBuf = new Float32Array([1, 2, 3, 4]);
+                const cBuf = new Float32Array(4);
+                // compute() (older) vs dispatch() (newer) — try the one that exists.
+                if (typeof ctx.compute === 'function') {
+                    const r = await ctx.compute(graph, { a: aBuf }, { c: cBuf });
+                    const out = (r.outputs ? r.outputs.c : cBuf);
+                    rows[rows.length - 1] = `<div class="row"><span class="k">add([1,2,3,4] + 10)</span><span class="v"><span class="badge ok">[${Array.from(out).join(', ')}]</span></span></div>`;
+                } else {
+                    rows[rows.length - 1] = `<div class="row"><span class="k">add([1,2,3,4] + 10)</span><span class="v"><span class="badge no">no compute()</span></span></div>`;
+                }
+            } catch (e) {
+                rows[rows.length - 1] = `<div class="row"><span class="k">add([1,2,3,4] + 10)</span><span class="v"><span class="badge no">${String(e.message || e).slice(0, 40)}</span></span></div>`;
+            }
+            flush();
+
+            rows.push(`<div class="note">If the add graph returns <code>[11, 12, 13, 14]</code>, WebNN compute works end to end on this engine.
+                A working <code>NPU</code> context is the clean, rule-respecting on-device acceleration path — no native libs in the core,
+                the renderer asks the platform NN stack.</div>`);
+            flush();
+        }
+
+        if (window.Presenter) Presenter.menu('webnn', [{ menu: 'view', verb: 'rerun', label: 'Re-run probe' }]);
+        if (window.Presenter) Presenter.onVerb((v) => { if (v === 'rerun') { rows.length = 0; probe(); } });
+        probe();
+    </script>
+</body>
+</html>

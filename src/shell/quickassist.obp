@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+  <base href="/" />
+  <title>Quick Assist</title>
+  
+  <!-- Subsystem OS Theme Contract -->
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/themes.js"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: transparent;
+      font-family: var(--font-sans);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    /* Minimalist Glassmorphic Sheet */
+    #assist-panel {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto calc(env(safe-area-inset-bottom, 12px) + 12px) auto;
+      background: rgba(var(--mica-rgb), calc(var(--mica-strong-opacity) * var(--transparency)));
+      backdrop-filter: blur(var(--mica-blur)) saturate(180%);
+      -webkit-backdrop-filter: blur(var(--mica-blur)) saturate(180%);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+      transform: translateY(120%);
+      opacity: 0;
+      animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(120%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* Context Chips (Multimodal indicators) */
+    .context-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding-left: 4px;
+    }
+    
+    .chip {
+      background: color-mix(in srgb, var(--fg) 8%, transparent);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .chip.active-audio {
+      background: color-mix(in srgb, var(--accent) 15%, transparent);
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+
+    /* Input Area */
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .mic-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--accent) 15%, transparent);
+      color: var(--accent);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .mic-btn.listening::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.8); opacity: 1; }
+      100% { transform: scale(1.4); opacity: 0; }
+    }
+
+    .text-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--fg);
+      font-family: var(--font-sans);
+      font-size: 16px;
+      outline: none;
+    }
+    
+    .text-input::placeholder { color: var(--muted); }
+
+    /* Output / Thinking Area */
+    #response-area {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px 4px 4px 4px;
+      border-top: 1px solid var(--border);
+    }
+
+    #response-area.visible {
+      display: flex;
+    }
+
+    .thinking-state {
+      font-size: 13px;
+      color: var(--accent);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mascot {
+      font-weight: 900;
+      color: var(--accent-2); /* Magenta hint */
+      letter-spacing: -1px;
+    }
+
+    .tool-chatter {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .final-text {
+      font-size: 15px;
+      color: var(--fg);
+      line-height: 1.4;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    /* Connection state row — a visible reason + retry instead of a blank sheet */
+    #conn-state {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 4px 2px 4px;
+      border-top: 1px solid var(--border);
+    }
+    #conn-state.visible { display: flex; }
+    #conn-state .reason {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      color: var(--error);
+      line-height: 1.4;
+    }
+    #retry-btn {
+      flex-shrink: 0;
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      background: color-mix(in srgb, var(--accent) 15%, transparent);
+      color: var(--accent);
+      border-radius: 12px;
+      padding: 5px 14px;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="assist-panel">
+    <!-- Multimodal Context Row -->
+    <div class="context-row">
+      <div class="chip" id="screen-chip">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+        Screen Context Attached
+      </div>
+      <div class="chip active-audio" id="audio-chip">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
+        Listening...
+      </div>
+    </div>
+
+    <!-- User Input Row -->
+    <div class="input-row">
+      <button class="mic-btn listening" id="mic-toggle">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path></svg>
+      </button>
+      <input type="text" class="text-input" id="cmd-input" placeholder="Ask Subsystem..." autocomplete="off" spellcheck="false" />
+    </div>
+
+    <!-- Agent Response Row -->
+    <div id="response-area">
+      <div class="thinking-state" id="thinking-indicator" style="display: none;">
+        <span class="mascot">&gt;-</span> <span id="think-text">Thinking...</span>
+      </div>
+      <div class="tool-chatter" id="tool-text"></div>
+      <div class="final-text" id="response-text"></div>
+    </div>
+
+    <!-- Connection state: a failed /agent link renders a reason + retry, never nothing -->
+    <div id="conn-state">
+      <span class="reason" id="conn-reason"></span>
+      <button id="retry-btn">Retry</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { WebSocketClient } from '/lib/api.js';
+
+    const input = document.getElementById('cmd-input');
+    const micBtn = document.getElementById('mic-toggle');
+    const audioChip = document.getElementById('audio-chip');
+    const responseArea = document.getElementById('response-area');
+    const thinkingIndicator = document.getElementById('thinking-indicator');
+    const thinkText = document.getElementById('think-text');
+    const toolText = document.getElementById('tool-text');
+    const responseText = document.getElementById('response-text');
+
+    const connState = document.getElementById('conn-state');
+    const connReason = document.getElementById('conn-reason');
+    const retryBtn = document.getElementById('retry-btn');
+
+    let isAutoListen = true;
+    let wsLlm = null;
+    let wsOpen = false;
+    let pendingMsg = null;     // one-deep queue: typed while connecting/loading, latest wins
+    let connectTimer = null;
+
+    // Pull preference from AndroidBridge — best-effort: assist may run without the
+    // native bridge (dev browser), so every bridge call is guarded and never throws.
+    try {
+      if (window.AndroidBridge?.getAutoListen) {
+        isAutoListen = window.AndroidBridge.getAutoListen();
+      }
+    } catch(e) {}
+
+    function updateMicUI() {
+      if (isAutoListen) {
+        micBtn.classList.add('listening');
+        audioChip.classList.add('active-audio');
+        audioChip.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg> Listening...`;
+      } else {
+        micBtn.classList.remove('listening');
+        audioChip.classList.remove('active-audio');
+        audioChip.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="2" x2="22" y2="22"></line><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path><path d="M5 10v2a7 7 0 0 0 12 5"></path><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path><path d="M9 9v3a3 3 0 0 0 5.12 1.67"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg> Muted`;
+      }
+    }
+
+    micBtn.addEventListener('click', () => {
+      isAutoListen = !isAutoListen;
+      updateMicUI();
+      try { window.AndroidBridge?.setAutoListen?.(isAutoListen); } catch(e) {}
+    });
+    updateMicUI();
+
+    // Connection state — the sheet must never sit blank: a dead /agent link shows
+    // the reason and a retry verb while WebSocketClient keeps backing off underneath.
+    function showConnState(reason) {
+      connReason.textContent = reason;
+      connState.classList.add('visible');
+    }
+    function hideConnState() { connState.classList.remove('visible'); }
+
+    function flushPending() {
+      if (pendingMsg === null || !wsLlm) return;
+      const text = pendingMsg; pendingMsg = null;
+      if (wsLlm.send(JSON.stringify({ type: "chat", text }))) {
+        input.placeholder = 'Sending...';
+      } else {
+        pendingMsg = text;
+      }
+    }
+
+    // Use unified API client (Complies with SS014: no raw `new WebSocket`)
+    function connectBackend() {
+      if (wsLlm) wsLlm.close();
+      wsOpen = false;
+      wsLlm = new WebSocketClient('/agent', {
+        onOpen: () => { wsOpen = true; hideConnState(); flushPending(); },
+        onMessage: (data) => {
+          let f; try { f = JSON.parse(data); } catch { return; }
+          handleFrame(f);
+        },
+        onClose: () => { wsOpen = false; },
+        onReconnecting: () => { showConnState('Assist link lost — retrying…'); }
+      });
+      wsLlm.connect();
+      if (connectTimer) clearTimeout(connectTimer);
+      connectTimer = setTimeout(() => {
+        if (!wsOpen) showConnState(`No agent connection after 4s (${location.host || '127.0.0.1:8080'}/agent). Still retrying…`);
+      }, 4000);
+    }
+    retryBtn.addEventListener('click', () => { showConnState('Reconnecting…'); connectBackend(); });
+    connectBackend();
+
+    function handleFrame(f) {
+      if (!f || !f.type) return;
+      responseArea.classList.add('visible');
+
+      switch (f.type) {
+        case 'status':
+          if (f.state === 'thinking') {
+            thinkingIndicator.style.display = 'flex';
+            thinkText.textContent = "Processing context...";
+          } else if (f.state === 'ready') {
+            thinkingIndicator.style.display = 'none';
+            flushPending();
+          } else {
+            // Model still loading — show progress, keep the input live (one message queues).
+            thinkingIndicator.style.display = 'flex';
+            thinkText.textContent = f.text || "Loading model...";
+          }
+          break;
+        case 'think':
+          thinkingIndicator.style.display = 'flex';
+          thinkText.textContent = "Reasoning...";
+          break;
+        case 'tool':
+          thinkingIndicator.style.display = 'none';
+          toolText.textContent = `⚙ Running tool: ${f.name}...`;
+          break;
+        case 'tool_result':
+          toolText.textContent = `✓ Tool complete: ${f.name}`;
+          break;
+        case 'token':
+          thinkingIndicator.style.display = 'none';
+          toolText.textContent = '';
+          responseText.textContent += f.text;
+          break;
+        case 'done':
+          thinkingIndicator.style.display = 'none';
+          toolText.textContent = '';
+          input.placeholder = 'Ask Subsystem...';
+          // TTS will already be speaking the response natively via AssistDispatch.cs
+          break;
+        case 'error':
+          thinkingIndicator.style.display = 'none';
+          toolText.textContent = '';
+          input.placeholder = 'Ask Subsystem...';
+          responseText.style.color = "var(--error)";
+          responseText.textContent = f.text;
+          break;
+      }
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim() !== '') {
+        const cmd = input.value.trim();
+        input.value = '';
+        responseText.textContent = '';
+        responseText.style.color = "var(--fg)";
+        responseArea.classList.add('visible');
+
+        const sent = wsOpen && wsLlm && wsLlm.send(JSON.stringify({ type: "chat", text: cmd }));
+        if (sent) {
+          input.placeholder = 'Sending...';
+        } else {
+          // Link not up yet — queue it (one deep, latest wins); it flushes on open/ready.
+          pendingMsg = cmd;
+          input.placeholder = 'Queued — connecting...';
+          showConnState('Not connected yet — your message will send when the link is up.');
+        }
+      }
+    });
+
+    // Tap outside the panel to close (Android immersive behavior)
+    document.body.addEventListener('click', (e) => {
+      if (!e.target.closest('#assist-panel')) {
+        try {
+          if (window.AndroidBridge?.minimizeApp) window.AndroidBridge.minimizeApp();
+          else window.close();
+        } catch(err) {}
+      }
+    });
+  </script>
+</body>
+</html>

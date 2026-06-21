@@ -1,0 +1,53 @@
+[
+  {
+    "Id": 103,
+    "Kind": "Incident",
+    "Category": "Cm",
+    "Summary": "Resolve orphaned, missing, and fragmented requests by integrating backlog into portable build (#75)",
+    "RelatedFiles": [
+      "src/runspace/Cm/RequestHive.cs",
+      "src/runspace/Cm/requests.json"
+    ],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782060890,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": []
+  },
+  {
+    "Id": 1,
+    "Kind": "Change",
+    "Category": "build",
+    "Summary": "Implement A/B Hotloader and Rollback System (#49)",
+    "RelatedFiles": [
+      "src/runspace/windows/launcher/Program.cs",
+      "src/runspace/windows/Build.cs",
+      "src/runspace/windows/SelfBuild.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782059606,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": []
+  },
+  {
+    "Id": 2,
+    "Kind": "Change",
+    "Category": "shell",
+    "Summary": "Finish TUI/Compositor Integration (#51)",
+    "RelatedFiles": [
+      "src/runspace/windows/Tui.cs",
+      "src/runspace/windows/Compositor.cs",
+      "src/runspace/windows/LayoutManager.cs",
+      "src/runspace/windows/StatusBar.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782059609,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": []
+  }
+]
