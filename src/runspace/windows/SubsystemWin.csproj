@@ -15,7 +15,7 @@
       4. + projection    — HTTP on 127.0.0.1:8080
   -->
   <PropertyGroup>
-    <OutputType>Library</OutputType>
+    <OutputType>Exe</OutputType>
     <!-- net11.0-windows + WinForms: the shell window hosts a WebView2 that consumes DirectPort regions
          (the WebView DirectPort adapter — a producer/consumer peer, no loopback). WinForms is on WITHOUT
          its ApplicationConfiguration source generator (the ouroboros runs none): WinShellUi sets visual
@@ -25,7 +25,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>SubsystemWin</AssemblyName>
+    <AssemblyName>ss</AssemblyName>
     <RollForward>LatestMajor</RollForward>
     <!-- The Windows exe (taskbar / Explorer) icon — the same S-within-S mark as the Android launcher.
          The binary .ico can't ride in the TEXT source dump, so it's also embedded as its OWN binary resource
@@ -59,6 +59,10 @@
     <Compile Include="..\Adb\IAdbTransport.cs" LinkBase="Adb" />
     <Compile Include="..\Adb\AdbConnection.cs" LinkBase="Adb" />
     <Compile Include="..\Adb\AndroidPubKey.cs" LinkBase="Adb" />
+    <!-- shell/cell — the SHARED cell surface: Cell/CellBuffer, the ICellPresenter seam, VtRenderer (console
+         floor), GlyphAtlas (MSDF rasterizer), CellShell (multi-session pwsh), Tui (namespace view), Repl
+         (the flip). One module compiled into BOTH heads; only the presenter branches per head. -->
+    <Compile Include="..\..\shell\cell\*.cs" LinkBase="shell\cell" />
   </ItemGroup>
 
   <!-- The vendored DirectPort D3D12 binding (src/native/directport, built by its build.ps1). Copied

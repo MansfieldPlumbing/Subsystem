@@ -222,16 +222,21 @@ internal static class SelfBuild
 
         // SubsystemWin.csproj's exact compile set: host-windows + the linked runspace Vom/Cm. CodeContext is
         // a separate bundled assembly — referenced above, NOT recompiled.
-        var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/runspace/Device/VomInterop.cs",
+        var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/shell/cell/", "src/runspace/Device/VomInterop.cs",
                             // the portable ADB core wired onto the Windows head (#75) — the IAdbTransport seam +
                             // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
                             // lives in windows/ (already covered by the windows/ root above).
                             "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs" };
+        // launcher/ is a SEPARATE exe with its own Main — folding it into this ConsoleApplication
+        // compile collides with windows/Program.cs (CS0017). Exclude it; it is superseded by the
+        // VOM slot-loader.
+        var excluded = new[] { "src/runspace/windows/launcher/" };
         var sources = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
             .Where(p =>
             {
                 var rel = Path.GetRelativePath(sourceRoot, p).Replace('\\', '/');
-                return roots.Any(r => rel.StartsWith(r, StringComparison.OrdinalIgnoreCase));
+                return roots.Any(r => rel.StartsWith(r, StringComparison.OrdinalIgnoreCase))
+                    && !excluded.Any(x => rel.StartsWith(x, StringComparison.OrdinalIgnoreCase));
             })
             .ToList();
         if (sources.Count == 0) return (null, new[] { "no source matched the SubsystemWin compile set." });

@@ -107,6 +107,37 @@ public static unsafe partial class Vom
     // consumer that uses WaitAny (switchboard: first worker to its phase) then WaitAll (barrier: parks until
     // EVERY fence reaches phase N). Proves the barrier holds for the laggard — async/ThreadPool jitter can't
     // tear it. Synchronous, futex-parked, no async; the fence value IS the clock.
+    // CRQ107 — WaitN, the general quorum. Prove n=2-of-3 returns at once when two fences are phased, and
+    // n=3 parks until the laggard signals (~120ms) then wakes — the middle between WaitAny and WaitAll.
+    public static string WaitQuorumTest()
+    {
+        var f = new[] { new CpuFence(), new CpuFence(), new CpuFence() };
+        var fences  = new Fence[] { f[0], f[1], f[2] };
+        var targets = new ulong[] { 1, 1, 1 };
+
+        f[0].Signal(1); f[1].Signal(1);                 // two of three are phased
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int metImmediate = Fence.WaitN(fences, targets, 2);
+        long immediateMs = sw.ElapsedMilliseconds;
+
+        var t = new Thread(() => { Thread.Sleep(120); f[2].Signal(1); }) { IsBackground = true };
+        sw.Restart(); t.Start();
+        int metFull = Fence.WaitN(fences, targets, 3);  // parks until the laggard signals
+        long blockedMs = sw.ElapsedMilliseconds;
+        t.Join();
+
+        return JsonSerializer.Serialize(new
+        {
+            metImmediate,
+            immediateMs,
+            metFull,
+            blockedMs,
+            quorumImmediate       = metImmediate >= 2 && immediateMs < 50,
+            quorumBlockedThenWoke = metFull == 3 && blockedMs >= 80,
+            note = "WaitN: n=2 of 3 returns at once when two are phased; n=3 parks until the laggard (~120ms) then wakes - the quorum between WaitAny (n=1) and WaitAll (n=M).",
+        });
+    }
+
     public static string WaitPhaseLockTest()
     {
         var vision = new CpuFence();

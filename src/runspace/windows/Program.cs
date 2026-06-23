@@ -50,7 +50,9 @@ public static class Program
             "refs"                                                           => Refs.Run(args[1..]),
             "adb"                                                            => Adb.Run(args[1..]),
             "directport" or "dp"                                             => DirectPortBench.Run(args[1..]),
-            "tui"                                                            => Tui.Run(args[1..]),
+            "tui"                                                            => Subsystem.Shell.Cell.Tui.Run(args[1..]),
+            "cell"                                                           => Subsystem.Shell.Cell.CellShell.Run(args[1..], Shim.LoadProjectCmdlets),
+            "repl"                                                           => Subsystem.Shell.Cell.Repl.Run(args[1..], Shim.LoadProjectCmdlets),
             "gateway" or "tray"                                             => Gateway.Run(args[1..]),
             _                                                                => Shim.Run(args),
         };

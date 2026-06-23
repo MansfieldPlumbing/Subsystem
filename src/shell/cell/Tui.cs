@@ -1,19 +1,18 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Subsystem.Vom;                    // the Owner type + VomFormat etc.
+using Subsystem.Vom;                    // the Owner type + Vom kernel
 
-namespace Subsystem.Windows;
+namespace Subsystem.Shell.Cell;
 
-// ss tui — the low-level dotnet renderer (#51): paints the LIVE VOM object namespace as cells -> VT.
-// The portability/recovery FLOOR beneath the WebView/GPU surfaces (three-renderers-one-truth); when
-// everything else is down, this rung still draws. It consumes ONE truth — Vom.Snapshot()/Totals() — and
-// holds nothing of its own (invariant 4). The TUI registers itself as a real VOM owner (\Sessions\Tui) and
-// Register's its framebuffer as a managed handle, so it appears in the very namespace it paints (the
-// ouroboros) and proves the kernel end-to-end; on exit it Terminate's that owner (cascade reclaim).
+// ss tui — the low-level cell renderer (#51) pointed at ONE truth: the live VOM object namespace, painted as
+// cells through the ICellSurface seam. The portability/recovery FLOOR beneath the WebView/GPU surfaces
+// (three-renderers-one-truth); when everything else is down, this rung still draws. It holds nothing of its
+// own (invariant 4) — it consumes Vom.Snapshot()/Totals(). The view registers itself as a real VOM owner
+// (\Sessions\Tui) and Register's its framebuffer as a managed handle, so it appears in the very namespace it
+// paints (the ouroboros); on exit it Terminate's that owner (cascade reclaim).
 //   ss tui            interactive: alternate-screen, live refresh, q/Esc/Ctrl-C to quit
 //   ss tui --once     one frame to stdout (no alt-screen) — scriptable / used when output is redirected
 internal static class Tui
@@ -25,11 +24,10 @@ internal static class Tui
         bool once = args.Any(a => a is "--once" or "-once" or "/once")
                     || Console.IsOutputRedirected || Console.IsInputRedirected;
 
-        // Dogfood the kernel: the renderer is itself an owned object in the namespace it renders.
         var owner = Vom.Vom.CreateOwner(OwnerPath);
         try
         {
-            return once ? RenderOnce(owner) : RenderLoop(owner);
+            return once ? RenderOnce(owner) : RenderLoop(owner, new VtRenderer());
         }
         finally
         {
@@ -38,7 +36,7 @@ internal static class Tui
     }
 
     // ---- interactive: alternate screen, live diff-refresh ----
-    private static int RenderLoop(Owner owner)
+    private static int RenderLoop(Owner owner, ICellPresenter surface)
     {
         int w = Math.Clamp(SafeWidth(100), 40, 400);
         int h = Math.Clamp(SafeHeight(24), 8, 200);
@@ -48,8 +46,7 @@ internal static class Tui
 
         bool priorCtrlC = Console.TreatControlCAsInput;
         Console.TreatControlCAsInput = true;   // Ctrl-C becomes a keypress we read, so Shutdown always runs
-        var renderer = new VtRenderer();
-        renderer.Initialize();
+        surface.Initialize();
         try
         {
             bool running = true;
@@ -61,11 +58,11 @@ internal static class Tui
                 {
                     current.Resize(nw, nh);
                     previous.Resize(nw, nh);
-                    renderer.Invalidate();
+                    surface.Invalidate();
                 }
 
                 Compose(current, owner);
-                renderer.Render(current, previous);
+                surface.Present(current, previous);
 
                 // poll ~400ms in short slices so keypresses feel responsive without busy-spinning
                 for (int waited = 0; waited < 400 && !Console.KeyAvailable; waited += 25)
@@ -82,7 +79,7 @@ internal static class Tui
         }
         finally
         {
-            renderer.Shutdown();
+            surface.Shutdown();
             Console.TreatControlCAsInput = priorCtrlC;
         }
         return 0;
@@ -155,8 +152,8 @@ internal static class Tui
         b.Write(1, last, "q/Esc quit · live · this view is itself \\Sessions\\Tui in the namespace", dim, footBg);
     }
 
-    // Read the live namespace off the public introspection surface (Vom.GetOwners returns the real
-    // Owner objects; this is strongly-typed and avoids reflection).
+    // Read the live namespace off the public introspection surface (Vom.GetOwners returns the real Owner
+    // objects; strongly-typed, no reflection).
     private static List<OwnerRow> ReadNamespace()
     {
         var rows = new List<OwnerRow>();

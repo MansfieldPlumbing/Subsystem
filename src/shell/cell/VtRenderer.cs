@@ -2,14 +2,14 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Subsystem.Windows;
+namespace Subsystem.Shell.Cell;
 
-// The cells -> VT console renderer (#51). Ported from tui-dwm (C:\tui-dwm\src\TuiDwm.Engine\VtRenderer.cs):
-// the diffing painter that turns a CellBuffer into the minimum stream of ANSI escapes. Double-buffered —
-// it compares current vs previous and emits only changed runs, so a live refresh doesn't flicker. conhost
-// leaves VT processing off by default, so Initialize turns it on (kernel32) and the same engine renders
-// identically in conhost or Windows Terminal.
-public sealed class VtRenderer
+// The Windows/terminal binding of ICellSurface: a diffing cells -> VT-console painter (ported from tui-dwm).
+// It compares current vs previous and emits only the changed runs, so a live refresh doesn't flicker. conhost
+// leaves VT processing off by default, so Initialize turns it on (kernel32); the same engine then renders
+// identically in conhost or Windows Terminal. On Android this file compiles but is never selected as the
+// surface (the head picks a Vulkan ICellSurface instead) — kernel32 imports are declarations, not calls.
+public sealed class VtRenderer : ICellPresenter
 {
     private const int  STD_OUTPUT_HANDLE = -11;
     private const uint ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
@@ -25,7 +25,6 @@ public sealed class VtRenderer
     private readonly StringBuilder _sb = new(1024 * 32);
     private byte _lastFg = 255;
     private byte _lastBg = 255;
-    private byte _lastStyle = 255;
 
     public void Initialize()
     {
@@ -37,7 +36,7 @@ public sealed class VtRenderer
         // alternate screen buffer, hide cursor, reset attrs, clear
         Console.Out.Write("\x1b[?1049h\x1b[?25l\x1b[0m\x1b[2J");
         Console.Out.Flush();
-        _lastFg = _lastBg = _lastStyle = 255;
+        _lastFg = _lastBg = 255;
     }
 
     // Force a full re-render on the next frame (call on terminal resize).
@@ -45,7 +44,7 @@ public sealed class VtRenderer
     {
         Console.Out.Write("\x1b[0m\x1b[2J");
         Console.Out.Flush();
-        _lastFg = _lastBg = _lastStyle = 255;
+        _lastFg = _lastBg = 255;
     }
 
     public void Shutdown()
@@ -55,7 +54,7 @@ public sealed class VtRenderer
         Console.Out.Flush();
     }
 
-    public void Render(CellBuffer current, CellBuffer previous)
+    public void Present(CellBuffer current, CellBuffer previous)
     {
         _sb.Clear();
         int width = current.Width;

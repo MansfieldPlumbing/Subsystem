@@ -31,6 +31,50 @@ public abstract class Fence
     public static void WaitAll(Fence[] fences, ulong[] targets) => WaitGroup(fences, targets, all: true);
     public static int  WaitAny(Fence[] fences, ulong[] targets) => WaitGroup(fences, targets, all: false);
 
+    // WaitN — the general quorum/threshold between WaitAny (n=1) and WaitAll (n=M): park until at least
+    // n of the M fences have reached their targets (e.g. 2-of-3 sensor consensus). Returns the count
+    // at/over target once the quorum holds (>= n). Same futex park as WaitGroup; no wake is lost because
+    // the monotonic fence value is the clock (a late Signal is re-seen on recheck).
+    public static int WaitN(Fence[] fences, ulong[] targets, int n)
+    {
+        if (fences is null || targets is null || fences.Length != targets.Length || fences.Length == 0)
+            throw new ArgumentException("WaitN needs matching, non-empty fence + target arrays.");
+        if (n < 1 || n > fences.Length)
+            throw new ArgumentOutOfRangeException(nameof(n), $"n must be in [1, {fences.Length}].");
+
+        int met = CountReady(fences, targets);
+        if (met >= n) return met;                       // quorum already met — never park needlessly
+
+        var gate = new object();
+        var registered = new List<CpuFence>(fences.Length);
+        foreach (var f in fences)
+        {
+            if (f is not CpuFence c)
+                throw new NotSupportedException("Tier-1 WaitN requires CpuFence; mixed-tier groups are a later tier.");
+            c.Register(gate);
+            registered.Add(c);
+        }
+        try
+        {
+            lock (gate)
+            {
+                while ((met = CountReady(fences, targets)) < n)
+                    Monitor.Wait(gate);                 // futex park; any registered Signal re-checks us
+                return met;
+            }
+        }
+        finally { foreach (var c in registered) c.Unregister(gate); }
+    }
+
+    // How many fences are at/over their target right now (the quorum counter for WaitN).
+    private static int CountReady(Fence[] fences, ulong[] targets)
+    {
+        int met = 0;
+        for (int i = 0; i < fences.Length; i++)
+            if (fences[i].CompletedValue >= targets[i]) met++;
+        return met;
+    }
+
     private static int WaitGroup(Fence[] fences, ulong[] targets, bool all)
     {
         if (fences is null || targets is null || fences.Length != targets.Length || fences.Length == 0)

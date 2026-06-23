@@ -1,19 +1,20 @@
 using System;
 
-namespace Subsystem.Windows;
+namespace Subsystem.Shell.Cell;
 
-// The cell grid — the low-level renderer's unit of truth (#51). Ported from the tui-dwm reference
-// (C:\tui-dwm\src\TuiDwm.Core\{Cell,CellBuffer}.cs): study-don't-import, logic lifted to the Windows
-// head as the dotnet-renderer FLOOR (cells -> VT console; the portability/recovery rung beneath the
-// WebView/GPU surfaces). One day the three renderers paint ONE projected cell grid; for now this is the
-// TUI's own buffer. A Cell is 4 bytes: a 16-bit rune + 8-bit fg + 8-bit bg (256-color), so a frame is a
-// flat row-major Cell[] that diffs cheaply against the previous frame.
+// shell/tui — the SHARED cell renderer (re-integration of tui-dwm; #51). Heads are peers: Cell/CellBuffer,
+// the compositor and the multi-session loop are ONE implementation compiled into both the Windows and the
+// Android head; only the ICellSurface present seam branches per head (VtRenderer console / D3D12 on Windows
+// <-> Vulkan/SurfaceView on Android — a given). This file is pure System.*; it holds no head dependency.
+//
+// A Cell is 4 bytes: a 16-bit rune + 8-bit fg + 8-bit bg (xterm-256), so a frame is a flat row-major Cell[]
+// that diffs cheaply against the previous frame.
 
-// 4-byte cell: rune + fg + bg. Style is a stub today (no bits in the 32-bit cell) but kept so the VT
+// 4-byte cell: rune + fg + bg. Style is reserved (no bits in the 32-bit cell today) but kept so the VT
 // renderer's SGR path stays intact for when attributes get bit-packed into the spare ordering.
 public struct Cell
 {
-    public char Rune;   // 16-bit character (full ANSI/Unicode BMP)
+    public char Rune;   // 16-bit character (full BMP)
     public byte Fg;     // 8-bit foreground (xterm-256 index)
     public byte Bg;     // 8-bit background (0 = terminal default, so Mica/acrylic shows through)
 
@@ -35,8 +36,8 @@ public struct Cell
     public static bool operator !=(Cell left, Cell right) => !left.Equals(right);
 }
 
-// A flat row-major grid of cells (index = y * Width + x). Resize preserves the overlapping region;
-// the renderer diffs current vs previous to emit only the changed runs.
+// A flat row-major grid of cells (index = y * Width + x). Resize preserves the overlapping region; the
+// renderer diffs current vs previous to emit only the changed runs.
 public sealed class CellBuffer
 {
     public int Width { get; private set; }
@@ -87,5 +88,22 @@ public sealed class CellBuffer
             x++;
         }
         return x;
+    }
+
+    // Blit another buffer's cells into this one at (dx,dy), clipped. The compositor's one paste primitive —
+    // each session pane composites into the frame through this (no ANSI between panes; cells all the way).
+    public void Blit(CellBuffer src, int dx, int dy)
+    {
+        for (int sy = 0; sy < src.Height; sy++)
+        {
+            int ty = dy + sy;
+            if (ty < 0 || ty >= Height) continue;
+            for (int sx = 0; sx < src.Width; sx++)
+            {
+                int tx = dx + sx;
+                if (tx < 0 || tx >= Width) continue;
+                At(tx, ty) = src.At(sx, sy);
+            }
+        }
     }
 }

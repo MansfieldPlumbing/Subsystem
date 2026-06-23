@@ -108,7 +108,11 @@
          embeds into the assembly with an explicit LogicalName that IS its virtual path —
          ObpHost serves it from RAM; ProjectionServer never reads the asset dir for the shell.
          No loose html/assets in the unzipped APK. -->
-    <EmbeddedResource Include="..\shell\**\*">
+    <!-- shell/cell is COMPILED into the head (the shared cell surface), so its .cs are excluded from the
+         shell resource embed below — source is not shipped twice. The atlas PNGs/metrics + fonts under
+         shell/assets/** still embed (the GPU presenter loads them from the resource on Android). -->
+    <Compile Include="..\shell\cell\*.cs" />
+    <EmbeddedResource Include="..\shell\**\*" Exclude="..\shell\cell\**\*.cs">
       <LogicalName>shell/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <!-- The .ps1 cmdlet "zoo" — User-tier script cmdlets (adb-reads,

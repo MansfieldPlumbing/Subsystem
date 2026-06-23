@@ -2,7 +2,9 @@
 
 > *This project is devoted to the loving memory of Billie Dean Mansfield — 1945–2026.*
 
-**PowerShell 7 hosted in-process inside a native Android app — no Linux userland, no VM, no proot, no root.**
+**A self-hosting, GC-free compute fabric** — an NT-Object-Manager-shaped runtime where memory, code, threads, and devices are *one namespace of refcounted handles* (the VOM), and **one transport (DirectPort)** pushes fenced, zero-copy regions across every boundary: process · GPU↔NPU · language · machine. It builds itself, owns its own memory, and reclaims deterministically (free-on-zero / cascade-kill).
+
+> *First proof, below: PowerShell 7 hosted in-process inside a native Android app — no Linux userland, no VM, no proot, no root.*
 
 Subsystem runs the `Microsoft.PowerShell.SDK` runspace directly inside a .NET 11 (`net11.0-android`) process on CoreCLR, on the device's ARM64 CPU. It is **not** a terminal emulator, an SSH client, a Termux/chroot environment, or a Linux VM. The runspace lives in the app's own process, defines cmdlets at runtime, and is driven by an on-device LLM.
 
@@ -27,7 +29,7 @@ As far as the record shows, this is the **first native in-process CoreCLR + Powe
 
 ## What it is
 
-An **NT-shaped object substrate, running inside an Android app.** The core is the **VOM (Virtual Object Manager)** — an in-process microkernel modeled on the Windows NT Object Manager: refcounted named handles, per-owner memory quotas, and a deterministic kill switch. NT/Windows priors transfer directly, because the abstractions are real analogs:
+A **self-hosting object machine** (the whitepaper's own subtitle) — an NT-Object-Manager-shaped object substrate. The core is the **VOM (Virtual Object Manager)**: a microkernel-*shaped* object kernel modeled on the Windows NT Object Manager — refcounted named handles as authority, per-owner quotas, and a deterministic cascade-kill. It is microkernel-*shaped*, not yet a microkernel in the strict sense: today its owners share one address space and isolate cooperatively, so the hardware-enforced inter-owner isolation that earns the unqualified word is tracked, not claimed. NT/Windows priors transfer directly, because the abstractions are real analogs:
 
 | NT / Windows | Subsystem |
 |---|---|

@@ -31,6 +31,9 @@ internal static class SelfTest
         Check("Vom.SelfTest", VomKernel.SelfTest(), "fenceWorks", "ownerRemoved", "staleHandleRejected"),
         Check("Vom.SpawnKillTest", VomKernel.SpawnKillTest(), "rootRemoved", "childRemoved", "grandchildRemoved", "childObservedCancel"),
         Check("Vom.WaitPhaseLockTest", VomKernel.WaitPhaseLockTest(), "waitAnyCorrect", "barrierHeldForLaggard", "phaseLocked"),
+        Check("Vom.WaitQuorumTest", VomKernel.WaitQuorumTest(), "quorumImmediate", "quorumBlockedThenWoke"),
+        Check("Vom.SlotSwapTest", VomKernel.SlotSwapTest(), "v1Served", "v2Served", "v2LiveAfterSwap", "v1ReclaimedOnZero"),
+        Check("Vom.SlotRollbackTest", VomKernel.SlotRollbackTest(), "rolledBack", "v1StillServes", "badSlotReclaimed"),
         Check("Cm.SelfTest", JsonSerializer.Serialize(Subsystem.Cm.Cm.SelfTest()), "ok", "inMemory", "inDurable"),
         Rehydration(),
     };

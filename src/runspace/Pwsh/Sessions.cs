@@ -40,6 +40,11 @@ public sealed class ManagedSession : IDisposable
         VomOwner = CreateOwner($"\\Sessions\\{name}");
         _rs = RunspaceFactory.CreateRunspace(host, iss);
         _rs.Open();
+        // VOM-SPEC §2: the runspace is not a private field dangling on the stock GC — it's a HANDLE in this
+        // session's owner table. Terminate(owner) now reclaims the managed runspace through the SAME
+        // DropPrefix cascade as the session's native handles: onReclaim closes it, then the GCHandle frees.
+        // One owner, one teardown — the split managed/native disposal (the duplicate truth) collapses.
+        Register(VomOwner, "Runspace", _rs, onReclaim: () => { try { _rs.Close(); _rs.Dispose(); } catch { } }, name: "Runspace");
     }
 
     // Runs a command in this session's persistent runspace. Serialized (single-threaded
@@ -69,7 +74,10 @@ public sealed class ManagedSession : IDisposable
 
     public void Dispose()
     {
-        try { _rs.Close(); _rs.Dispose(); } catch { }
+        // Single teardown path: cancel the owner's token and DropPrefix-reclaim everything it holds —
+        // including the runspace handle, whose onReclaim closes/disposes it. Idempotent (safe if Remove()
+        // already terminated). The runspace is no longer disposed out-of-band from the VOM cascade.
+        Terminate(VomOwner);
     }
 }
 
@@ -112,8 +120,7 @@ public static class SessionManager
     {
         if (_sessions.TryRemove(name, out var s))
         {
-            Terminate(s.VomOwner);   // VOM termination token: cancel + DropPrefix(\Sessions\{name}); DOM logs the autopsy
-            s.Dispose();
+            Terminate(s.VomOwner);   // one cascade: DropPrefix(\Sessions\{name}) reclaims the runspace handle (Close/Dispose) AND native handles together; DOM logs the autopsy
             return true;
         }
         return false;

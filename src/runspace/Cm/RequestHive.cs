@@ -59,8 +59,9 @@ public static class RequestHive
 
     private static readonly char Sep = (char)0x1f;   // unit-separator: joins RelatedFiles (mirrors Cm.DependsOn)
 
-    // The request plane is stored in subsystem-requests.db, located beside the exe by default,
-    // or in the AppData directory if opted in ($env:SS_USE_APPDATA) or running on Android.
+    // The request plane is stored in subsystem-requests.db at the DRIVE ROOT — one hive per drive,
+    // cwd-independent, so every ss binary on the drive reads the SAME hive regardless of where it was
+    // launched (invariant 1; fixes the per-cwd fork, CRQ125-C). AppData branch when opted in or on Android.
     public static string HivePath
     {
         get
@@ -71,7 +72,7 @@ public static class RequestHive
             {
                 return Path.Combine(Path.GetDirectoryName(Cm.DbPath)!, "subsystem-requests.db");
             }
-            return Path.Combine(AppContext.BaseDirectory, "subsystem-requests.db");
+            return Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory)!, "subsystem-requests.db");
         }
     }
 

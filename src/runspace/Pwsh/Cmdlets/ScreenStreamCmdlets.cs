@@ -1,6 +1,5 @@
 using System;
-using System.Net;
-using System.Net.Sockets;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Management.Automation;
@@ -12,62 +11,32 @@ namespace Subsystem.Pwsh.Cmdlets;
 
 // ---------------------------------------------------------------------------
 // Screen streaming — scrcpy's ScreenCapture + SurfaceEncoder pipeline mapped
-// to PowerShell cmdlets.  Android 16+, no legacy compat.
-//
-// Mapping:
-//   scrcpy ScreenCapture.start()        → Start-AndroidScreenStream
-//   scrcpy SurfaceEncoder (H.264/H.265) → same; codec/bitrate params
-//   scrcpy DisplayMonitor               → Get-AndroidDisplayInfo
-//   scrcpy SurfaceCapture.stop/release  → Stop-AndroidScreenStream
+// to PowerShell cmdlets. Symmetric P2P over ADB stdin/stdout pipes.
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Starts an H.264 (or H.265) screen stream served over a raw TCP socket on
-/// the specified port.  Powered by MediaProjection + VirtualDisplay + MediaCodec.
-///
-/// The session token is a Guid that can be passed to Stop-AndroidScreenStream.
-///
-/// Equivalent to starting scrcpy's SurfaceEncoder pipeline:
-///   SurfaceEncoder.encode() → ScreenCapture.start(surface) → VirtualDisplay
+/// Starts a symmetric ADB pipe P2P screen stream.
 /// </summary>
 [Cmdlet(VerbsLifecycle.Start, "AndroidScreenStream")]
-[OutputType(typeof(PSObject))]
 public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
 {
-    // Port that the raw H.264/H.265 annex-B byte stream is served on.
-    [Parameter(Position = 0)]
-    public int Port { get; set; } = 27183; // scrcpy default video port
-
-    // Encoder MIME.  "video/avc" = H.264, "video/hevc" = H.265.
     [Parameter]
-    [ValidateSet("video/avc", "video/hevc", "video/av01")]
     public string Codec { get; set; } = "video/avc";
 
-    // Target bitrate in bits per second.  Default matches scrcpy 4 Mbps.
     [Parameter]
     public int Bitrate { get; set; } = 4_000_000;
 
-    // Target frame rate (fps).  Android 16 hardware encoders support up to 120.
     [Parameter]
-    [ValidateRange(1, 120)]
     public int FrameRate { get; set; } = 60;
 
-    // Maximum dimension (longer edge) in pixels.  0 = use native resolution.
     [Parameter]
     public int MaxSize { get; set; } = 0;
 
-    // Display to mirror.  0 = primary.
     [Parameter]
     public int DisplayId { get; set; } = 0;
 
-    // I-frame interval in seconds (scrcpy default = 10).
     [Parameter]
     public int KeyFrameInterval { get; set; } = 10;
-
-    // When set, the cmdlet returns immediately and the stream runs in the
-    // background (same semantics as scrcpy --no-control background mode).
-    [Parameter]
-    public SwitchParameter Background { get; set; }
 
     protected override void ProcessRecord()
     {
@@ -76,7 +45,6 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
             var ctx = MainActivity.Instance
                 ?? throw new InvalidOperationException("MainActivity is not available.");
 
-            // --- Obtain display metrics ---
             var dm = ctx.Resources?.DisplayMetrics
                 ?? throw new InvalidOperationException("Cannot read DisplayMetrics.");
 
@@ -88,31 +56,31 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
                 float scale = (float)MaxSize / Math.Max(width, height);
                 if (scale < 1f)
                 {
-                    width  = (int)(width  * scale) & ~1; // must be even for AVC
+                    width  = (int)(width  * scale) & ~1;
                     height = (int)(height * scale) & ~1;
                 }
             }
 
             var sessionId = Guid.NewGuid().ToString("N")[..8];
 
-            // --- Build MediaFormat ---
+            // 1. Build MediaFormat for YUV420 input
             var fmt = MediaFormat.CreateVideoFormat(Codec, width, height)!;
-            fmt.SetInteger(MediaFormat.KeyColorFormat,
-                (int)MediaCodecCapabilities.Formatsurface);
+            // 2135033992 = COLOR_FormatYUV420Flexible
+            fmt.SetInteger(MediaFormat.KeyColorFormat, 2135033992);
             fmt.SetInteger(MediaFormat.KeyBitRate,   Bitrate);
             fmt.SetInteger(MediaFormat.KeyFrameRate, FrameRate);
             fmt.SetInteger(MediaFormat.KeyIFrameInterval, KeyFrameInterval);
-            // Android 16: enable low-latency encoding path
             fmt.SetInteger("low-latency", 1);
 
             var encoder = MediaCodec.CreateEncoderByType(Codec)
                 ?? throw new InvalidOperationException($"No encoder for {Codec}.");
             encoder.Configure(fmt, null, null, MediaCodecConfigFlags.Encode);
-
-            // --- Create encoder input Surface → feed into VirtualDisplay ---
-            var inputSurface = encoder.CreateInputSurface()
-                ?? throw new InvalidOperationException("CreateInputSurface returned null.");
             encoder.Start();
+
+            // 2. Create ImageReader to capture raw YUV420 frames from the VirtualDisplay
+            // 35 = ImageFormat.YUV_420_888
+            var imageReader = ImageReader.NewInstance(width, height, (Android.Graphics.ImageFormatType)35, 2)
+                ?? throw new InvalidOperationException("Failed to create ImageReader.");
 
             var displayManager = (DisplayManager?)
                 ctx.GetSystemService(Android.Content.Context.DisplayService)
@@ -123,82 +91,239 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
             var vd = displayManager.CreateVirtualDisplay(
                 $"scrcpy-stream-{sessionId}",
                 width, height, (int)dm.DensityDpi,
-                inputSurface,
+                imageReader.Surface,
                 flags)
                 ?? throw new InvalidOperationException("CreateVirtualDisplay failed.");
 
-            // --- TCP listener ---
-            var listener = new TcpListener(IPAddress.Loopback, Port);
-            listener.Start();
-
+            // 3. Open raw stdio streams
+            var stdoutStream = Console.OpenStandardOutput();
+            var stdinStream = Console.OpenStandardInput();
             var cts = new CancellationTokenSource();
-            ScreenStreamRegistry.Register(sessionId, new ScreenStreamSession(encoder, vd, listener, cts));
 
-            Task.Run(() => PumpFrames(encoder, listener, cts.Token), cts.Token);
+            var session = new ScreenStreamSession(encoder, vd, imageReader, cts);
+            ScreenStreamRegistry.Register(sessionId, session);
 
-            var result = new PSObject();
-            result.Properties.Add(new PSNoteProperty("SessionId", sessionId));
-            result.Properties.Add(new PSNoteProperty("Port",      Port));
-            result.Properties.Add(new PSNoteProperty("Codec",     Codec));
-            result.Properties.Add(new PSNoteProperty("Width",     width));
-            result.Properties.Add(new PSNoteProperty("Height",    height));
-            result.Properties.Add(new PSNoteProperty("Bitrate",   Bitrate));
-            result.Properties.Add(new PSNoteProperty("FrameRate", FrameRate));
-            Emit(result);
+            // Log configuration metadata strictly to stderr so stdout remains clean
+            Console.Error.WriteLine($"CONFIG:SessionId={sessionId};Width={width};Height={height};Codec={Codec}");
+
+            // Run P2P receiver and frame pumping loops
+            Task.Run(() => ReceiveLoopAsync(stdinStream, cts.Token), cts.Token);
+            Task.Run(() => PumpFramesPipe(encoder, imageReader, stdoutStream, width, height, cts.Token), cts.Token);
         }
         catch (Exception ex)
         {
-            WriteError(new ErrorRecord(ex, "StartScreenStreamFailed",
-                ErrorCategory.InvalidOperation, null));
+            Console.Error.WriteLine($"ERROR: {ex.Message}");
         }
     }
 
-    // Dequeue encoded NALUs from MediaCodec and write them to the connected TCP client.
-    // Mirrors scrcpy's Streamer.writePacket() loop.
-    private static async Task PumpFrames(
-        MediaCodec encoder, TcpListener listener, CancellationToken ct)
+    private static async Task ReceiveLoopAsync(Stream stdinStream, CancellationToken ct)
+    {
+        byte[] header = new byte[11];
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                int read = 0;
+                while (read < 11)
+                {
+                    int r = await stdinStream.ReadAsync(header, read, 11 - read, ct);
+                    if (r <= 0) return; // EOF
+                    read += r;
+                }
+
+                byte channelId = header[0];
+                uint frameIndex = BitConverter.ToUInt32(header, 1);
+                ushort fragIndex = BitConverter.ToUInt16(header, 5);
+                ushort totalFrags = BitConverter.ToUInt16(header, 7);
+                ushort payloadSize = BitConverter.ToUInt16(header, 9);
+
+                byte[] payload = new byte[payloadSize];
+                int pread = 0;
+                while (pread < payloadSize)
+                {
+                    int r = await stdinStream.ReadAsync(payload, pread, payloadSize - pread, ct);
+                    if (r <= 0) return;
+                    pread += r;
+                }
+
+                if (channelId == 2) // Input Injection Channel
+                {
+                    float x = BitConverter.ToSingle(payload, 0);
+                    float y = BitConverter.ToSingle(payload, 4);
+                    TerminalAccessibilityService.Instance?.DispatchTap(x, y);
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Stdin Receive error: {ex.Message}");
+            }
+        }
+    }
+
+    private static async Task PumpFramesPipe(
+        MediaCodec encoder, ImageReader reader, Stream stdoutStream, int w, int h, CancellationToken ct)
     {
         try
         {
-            using var client = await listener.AcceptTcpClientAsync(ct);
-            await using var stream = client.GetStream();
             var info = new MediaCodec.BufferInfo();
+            uint frameIndex = 0;
+            int blastFramesLeft = 5; // Blast the first 5 frames as uncompressed raw YUV420
 
-            while (!ct.IsCancellationRequested && client.Connected)
+            while (!ct.IsCancellationRequested)
             {
-                int idx = encoder.DequeueOutputBuffer(info, timeoutUs: 10_000);
-                if (idx >= 0)
+                var img = reader.AcquireLatestImage();
+                if (img == null)
                 {
-                    var buf = encoder.GetOutputBuffer(idx);
-                    if (buf != null && info.Size > 0)
-                    {
-                        var data = new byte[info.Size];
-                        buf.Position(info.Offset);
-                        buf.Get(data);
-                        await stream.WriteAsync(data, ct);
-                    }
-                    encoder.ReleaseOutputBuffer(idx, render: false);
+                    await Task.Delay(16, ct);
+                    continue;
                 }
-                else if (idx == (int)Android.Media.MediaCodecInfoState.TryAgainLater)
+
+                // 1. Pack YUV420 flat bytes
+                byte[] yuvData = PackYuv420Flat(img, w, h);
+                img.Close();
+
+                // 2. Blast raw YUV420 (Channel 0) if within startup phase
+                if (blastFramesLeft > 0)
                 {
-                    await Task.Delay(1, ct);
+                    await SendPipeFrameAsync(stdoutStream, 0, yuvData, frameIndex, ct);
+                    blastFramesLeft--;
+                }
+
+                // 3. Feed the frame into the H.264 encoder input buffer
+                int inputBufIdx = encoder.DequeueInputBuffer(timeoutUs: 10_000);
+                if (inputBufIdx >= 0)
+                {
+                    var inputBuf = encoder.GetInputBuffer(inputBufIdx);
+                    if (inputBuf != null)
+                    {
+                        inputBuf.Clear();
+                        inputBuf.Put(yuvData);
+                        encoder.QueueInputBuffer(inputBufIdx, 0, yuvData.Length, presentationTimeUs: frameIndex * 16666, flags: 0);
+                    }
+                }
+
+                // 4. Dequeue encoded NALUs and send over stdout Channel 1
+                int outputBufIdx = encoder.DequeueOutputBuffer(info, timeoutUs: 10_000);
+                if (outputBufIdx >= 0)
+                {
+                    var outputBuf = encoder.GetOutputBuffer(outputBufIdx);
+                    if (outputBuf != null && info.Size > 0)
+                    {
+                        byte[] nalu = new byte[info.Size];
+                        outputBuf.Position(info.Offset);
+                        outputBuf.Get(nalu);
+                        await SendPipeFrameAsync(stdoutStream, 1, nalu, frameIndex, ct);
+                    }
+                    encoder.ReleaseOutputBuffer(outputBufIdx, render: false);
+                }
+
+                frameIndex++;
+                await Task.Delay(1, ct);
+            }
+        }
+        catch (OperationCanceledException) {}
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PumpFramesPipe error: {ex.Message}");
+        }
+    }
+
+    private static async Task SendPipeFrameAsync(Stream stdoutStream, byte channelId, byte[] data, uint frameIndex, CancellationToken ct)
+    {
+        const int maxPayload = 1400;
+        int totalBytes = data.Length;
+        ushort totalFragments = (ushort)((totalBytes + maxPayload - 1) / maxPayload);
+        if (totalFragments == 0) totalFragments = 1;
+
+        for (ushort i = 0; i < totalFragments; i++)
+        {
+            if (ct.IsCancellationRequested) break;
+            int offset = i * maxPayload;
+            int size = Math.Min(maxPayload, totalBytes - offset);
+
+            byte[] packet = new byte[11 + size];
+            packet[0] = channelId;
+            BitConverter.TryWriteBytes(new Span<byte>(packet, 1, 4), frameIndex);
+            BitConverter.TryWriteBytes(new Span<byte>(packet, 5, 2), i);
+            BitConverter.TryWriteBytes(new Span<byte>(packet, 7, 2), totalFragments);
+            BitConverter.TryWriteBytes(new Span<byte>(packet, 9, 2), (ushort)size);
+            Buffer.BlockCopy(data, offset, packet, 11, size);
+
+            await stdoutStream.WriteAsync(packet, 0, packet.Length, ct);
+        }
+        await stdoutStream.FlushAsync(ct);
+    }
+
+    private static byte[] PackYuv420Flat(Android.Media.Image image, int w, int h)
+    {
+        int ySize = w * h;
+        int uvSize = (w / 2) * (h / 2);
+        byte[] yuv = new byte[ySize + uvSize * 2];
+
+        var planes = image.GetPlanes()!;
+
+        // Y Plane
+        var yPlane = planes[0];
+        var yBuf = yPlane.Buffer!;
+        int yStride = yPlane.RowStride;
+        if (yStride == w)
+        {
+            yBuf.Get(yuv, 0, ySize);
+        }
+        else
+        {
+            for (int row = 0; row < h; row++)
+            {
+                yBuf.Position(row * yStride);
+                yBuf.Get(yuv, row * w, w);
+            }
+        }
+
+        // U/V Planes
+        var uPlane = planes[1];
+        var vPlane = planes[2];
+        var uBuf = uPlane.Buffer!;
+        var vBuf = vPlane.Buffer!;
+        int uStride = uPlane.RowStride;
+        int vStride = vPlane.RowStride;
+        int uPixStride = uPlane.PixelStride;
+        int vPixStride = vPlane.PixelStride;
+
+        int uvW = w / 2;
+        int uvH = h / 2;
+        int uOffset = ySize;
+        int vOffset = ySize + uvSize;
+
+        if (uPixStride == 1 && vPixStride == 1 && uStride == uvW && vStride == uvW)
+        {
+            uBuf.Get(yuv, uOffset, uvSize);
+            vBuf.Get(yuv, vOffset, uvSize);
+        }
+        else
+        {
+            byte[] tempRowU = new byte[uStride];
+            byte[] tempRowV = new byte[vStride];
+            for (int row = 0; row < uvH; row++)
+            {
+                uBuf.Position(row * uStride);
+                uBuf.Get(tempRowU, 0, Math.Min(uStride, uBuf.Remaining()));
+
+                vBuf.Position(row * vStride);
+                vBuf.Get(tempRowV, 0, Math.Min(vStride, vBuf.Remaining()));
+
+                for (int col = 0; col < uvW; col++)
+                {
+                    yuv[uOffset + row * uvW + col] = tempRowU[col * uPixStride];
+                    yuv[vOffset + row * uvW + col] = tempRowV[col * vPixStride];
                 }
             }
         }
-        catch (OperationCanceledException) { /* normal shutdown */ }
-        catch (Exception ex)
-        {
-            Dg.Log("screen-stream", $"PumpFrames error: {ex.Message}");
-        }
+
+        return yuv;
     }
 }
 
-/// <summary>
-/// Stops a running screen stream session started by Start-AndroidScreenStream.
-/// Releases the VirtualDisplay, stops the encoder, and closes the TCP listener.
-///
-/// Equivalent to scrcpy's CleanUp + SurfaceCapture.release().
-/// </summary>
 [Cmdlet(VerbsLifecycle.Stop, "AndroidScreenStream")]
 [OutputType(typeof(bool))]
 public sealed class StopAndroidScreenStreamCmdlet : WrapperCmdlet
@@ -214,15 +339,11 @@ public sealed class StopAndroidScreenStreamCmdlet : WrapperCmdlet
         }
         catch (Exception ex)
         {
-            WriteError(new ErrorRecord(ex, "StopScreenStreamFailed",
-                ErrorCategory.InvalidOperation, SessionId));
+            Console.Error.WriteLine($"StopScreenStreamFailed: {ex.Message}");
         }
     }
 }
 
-/// <summary>
-/// Lists all active screen-stream sessions (session ID, port, codec).
-/// </summary>
 [Cmdlet(VerbsCommon.Get, "AndroidScreenStream")]
 [OutputType(typeof(PSObject))]
 public sealed class GetAndroidScreenStreamCmdlet : WrapperCmdlet
@@ -230,19 +351,15 @@ public sealed class GetAndroidScreenStreamCmdlet : WrapperCmdlet
     protected override void ProcessRecord() => Emit(ScreenStreamRegistry.List());
 }
 
-// ---------------------------------------------------------------------------
-// Internal session registry — keeps the encoder / VD alive between cmdlet
-// invocations (mirrors scrcpy's AsyncProcessor lifetime model).
-// ---------------------------------------------------------------------------
 internal sealed class ScreenStreamSession(
     MediaCodec encoder,
     VirtualDisplay virtualDisplay,
-    TcpListener listener,
+    ImageReader imageReader,
     CancellationTokenSource cts)
 {
     public MediaCodec      Encoder        { get; } = encoder;
     public VirtualDisplay  VirtualDisplay { get; } = virtualDisplay;
-    public TcpListener     Listener       { get; } = listener;
+    public ImageReader     ImageReader    { get; } = imageReader;
     public CancellationTokenSource Cts   { get; } = cts;
 
     public PSObject ToInfo(string id) =>
@@ -267,7 +384,7 @@ internal static class ScreenStreamRegistry
         s.Encoder.Stop();
         s.Encoder.Release();
         s.VirtualDisplay.Release();
-        s.Listener.Stop();
+        s.ImageReader.Release();
         return true;
     }
 
@@ -278,8 +395,4 @@ internal static class ScreenStreamRegistry
     }
 }
 
-// Tiny extension so PSObject initialisation reads cleanly.
-internal static class PsoExtensions
-{
-    public static PSObject Also(this PSObject o, Action<PSObject> configure) { configure(o); return o; }
-}
+
