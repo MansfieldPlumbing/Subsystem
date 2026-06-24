@@ -18,8 +18,8 @@ namespace Subsystem.Windows;
 //
 // Tools (rung 1):
 //   ss_contextualize — the system contract as JSON (components, the dependency DAG, the closed vocabulary).
-//   ss_run           — run a command in the hosted runspace (pwsh built-ins + project cmdlets: ss-refs,
-//                      ss-check, Get-CodeContext, the vom: provider). stdout is the protocol channel, so the
+//   ss_run           — run a command in the hosted runspace (pwsh built-ins + project cmdlets:
+//                      Get-Request, Get-CodeContext, and the vom: provider). stdout is the protocol channel, so the
 //                      runspace's own output is CAPTURED as text, never written to the console.
 internal static class Mcp
 {
@@ -81,7 +81,7 @@ internal static class Mcp
         new
         {
             name = "ss_run",
-            description = "Run a command in the ss runspace (PowerShell 7 built-ins + the project cmdlets: ss-refs, ss-check, Get-CodeContext, the vom: provider). Returns the formatted output as text.",
+            description = "Run a command in the ss runspace (PowerShell 7 built-ins + the project cmdlets: Get-Request/Remedy-*Request, Get-CodeContext, and the vom: provider — `Get-ChildItem vom:\\` walks the live VOM kernel). Returns the formatted output as text.",
             inputSchema = new
             {
                 type = "object",

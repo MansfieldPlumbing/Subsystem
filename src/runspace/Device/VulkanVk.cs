@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace Subsystem.Device.Android;
+namespace Subsystem.Device;
 
 // VulkanVk — pure C# Vulkan bindings for Android. Exposes the minimal set of structures,
 // constants, and entry points required to allocate a shared VkImage and export opaque fds.

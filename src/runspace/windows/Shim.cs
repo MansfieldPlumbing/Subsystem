@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Management.Automation.Provider;
 using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Text;
@@ -39,53 +40,67 @@ internal static class Shim
         // the information stream now appear (a bare RunspaceFactory runspace drops the host streams —
         // friction F8). ConsoleHost.SetShouldExit also captures `exit N`, so ss returns the script's code.
         var host = new ConsoleHost();
-        using var rs = RunspaceFactory.CreateRunspace(host, iss);
+        var rs = RunspaceFactory.CreateRunspace(host, iss);
         rs.Open();
-        using var ps = PowerShell.Create();
-        ps.Runspace = rs;
 
-        // -File <path> [args…] — invoke the FILE as a script command so $PSScriptRoot / $PSCommandPath /
-        // $args resolve exactly like `pwsh -File`. Running the file's TEXT via AddScript loses that file
-        // context (friction: a script that anchors on $PSScriptRoot — e.g. build-ss.ps1 — broke under
-        // `ss -File`). Everything else (bare passthrough, -Command, -EncodedCommand) stays AddScript.
-        int fileIdx = Array.FindIndex(args, a => a.Equals("-File", StringComparison.OrdinalIgnoreCase));
-        if (fileIdx >= 0 && fileIdx + 1 < args.Length)
-        {
-            ps.AddCommand(args[fileIdx + 1], useLocalScope: false);
-            for (int i = fileIdx + 2; i < args.Length; i++) ps.AddArgument(args[i]);
-        }
-        else
-        {
-            var script = ResolveScript(args);
-            if (string.IsNullOrWhiteSpace(script)) { Console.Error.WriteLine("ss: nothing to run"); return 2; }
-            ps.AddScript(script);
-        }
-        ps.AddCommand("Out-Default");
-
-        int code = 0;
+        // pwsh is NOT the host — it's a DEVICE. Mount the runspace as a VOM handle under \Device\Pwsh so it is
+        // owned, refcounted, enumerable (`gci vom:\Device`), and reclaimed by the SAME teardown cascade as any
+        // driver — not by a `using`/GC. First rung of "treat pwsh no different than a runtime or device": the
+        // substrate is CoreCLR + the VOM, and the shell is one mounted surface among peers.
+        var pwshMount = Vom.Vom.CreateOwner("\\Device\\Pwsh");
+        Vom.Vom.Register(pwshMount, "PwshRuntime", rs, onReclaim: rs.Dispose, name: "Runspace");
         try
         {
-            ps.Invoke();
+            using var ps = PowerShell.Create();
+            ps.Runspace = rs;
+
+            // -File <path> [args…] — invoke the FILE as a script command so $PSScriptRoot / $PSCommandPath /
+            // $args resolve exactly like `pwsh -File`. Running the file's TEXT via AddScript loses that file
+            // context (friction: a script that anchors on $PSScriptRoot — e.g. build-ss.ps1 — broke under
+            // `ss -File`). Everything else (bare passthrough, -Command, -EncodedCommand) stays AddScript.
+            int fileIdx = Array.FindIndex(args, a => a.Equals("-File", StringComparison.OrdinalIgnoreCase));
+            if (fileIdx >= 0 && fileIdx + 1 < args.Length)
+            {
+                ps.AddCommand(args[fileIdx + 1], useLocalScope: false);
+                for (int i = fileIdx + 2; i < args.Length; i++) ps.AddArgument(args[i]);
+            }
+            else
+            {
+                var script = ResolveScript(args);
+                if (string.IsNullOrWhiteSpace(script)) { Console.Error.WriteLine("ss: nothing to run"); return 2; }
+                ps.AddScript(script);
+            }
+            ps.AddCommand("Out-Default");
+
+            int code = 0;
+            try
+            {
+                ps.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("ss: " + ex.Message);
+                return 1;
+            }
+            // A real PowerShell error fails the run; a NATIVE command writing to stderr does NOT. git, dotnet
+            // and adb all chatter on stderr while succeeding — friction F9: every `ss "<native>"` looked failed
+            // because PowerShell surfaces native stderr as NativeCommandError records. Those don't set the code.
+            foreach (var e in ps.Streams.Error)
+            {
+                Console.Error.WriteLine(e.ToString());
+                if (!(e.FullyQualifiedErrorId ?? string.Empty).Contains("NativeCommand", StringComparison.OrdinalIgnoreCase))
+                    code = 1;
+            }
+            // For a passthrough shell, a native command's OWN exit code is the truth: a real failure surfaces,
+            // a success (exit 0) stays green even after stderr chatter. `exit N` (host.ExitCode) still wins.
+            if (rs.SessionStateProxy.GetVariable("LASTEXITCODE") is int nativeExit && nativeExit != 0)
+                code = nativeExit;
+            return host.ExitCode ?? code;
         }
-        catch (Exception ex)
+        finally
         {
-            Console.Error.WriteLine("ss: " + ex.Message);
-            return 1;
+            Vom.Vom.Terminate(pwshMount);   // the mount's teardown reclaims the runspace (reclaim => rs.Dispose)
         }
-        // A real PowerShell error fails the run; a NATIVE command writing to stderr does NOT. git, dotnet
-        // and adb all chatter on stderr while succeeding — friction F9: every `ss "<native>"` looked failed
-        // because PowerShell surfaces native stderr as NativeCommandError records. Those don't set the code.
-        foreach (var e in ps.Streams.Error)
-        {
-            Console.Error.WriteLine(e.ToString());
-            if (!(e.FullyQualifiedErrorId ?? string.Empty).Contains("NativeCommand", StringComparison.OrdinalIgnoreCase))
-                code = 1;
-        }
-        // For a passthrough shell, a native command's OWN exit code is the truth: a real failure surfaces,
-        // a success (exit 0) stays green even after stderr chatter. `exit N` (host.ExitCode) still wins.
-        if (rs.SessionStateProxy.GetVariable("LASTEXITCODE") is int nativeExit && nativeExit != 0)
-            code = nativeExit;
-        return host.ExitCode ?? code;
     }
 
     // Register the project's cmdlets from the in-memory assemblies by their [Cmdlet] attribute —
@@ -113,10 +128,18 @@ internal static class Shim
                 foreach (var type in types)
                 {
                     var attr = type.GetCustomAttribute<CmdletAttribute>();
-                    if (attr == null) continue;
-                    var name = $"{attr.VerbName}-{attr.NounName}";
-                    if (seen.Add(name))
-                        iss.Commands.Add(new SessionStateCmdletEntry(name, type, null));
+                    if (attr != null)
+                    {
+                        var name = $"{attr.VerbName}-{attr.NounName}";
+                        if (seen.Add(name))
+                            iss.Commands.Add(new SessionStateCmdletEntry(name, type, null));
+                        continue;
+                    }
+                    // Providers (the vom: drive) ride the SAME loader so the console AND the MCP runspace both
+                    // mount them — the cmdlet-only loader was why `gci vom:\` failed over MCP (INC137 layer 2).
+                    var prov = type.GetCustomAttribute<CmdletProviderAttribute>();
+                    if (prov != null && seen.Add("provider:" + prov.ProviderName))
+                        iss.Providers.Add(new SessionStateProviderEntry(prov.ProviderName, type, null));
                 }
             }
             catch (Exception ex) { Console.Error.WriteLine($"ss: project cmdlets failed to load from {asm.GetName().Name}: " + ex.Message); }

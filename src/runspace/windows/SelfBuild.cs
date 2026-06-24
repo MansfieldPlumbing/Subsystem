@@ -223,6 +223,11 @@ internal static class SelfBuild
         // SubsystemWin.csproj's exact compile set: host-windows + the linked runspace Vom/Cm. CodeContext is
         // a separate bundled assembly — referenced above, NOT recompiled.
         var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/shell/cell/", "src/runspace/Device/VomInterop.cs",
+                            // The vom: provider lives in the SHARED Pwsh surface (so Android compiles it too),
+                            // but the rest of Pwsh/ is still welded to Android (WrapperCmdlet base, TerminalSession,
+                            // Subsystem.Device) — folding all of Pwsh/ in is the peer-heads seam (see the Pwsh-into-
+                            // Windows CR). Until then, pull in JUST this file: it depends only on Vom + the SMA SDK.
+                            "src/runspace/Pwsh/VomDrive.cs",
                             // the portable ADB core wired onto the Windows head (#75) — the IAdbTransport seam +
                             // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
                             // lives in windows/ (already covered by the windows/ root above).

@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using Subsystem.Vom;
 
-namespace Subsystem.Device.Android;
+namespace Subsystem.Device;
 
 // DirectPortVk — C# implementation of the Vulkan DirectPort fabric.
 // Initializes the Vulkan instance and device, creates shared VkImages,
