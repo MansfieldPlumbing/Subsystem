@@ -822,8 +822,8 @@ public class ProjectionServer
             if (!System.Text.RegularExpressions.Regex.IsMatch(key, @"^[A-Za-z0-9._-]{1,64}$"))
             {
                 res.ContentType = "application/json";
-                var bad = Encoding.UTF8.GetBytes("{\"error\":\"bad config key\"}");
-                res.OutputStream.Write(bad, 0, bad.Length);
+                var errorBytes = Encoding.UTF8.GetBytes("{\"error\":\"bad config key\"}");
+                res.OutputStream.Write(errorBytes, 0, errorBytes.Length);
                 return;
             }
             var path = "\\Shell\\Config\\" + key;   // shell/UI state lives under the Shell subtree (SS004)

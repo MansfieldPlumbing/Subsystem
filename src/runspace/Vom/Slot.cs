@@ -44,9 +44,9 @@ public static unsafe partial class Vom
         return new Slot(h.Path, h.Id, asm, alc);
     }
 
-    // Enter/Leave a slot around an in-flight call (refcount up / down). Leave at zero frees the slot.
-    public static bool EnterSlot(Slot s) { var o = GetOwner(SlotsOwner); return o != null && Open(o, s.Path); }
-    public static bool LeaveSlot(Slot s) { var o = GetOwner(SlotsOwner); return o != null && Close(o, s.Path); }
+    // Open/Close a slot around an in-flight call (refcount up / down). Close at zero frees the slot.
+    public static bool OpenSlot(Slot s) { var o = GetOwner(SlotsOwner); return o != null && Open(o, s.Path); }
+    public static bool CloseSlot(Slot s) { var o = GetOwner(SlotsOwner); return o != null && Close(o, s.Path); }
 
     // Drop a slot's loader reference (free-on-zero: frees once any in-flight callers also Leave).
     public static bool FreeSlot(Slot s) { var o = GetOwner(SlotsOwner); return o != null && Close(o, s.Path); }
@@ -55,7 +55,7 @@ public static unsafe partial class Vom
     // against it; if it cannot load, or probe returns false / throws, free the candidate and KEEP
     // current (rollback). Otherwise retire current and go live on the candidate. The loser is freed by
     // the same free-on-zero path as any handle — a bad swap leaves nothing behind.
-    public static (Slot Live, bool RolledBack) SwapWithRollback(Slot current, string name, byte[] newImage, Func<Slot, bool> probe)
+    public static (Slot Live, bool RolledBack) ApplySlotWithRollback(Slot current, string name, byte[] newImage, Func<Slot, bool> probe)
     {
         Slot candidate;
         try { candidate = LoadSlot(name, newImage); }
@@ -74,7 +74,7 @@ public static unsafe partial class Vom
     // Assert v1 served 1, v2 serves 2 (and still serves after v1 is gone), and v1's ALC is reclaimed
     // once its refcount hits zero. GC is pumped because the unload TRIGGER is deterministic but
     // reclamation is GC-timed until the GC is removed (invariant 7). A JSON verdict, like the others.
-    public static string SlotSwapTest()
+    public static string ApplySlotSwapTest()
     {
         var (wr, v1Value, v2Value, v2Live) = SwapCycle();
 
@@ -148,29 +148,29 @@ public static unsafe partial class Vom
     // Good slot v1 is live; a swap to a slot that LOADS but FAULTS when invoked is attempted; the probe
     // throws; the loader frees the bad slot and keeps v1. Assert: rolled back, v1 still serves, and the
     // bad slot's handle is gone (freed-on-zero — Reclaim fired). A JSON verdict, like the others.
-    public static string SlotRollbackTest()
+    public static string ApplySlotRollbackTest()
     {
-        var (v1Still, badGone, rolledBack) = RollbackCycle();
+        var (v1Still, faultingGone, rolledBack) = RollbackCycle();
         var owner = GetOwner(SlotsOwner);
         if (owner != null) Terminate(owner);
         return JsonSerializer.Serialize(new
         {
             rolledBack,
             v1StillServes = v1Still,
-            badSlotReclaimed = badGone,
+            faultingSlotReclaimed = faultingGone,
             note = "swap to a slot that faults on invoke: probe throws -> bad slot freed-on-zero, prior slot kept. A/B rollback on the VOM loader.",
         });
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (bool V1Still, bool BadGone, bool RolledBack) RollbackCycle()
+    private static (bool V1Still, bool FaultingGone, bool RolledBack) RollbackCycle()
     {
         var owner = CreateOwner(SlotsOwner);
         var v1 = LoadSlot("good", EmitValueAssembly("SlotGood", 1));
-        var (live, rolledBack) = SwapWithRollback(v1, "bad", EmitFaultingAssembly("SlotBad"), s => InvokeValue(s) == 1);
+        var (live, rolledBack) = ApplySlotWithRollback(v1, "faulting", EmitFaultingAssembly("SlotFaulting"), s => InvokeValue(s) == 1);
         bool v1Still = ReferenceEquals(live, v1) && InvokeValue(v1) == 1;   // we kept v1
-        bool badGone = !TryGetByPath(owner, "\\Slots\\Objects\\bad", out _); // the bad slot handle is freed
-        return (v1Still, badGone, rolledBack);
+        bool faultingGone = !TryGetByPath(owner, "\\Slots\\Objects\\faulting", out _); // the faulting slot handle is freed
+        return (v1Still, faultingGone, rolledBack);
     }
 
     // Emit { public static class Entry { public static int Value() => throw new InvalidOperationException(); } }

@@ -68,7 +68,8 @@ internal static class Tts
         }
 
         var wav = outPath ?? Path.Combine(Path.GetTempPath(), $"ss-tts-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}.wav");
-        try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(wav))!); } catch { }
+        try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(wav))!); }
+        catch (Exception ex) { Subsystem.Dg.Log("tts", "could not create output dir: " + ex.Message); }
 
         string engineArgs = phonemes != null
             ? $"stream \"{model}\" --phonemes \"{phonemes}\" --voice {voice} --speed {speed.ToString(CultureInfo.InvariantCulture)} --out \"{wav}\""
