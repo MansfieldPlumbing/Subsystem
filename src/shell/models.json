@@ -28,12 +28,5 @@
     "repo": "litert-community/Qwen3-4B-Instruct-2507",
     "note": "text-only coding profile; swap in for code work (no file field -> not in the loadable projection until present)",
     "tools": true, "thinking": true
-  },
-  {
-    "id": "kokoro", "name": "Kokoro TTS", "enabled": false,
-    "version": 1, "kind": "model", "role": "tts", "format": "onnx",
-    "file": "models/kokoro-v1.0.onnx",
-    "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model.onnx",
-    "minBytes": 80000000
   }
 ]

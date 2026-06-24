@@ -658,15 +658,9 @@ public static class Registrar
             }
         }
         catch (Exception ex) { Subsystem.Dg.Log("registrar", "models.json seed failed: " + ex.Message); }
-        var kp = "\\Capability\\Speech\\Kokoro";
-        if (Subsystem.Cm.Cm.Get(kp) == null)   // seed-if-absent — a user/agent enable survives reboots
-        {
-            Reg(kp, "Kokoro", "Mount", new
-            {
-                version = 1, id = "speech-kokoro",
-                desc = "WebView Kokoro TTS lane (ort-web); enable to let the agent speak via lib/speech.js",
-            }, enabled: false, integrity: "User");
-        }
+        // TTS is now the native ORT-free dp-onnx `ss tts` verb (CRQ121). The WebView ort-web Kokoro lane
+        // (\Capability\Speech\Kokoro + lib/speech.js + vendor/kokoro) was removed 2026-06-24, and vendor/ort
+        // (onnxruntime-web, 31MB) followed once orphaned — ONNX inferencing is dp-onnx, home-rolled; no foreign runtime.
 
         // --- Quick-assist config (the power-button / assist-gesture panel). Stored as a Cm object so its
         //     actions are registry-driven, not hardcoded. Native hookup (assist intent) lands when the

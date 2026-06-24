@@ -175,7 +175,7 @@ internal static class Shim
 
         // First-class ss verbs (kept in step with Program.cs dispatch): say it the verb way, no quotes.
         string[] verbs = { "git", "build", "check", "contextualize", "onboard", "diag", "selftest",
-                           "status", "refs", "mcp", "chat", "extract", "surface", "view", "ui" };
+                           "status", "refs", "mcp", "chat", "tts", "extract", "surface", "view", "ui" };
         if (verbs.Contains(token))
             return $"ss: '{token}' is a first-class ss verb — run  ss {token} …  (drop the quotes), not a passthrough string.\n" +
                     "     Intentional PowerShell? re-run with --raw.";

@@ -10,8 +10,7 @@
   <link rel="stylesheet" href="/theme.css">
   <script src="/themes.js"></script>
 
-  <!-- Monaco Editor Loader -->
-  <script src="vendor/monaco/vs/loader.js"></script>
+  <!-- Vanilla code editor (CodeEdit) — no Monaco, no TypeScript worker. Imported as a module below. -->
 
   <style>
     * { box-sizing: border-box; }
@@ -92,8 +91,8 @@
     .menu-item .nf { font-family: var(--font-mono); font-size: 13px; color: var(--accent); width: 1.1rem; text-align: center; }
     .menu-item:hover { background-color: rgba(255, 255, 255, 0.08); }
 
-    /* Monaco Container */
-    #editor-wrapper { flex: 1; width: 100%; position: relative; }
+    /* Editor container */
+    #editor-wrapper { flex: 1; width: 100%; position: relative; min-height: 0; }
 
     /* Status Bar */
     .status-bar {
@@ -245,12 +244,11 @@
         <button class="menu-item" data-verb="sort"><span class="nf">&#xf15d;</span> Sort Lines</button>
         <div class="menu-group">View</div>
         <button class="menu-item" data-verb="wrap"><span class="nf">&#xf036;</span> <span id="menu-lbl-wrap">Wrap Lines</span></button>
-        <button class="menu-item" data-verb="minimap"><span class="nf">&#xf279;</span> Minimap</button>
         <button class="menu-item" data-verb="settings"><span class="nf">&#xf013;</span> Editor Settings…</button>
       </div>
     </div>
 
-    <!-- 3. Monaco -->
+    <!-- 3. Editor -->
     <div id="editor-wrapper"></div>
 
     <!-- 4. Status Bar -->
@@ -290,20 +288,6 @@
                 <h3>Appearance</h3>
                 <div class="settings-card">
                    <div>
-                      <div class="card-title">Plain Monaco Theme</div>
-                      <div class="card-desc">Use Monaco's stock vs/vs-dark syntax colors instead of the theme-derived palette.</div>
-                   </div>
-                   <button id="toggle-theme" class="win-toggle"><div class="knob"></div></button>
-                </div>
-                <div class="settings-card">
-                   <div>
-                      <div class="card-title">Code Minimap</div>
-                      <div class="card-desc">Render a zoomed-out visual guide of the entire document on the right side.</div>
-                   </div>
-                   <button id="toggle-minimap" class="win-toggle active"><div class="knob"></div></button>
-                </div>
-                <div class="settings-card">
-                   <div>
                       <div class="card-title">Line Numbers</div>
                       <div class="card-desc">Show line numbers on the left gutter.</div>
                    </div>
@@ -333,6 +317,7 @@
   </div>
 
   <script type="module">
+    import { CodeEdit } from '/lib/codeedit.js';
     import { PsrpSession } from '/lib/psrp.js';
     import { Splash } from '/lib/splash.js';
     import { downloadText } from '/lib/download.js';
@@ -350,10 +335,8 @@
     const urlParams = new URLSearchParams(window.location.search);
     let filePath = urlParams.get('file') || '/sdcard/Documents/untitled.txt';
     let isModified = false;
-    let savedVersionId = null;   // Monaco alternative-version id at last load/save — dirty = drift from it
-    let plainTheme = false;
-    let wordWrap = false, minimap = true, fontSize = 14, lineNumbers = true;
-    let editorInstance = null;
+    let wordWrap = false, fontSize = 14, lineNumbers = true;
+    let ed = null;   // the CodeEdit instance (vanilla — no Monaco, no TS worker)
 
     // ---- DOM ----
     const $ = (id) => document.getElementById(id);
@@ -420,38 +403,9 @@
       return lang;
     }
 
-    // ---- Monaco theme — derived from the live CSS vars (the registry's theme contract), ONE
-    //      definition reused everywhere; re-applied when themes.js repaints (storage event). ----
-    function applyMonacoTheme() {
-      if (!window.monaco) return;
-      const css = (n, d) => {
-        const v = getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-        return (v && v.startsWith('#')) ? v.slice(1) : d;
-      };
-      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-      window.monaco.editor.defineTheme('subsystem-editor', {
-        base: isLight ? 'vs' : 'vs-dark',
-        inherit: true,
-        rules: plainTheme ? [] : [
-          { token: 'keyword',        foreground: css('--accent',   '0084ff') },
-          { token: 'tag',            foreground: css('--accent',   '0084ff') },
-          { token: 'string',         foreground: css('--success',  '10b981') },
-          { token: 'string.html',    foreground: css('--success',  '10b981') },
-          { token: 'number',         foreground: css('--accent-2', 'd80073') },
-          { token: 'function',       foreground: css('--neon',     '22ff66') },
-          { token: 'attribute.name', foreground: css('--neon',     '22ff66') },
-          { token: 'type',           foreground: css('--accent-2', 'd80073') },
-          { token: 'class',          foreground: css('--accent-2', 'd80073') },
-          { token: 'comment',        foreground: css('--muted',    '878787'), fontStyle: 'italic' },
-        ],
-        colors: {
-          'editor.background': '#' + css('--bg', isLight ? 'ffffff' : '111111'),
-          'editor.foreground': '#' + css('--fg', isLight ? '15243f' : 'f2f2f2'),
-        }
-      });
-      window.monaco.editor.setTheme('subsystem-editor');
-    }
-    window.addEventListener('storage', (e) => { if (e.key === 'ss-theme') applyMonacoTheme(); });
+    // Theme: CodeEdit paints tokens straight from the CSS-var palette (theme.css → --ce-* with
+    // syntax-friendly fallbacks), so a themes.js repaint re-skins the editor through the cascade —
+    // there is no defineTheme/setTheme JS to run. (The Monaco theme bridge used to live here.)
 
     // ---- backend: load / save over the shared PSRP lane ----
     async function loadFile(path, { fresh = false } = {}) {
@@ -479,8 +433,8 @@
     }
 
     async function saveFile(path) {
-      if (!editorInstance) return;
-      const content = editorInstance.getValue();
+      if (!ed) return;
+      const content = ed.value;
       try {
         notify('Saving…');
         await psrp.invoke([{ name: 'Set-Content', parameters: {
@@ -488,7 +442,7 @@
         } }]);
         filePath = path;
         filePathInput.value = path;
-        savedVersionId = editorInstance.getModel()?.getAlternativeVersionId() ?? savedVersionId;
+        ed.markSaved();
         setIsModified(false);
         notify('Saved');
       } catch (err) {
@@ -497,18 +451,13 @@
     }
 
     function setBuffer(content) {
-      if (editorInstance) {
-        editorInstance.setValue(content);
-        const model = editorInstance.getModel();
-        if (model) window.monaco.editor.setModelLanguage(model, getLang());
-        savedVersionId = model ? model.getAlternativeVersionId() : null;
-      }
+      if (ed) { ed.value = content; ed.language = getLang(); ed.markSaved(); }
       setIsModified(false);
     }
 
     function notifyLangAndSize() {
       getLang();
-      if (editorInstance) $('status-size').textContent = `${new Blob([editorInstance.getValue()]).size} bytes`;
+      if (ed) $('status-size').textContent = `${new Blob([ed.value]).size} bytes`;
     }
 
     function setIsModified(mod) {
@@ -531,8 +480,8 @@
       if (p) saveFile(p);
     }
     function download() {
-      if (!editorInstance) return;
-      downloadText(filePath.split('/').pop() || 'untitled.txt', editorInstance.getValue());
+      if (!ed) return;
+      downloadText(filePath.split('/').pop() || 'untitled.txt', ed.value);
     }
     async function openFile() {
       const p = await askPath('Open file', filePath);
@@ -544,43 +493,36 @@
       const p = filePathInput.value.trim() || filePath;
       navigator.clipboard.writeText(p).then(() => notify('Path copied')).catch(() => notify(p));
     }
-    function doUndo() { editorInstance?.trigger('toolbar', 'undo', null); }
-    function doRedo() { editorInstance?.trigger('toolbar', 'redo', null); }
-    // Find without stealing the soft keyboard: open the widget but DON'T focus its input, so the
-    // keyboard stays down until the user taps the field (mobile WebView focus pops the IME).
-    function openFind() {
-      if (!editorInstance) return;
-      editorInstance.getAction('actions.find')?.run();
-      // Monaco autofocuses the find input on open; pull focus back to the editor so the IME stays put.
-      requestAnimationFrame(() => editorInstance.focus());
+    // Undo/redo ride the textarea's NATIVE history — free, and correct across IME composition (the
+    // exact thing Monaco's hand-rolled model got wrong on Android).
+    function doUndo() { ed?.focus(); document.execCommand('undo'); }
+    function doRedo() { ed?.focus(); document.execCommand('redo'); }
+    // Find: a modal prompt (no find-widget that steals the IME), then select+scroll to the next match.
+    async function openFind() {
+      if (!ed) return;
+      const q = await askPath('Find', ed.selectionText || '');
+      if (q && !ed.find(q)) notify(`Not found: ${q}`);
     }
     function setLineNumbers(on) {
       lineNumbers = !!on;
       $('toggle-linenumbers').classList.toggle('active', lineNumbers);
-      editorInstance?.updateOptions({ lineNumbers: lineNumbers ? 'on' : 'off' });
+      ed?.setGutter(lineNumbers);
       setConfig('edit.lineNumbers', lineNumbers ? 'true' : 'false');
     }
     function doSort() {
-      if (!editorInstance) return;
-      const sel = editorInstance.getSelection();
-      const model = editorInstance.getModel();
-      const range = sel.isEmpty() ? model.getFullModelRange() : sel;
-      const text = sel.isEmpty() ? model.getValue() : model.getValueInRange(sel);
+      if (!ed) return;
+      const sel = ed.selectionText;
+      const text = sel || ed.value;
       if (!text.trim()) { notify('Nothing to sort'); return; }
-      const lines = text.split(/\r?\n/).sort((a, b) => a.localeCompare(b));
-      editorInstance.executeEdits('sort', [{ range, text: lines.join('\n'), forceMoveMarkers: true }]);
+      const sorted = text.split(/\r?\n/).sort((a, b) => a.localeCompare(b)).join('\n');
+      if (sel) ed.replaceSelection(sorted); else ed.value = sorted;
+      ed.focus();
     }
     function toggleWrap() {
       wordWrap = !wordWrap;
       $('toggle-wordwrap').classList.toggle('active', wordWrap);    // (btn-wrap/lbl-wrap left the toolbar)
       $('menu-lbl-wrap').textContent = wordWrap ? 'Unwrap Lines' : 'Wrap Lines';
-      editorInstance?.updateOptions({ wordWrap: wordWrap ? 'on' : 'off' });
-      publishMenu();
-    }
-    function toggleMinimap() {
-      minimap = !minimap;
-      $('toggle-minimap').classList.toggle('active', minimap);     // (btn-minimap left the toolbar)
-      editorInstance?.updateOptions({ minimap: { enabled: minimap } });
+      ed?.setWrap(wordWrap);
       publishMenu();
     }
 
@@ -593,14 +535,12 @@
     // Clipboard stays on the bar. Copy-path / save-as / download / find / sort / wrap / minimap / settings
     // are reachable from the hamburger (MENU_ACTIONS below) — their toolbar buttons (and this dead wiring)
     // were removed, so these handlers no longer null-ref on the absent buttons.
-    $('btn-cut').onclick = () => { editorInstance?.focus(); document.execCommand('cut'); };
-    $('btn-copy').onclick = () => { editorInstance?.focus(); document.execCommand('copy'); };
+    $('btn-cut').onclick = () => { ed?.focus(); document.execCommand('cut'); };
+    $('btn-copy').onclick = () => { ed?.focus(); document.execCommand('copy'); };
     $('btn-paste').onclick = () => {
-      if (!editorInstance) return;
-      editorInstance.focus();
-      navigator.clipboard.readText().then(text => {
-        editorInstance.executeEdits('clipboard', [{ range: editorInstance.getSelection(), text, forceMoveMarkers: true }]);
-      }).catch(() => notify('Use Ctrl+V / Cmd+V to paste'));
+      if (!ed) return;
+      ed.focus();
+      navigator.clipboard.readText().then(text => ed.replaceSelection(text)).catch(() => notify('Use Ctrl+V / Cmd+V to paste'));
     };
     $('btn-close-settings').onclick = () => settingsPanel.classList.add('hidden');
 
@@ -613,7 +553,7 @@
       'new': newBuffer, 'open': openFile, 'save': () => saveFile(filePathInput.value.trim() || filePath),
       'save-as': saveAs, 'download': download, 'copy-path': copyPath,
       'undo': doUndo, 'redo': doRedo, 'find': openFind, 'sort': doSort,
-      'wrap': toggleWrap, 'minimap': toggleMinimap, 'settings': () => settingsPanel.classList.remove('hidden'),
+      'wrap': toggleWrap, 'settings': () => settingsPanel.classList.remove('hidden'),
     };
     menuVeil.querySelectorAll('.menu-item').forEach(b => b.onclick = () => {
       closeMenu();
@@ -621,18 +561,12 @@
     });
 
     // ---- settings panel ----
-    $('toggle-theme').onclick = () => {
-      plainTheme = !plainTheme;
-      $('toggle-theme').classList.toggle('active', plainTheme);
-      applyMonacoTheme();
-    };
-    $('toggle-minimap').onclick = toggleMinimap;
     $('toggle-linenumbers').onclick = () => setLineNumbers(!lineNumbers);
     $('toggle-wordwrap').onclick = toggleWrap;
     $('input-fontsize').oninput = (e) => {
       fontSize = parseInt(e.target.value);
       $('lbl-fontsize').textContent = fontSize;
-      editorInstance?.updateOptions({ fontSize });
+      ed?.setFontSize(fontSize);
     };
 
     // ---- address bar ----
@@ -668,7 +602,6 @@
         { menu: 'edit', verb: 'find',      label: 'Find & Replace' },
         { menu: 'edit', verb: 'sort',      label: 'Sort Lines' },
         { menu: 'view', verb: 'wrap',      label: wordWrap ? 'Unwrap Lines' : 'Wrap Lines' },
-        { menu: 'view', verb: 'minimap',   label: 'Minimap', checked: minimap },
         { menu: 'view', verb: 'linenumbers', label: 'Line Numbers', checked: lineNumbers },
         { menu: 'view', verb: 'settings',  label: 'Editor Settings…' },
       ]);
@@ -681,7 +614,7 @@
       else if (verb === 'find') openFind();
       else if (verb === 'sort') doSort();
       else if (verb === 'wrap') toggleWrap();
-      else if (verb === 'minimap') toggleMinimap();
+      else if (verb === 'linenumbers') setLineNumbers(!lineNumbers);
       else if (verb === 'settings') settingsPanel.classList.remove('hidden');
       else if (verb === 'close') {
         // Defensive in-iframe guard: confirm before the buffer is lost. NB the Shell's red-X
@@ -692,57 +625,34 @@
       }
     });
 
-    // ---- boot: Monaco, theme, first file ----
-    function initMonaco() {
-      window.require.config({ paths: { 'vs': 'vendor/monaco/vs' } });
-      window.require(['vs/editor/editor.main'], async () => {
-        applyMonacoTheme();
-        // Editor prefs write on toggle (setLineNumbers → setConfig) but were never read back, so a gutter
-        // you turned off sprang back to the default on reopen. Load the persisted choice HERE, before
-        // create, so it sticks. Absent → ON (the editor default). Other toggles don't persist yet.
-        try { const ln = await getConfig('edit.lineNumbers'); if (ln != null) lineNumbers = (ln !== 'false'); } catch (_) {}
-        $('toggle-linenumbers').classList.toggle('active', lineNumbers);
-        editorInstance = window.monaco.editor.create($('editor-wrapper'), {
-          value: '',
-          language: getLang(),
-          theme: 'subsystem-editor',
-          automaticLayout: true,
-          minimap: { enabled: minimap, scale: 0.75, renderCharacters: false },
-          wordWrap: wordWrap ? 'on' : 'off',
-          fontSize,
-          lineNumbers: lineNumbers ? 'on' : 'off',
-          fontFamily: 'var(--font-mono)',
-          scrollBeyondLastLine: false,
-          smoothScrolling: true,
-          cursorBlinking: 'smooth',
-          cursorSmoothCaretAnimation: 'on',
-          padding: { top: 12 },
-          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-        });
-        editorInstance.onDidChangeCursorPosition((e) => {
-          $('status-cursor').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
-        });
-        editorInstance.onDidChangeModelContent(() => {
-          // Dirty = the model drifted from the last saved version (undo back to it goes clean again).
-          const model = editorInstance.getModel();
-          setIsModified(!model || model.getAlternativeVersionId() !== savedVersionId);
-          $('status-size').textContent = `${new Blob([editorInstance.getValue()]).size} bytes`;
-        });
-        editorInstance.addCommand(window.monaco.KeyMod.CtrlCmd | window.monaco.KeyCode.KeyS, () => saveFile(filePath));
+    // ---- boot: editor, prefs, first file ----
+    async function initEditor() {
+      // Editor prefs write on toggle (setLineNumbers → setConfig) but were never read back, so a gutter
+      // you turned off sprang back to the default on reopen. Load the persisted choice HERE, before
+      // create, so it sticks. Absent → ON (the editor default).
+      try { const ln = await getConfig('edit.lineNumbers'); if (ln != null) lineNumbers = (ln !== 'false'); } catch (_) {}
+      $('toggle-linenumbers').classList.toggle('active', lineNumbers);
 
-        try {
-          await loadFile(filePath, { fresh: true });
-          Splash.done();
-        } catch (err) {
-          Splash.fail(String(err.message || err), () => loadFile(filePath, { fresh: true }).then(() => Splash.done()));
-        }
-        publishMenu();
+      ed = new CodeEdit($('editor-wrapper'), { value: '', language: getLang(), tabSize: 2 });
+      ed.setGutter(lineNumbers);
+      ed.setWrap(wordWrap);
+      ed.setFontSize(fontSize);
+      ed.onCursor((c) => { $('status-cursor').textContent = `Ln ${c.line}, Col ${c.col}`; });
+      ed.onChange(() => {
+        setIsModified(ed.dirty);   // dirty = drift from the last save (undo back to it goes clean again)
+        $('status-size').textContent = `${new Blob([ed.value]).size} bytes`;
       });
+      ed.onSave(() => saveFile(filePath));   // Ctrl/Cmd+S from inside the editor
+
+      try {
+        await loadFile(filePath, { fresh: true });
+        Splash.done();
+      } catch (err) {
+        Splash.fail(String(err.message || err), () => loadFile(filePath, { fresh: true }).then(() => Splash.done()));
+      }
+      publishMenu();
     }
-    if (window.require) initMonaco();
-    else {
-      const poll = setInterval(() => { if (window.require) { clearInterval(poll); initMonaco(); } }, 100);
-    }
+    initEditor();
   </script>
 </body>
 </html>

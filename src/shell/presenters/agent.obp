@@ -305,8 +305,9 @@
     #avatar-menu .am-div { height: 1px; margin: 5px 8px; background: var(--border-subtle); }
   </style>
   <script src="/shell/presenter.js"></script>
-  <!-- Optional TTS (lib/speech.js exposes window.Speech); every call site guards its absence. -->
-  <script src="/lib/speech.js"></script>
+  <!-- TTS: the WebView ort-web Kokoro lane (lib/speech.js) was removed 2026-06-24; spoken replies re-wire
+       to the native dp-onnx `ss tts` (CRQ121). The window.Speech call sites below stay guarded (no-op while
+       absent), marking the re-wire hook. -->
 </head>
 <body>
   <div id="panel">
