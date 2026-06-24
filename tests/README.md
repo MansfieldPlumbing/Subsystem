@@ -16,7 +16,7 @@ it proves). One concept per file.
 
 No other shape. (`*.tests.ps1`, camelCase, vague names → rename to conform.)
 
-## Shape — the Cutler-tier receipt template
+## Shape — the Cutlerian receipt template
 
 Every test follows this so output is **auditable at a glance** (pass + measured numbers + verdict):
 
