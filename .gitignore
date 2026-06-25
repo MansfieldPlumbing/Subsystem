@@ -15,6 +15,9 @@ src/runspace/boringssl/
 *.exe
 # Prebuilt native libraries are build outputs — rebuilt from source (e.g. src/native/directport/build.ps1).
 *.dll
+# ONNX model weights are re-derivable data (public Kokoro-82M etc.), NEVER in the repo — guard the
+# vendored dp-onnx engine (src/native/dp-onnx) from ever swallowing a ~310 MB model.onnx.
+*.onnx
 # rename-aside debris from `ss build` self-replace
 *.exe.old
 # the embedded source payload — regenerated on every build, free to recreate
@@ -76,6 +79,8 @@ ss-source.dump
 *.md
 !README.md
 !Registry/Feedback/in-memoriam-dedication.md
+# the vendored dp-onnx engine carries its own provenance README (CRQ143 P0)
+!src/native/dp-onnx/README.md
 *.db
 *.db-wal
 *.db-shm

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- dp-onnx: native .NET ONNX interpreter over the PREBUILT Onnx.dll (protobuf
+       decomposition). References the DLL directly — no rebuild of Onnx, no glob
+       contamination from the netstandard2.0 parent project. NO onnxruntime. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>dp-onnx</AssemblyName>
+    <!-- single-file project: compile ONLY Program.cs so emitted/scratch .cs (io\*.cs, _emittest\**) under the tree are never swept in -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Reference Include="Onnx">
+      <HintPath>..\onnxnet\bin\Release\netstandard2.0\Onnx.dll</HintPath>
+    </Reference>
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+  </ItemGroup>
+</Project>
