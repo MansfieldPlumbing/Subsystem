@@ -18,6 +18,9 @@ src/runspace/boringssl/
 # ONNX model weights are re-derivable data (public Kokoro-82M etc.), NEVER in the repo — guard the
 # vendored dp-onnx engine (src/native/dp-onnx) from ever swallowing a ~310 MB model.onnx.
 *.onnx
+# Compiled shader blobs — re-derivable from the .hlsl source (dxc/D3DCompile).
+*.dxil
+*.cso
 # rename-aside debris from `ss build` self-replace
 *.exe.old
 # the embedded source payload — regenerated on every build, free to recreate
@@ -81,6 +84,11 @@ ss-source.dump
 !Registry/Feedback/in-memoriam-dedication.md
 # the vendored dp-onnx engine carries its own provenance README (CRQ143 P0)
 !src/native/dp-onnx/README.md
+# wip/ is the workshop: parked scattered projects (clone-and-rebuild sovereignty).
+# Their docs/state ARE the point, so md is tracked under wip (heavy data still ignored
+# by the *.dll/*.exe/*.onnx/*.zip/bin/obj rules above).
+!wip/**/*.md
+!wip/**/README.md
 *.db
 *.db-wal
 *.db-shm

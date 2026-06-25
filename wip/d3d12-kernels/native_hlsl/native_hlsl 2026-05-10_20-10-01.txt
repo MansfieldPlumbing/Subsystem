@@ -1,0 +1,5638 @@
+﻿<context_report project="native_hlsl" generated="2026-05-10_20-10-01">
+<directory_structure>
+- abs.dxil
+- abs.hlsl
+- arange.dxil
+- arange.hlsl
+- ceil.dxil
+- ceil.hlsl
+- CMakeLists_inference.txt
+- contig_copy.dxil
+- contig_copy.hlsl
+- copy.dxil
+- copy.hlsl
+- count_experts.dxil
+- count_experts.hlsl
+- d3d12_dispatch_reference.h
+- dequant_f32.dxil
+- dequant_f32.hlsl
+- dequant_q1_0.hlsl
+- dequant_q4_0_native.hlsl
+- dequant_q4_0.dxil
+- dequant_q4_0.hlsl
+- dequant_q4_1.hlsl
+- dequant_q5_0.hlsl
+- dequant_q5_1.hlsl
+- dequant_q8_0.hlsl
+- diag_mask_inf.dxil
+- diag_mask_inf.hlsl
+- diag.dxil
+- diag.hlsl
+- DieWorker.cpp
+- DieWorker.h
+- elu.dxil
+- elu.hlsl
+- exp.dxil
+- exp.hlsl
+- fill.dxil
+- fill.hlsl
+- flash_attn_split_k_reduce.dxil
+- flash_attn_split_k_reduce.hlsl
+- floor.dxil
+- floor.hlsl
+- geglu_erf.dxil
+- geglu_erf.hlsl
+- geglu_quick.dxil
+- geglu_quick.hlsl
+- geglu.dxil
+- geglu.hlsl
+- gelu_erf.dxil
+- gelu_erf.hlsl
+- gelu_quick.dxil
+- gelu_quick.hlsl
+- gelu.dxil
+- gelu.hlsl
+- ggml-d3d12-shared.h
+- group_norm.dxil
+- group_norm.hlsl
+- hardsigmoid.dxil
+- hardsigmoid.hlsl
+- hardswish.dxil
+- hardswish.hlsl
+- im2col_3d.dxil
+- im2col_3d.hlsl
+- leaky_relu.dxil
+- leaky_relu.hlsl
+- log.dxil
+- log.hlsl
+- mul_mat_split_k_reduce.dxil
+- mul_mat_split_k_reduce.hlsl
+- neg.dxil
+- neg.hlsl
+- norm.dxil
+- norm.hlsl
+- pad.dxil
+- pad.hlsl
+- quantize_q8_1.hlsl
+- reglu.dxil
+- reglu.hlsl
+- relu.dxil
+- relu.hlsl
+- repeat.dxil
+- repeat.hlsl
+- roll.dxil
+- roll.hlsl
+- round.dxil
+- round.hlsl
+- sgn.dxil
+- sgn.hlsl
+- sigmoid.dxil
+- sigmoid.hlsl
+- silu.dxil
+- silu.hlsl
+- softplus.dxil
+- softplus.hlsl
+- ssm_conv.dxil
+- ssm_conv.hlsl
+- step.dxil
+- step.hlsl
+- swiglu_oai.dxil
+- swiglu_oai.hlsl
+- swiglu.dxil
+- swiglu.hlsl
+- tanh.dxil
+- tanh.hlsl
+- tri.dxil
+- tri.hlsl
+- trunc.dxil
+- trunc.hlsl
+- upscale.dxil
+- upscale.hlsl
+- xielu.dxil
+- xielu.hlsl
+</directory_structure>
+
+<source_code>
+<file path="abs.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _52;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(abs(float(_52.Load<half>(i * 2 + 0)))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="arange.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _48;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float value = p_param1 + (p_param2 * float(i));
+    _48.Store<half>(i * 2 + 0, half(value));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="ceil.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(ceil(x)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="CMakeLists_inference.txt">
+cmake_minimum_required(VERSION 3.20)
+project(DirectPortInference LANGUAGES CXX)
+
+# Match VirtuaCam toolchain settings exactly
+add_compile_definitions(_WIN32_WINNT=0x0A00)
+set(CMAKE_SYSTEM_VERSION "10.0.22621.0")
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS ON)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# vcpkg toolchain (same as VirtuaCam)
+# cmake -DCMAKE_TOOLCHAIN_FILE=C:/BUILD/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+find_package(wil CONFIG REQUIRED)
+
+set(LLAMA_DIR "C:/BUILD/llama.cpp")
+set(DIRECTPORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(DXIL_DIR "C:/BUILD/native_hlsl")
+
+# --- DirectPort SDK (C transport layer) ---
+add_library(DirectPort STATIC
+    ${DIRECTPORT_DIR}/directportd3d12.cpp
+    ${DIRECTPORT_DIR}/directportd3d11.cpp
+)
+target_include_directories(DirectPort PUBLIC ${DIRECTPORT_DIR})
+target_link_libraries(DirectPort PUBLIC d3d12 d3d11 dxgi advapi32)
+target_compile_definitions(DirectPort PRIVATE UNICODE _UNICODE)
+
+# --- Inference backend DLL ---
+# Mirrors DirectPortBroker / DirectPortConsumer from VirtuaCam CMakeLists
+add_library(DirectPortInference SHARED
+    DieWorker.cpp
+)
+target_include_directories(DirectPortInference PRIVATE
+    ${DIRECTPORT_DIR}
+    ${LLAMA_DIR}/ggml/include
+    ${LLAMA_DIR}/include
+)
+target_link_libraries(DirectPortInference PRIVATE
+    DirectPort
+    WIL::WIL
+    d3d12 dxgi d3dcompiler advapi32
+)
+target_compile_definitions(DirectPortInference PRIVATE
+    UNICODE _UNICODE
+    DXIL_DIR="${DXIL_DIR}"
+)
+target_precompile_headers(DirectPortInference PRIVATE DieWorker.h)
+
+# --- ggml backend registration (links into llama.cpp) ---
+# Add DirectPortInference to llama.cpp's backend list in ggml-backend.cpp
+# and register via ggml_backend_register() at init time.
+# See: llama.cpp/ggml/src/ggml-backend.cpp -> ggml_backend_init_best()
+</file>
+<file path="contig_copy.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(128u, 1u, 1u);
+
+RWByteAddressBuffer _80;
+ByteAddressBuffer _87;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if ((idx + 384u) < p_ne)
+    {
+        [unroll]
+        for (uint i = 0u; i < 4u; i++)
+        {
+            _80.Store<half>((get_doffset() + idx) * 2 + 0, _87.Load<half>((get_aoffset() + idx) * 2 + 0));
+            idx += 128u;
+        }
+    }
+    else
+    {
+        [unroll]
+        for (uint i_1 = 0u; i_1 < 4u; i_1++)
+        {
+            if (idx >= p_ne)
+            {
+                continue;
+            }
+            _80.Store<half>((get_doffset() + idx) * 2 + 0, _87.Load<half>((get_aoffset() + idx) * 2 + 0));
+            idx += 128u;
+        }
+    }
+}
+
+[numthreads(128, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="copy.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _297;
+ByteAddressBuffer _306;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _73;
+    umulExtended(n, mp, _73._m1, _73._m0);
+    uint lsbs = _73._m0;
+    uint msbs = _73._m1;
+    return (msbs + n) >> L;
+}
+
+uint dst_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return (((i13 * p_nb13) + (i12 * p_nb12)) + (i11 * p_nb11)) + (i10 * p_nb10);
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+uint src0_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne0_012mp;
+    uint param_2 = p_ne0_012L;
+    uint i03 = fastdiv(param, param_1, param_2);
+    uint i03_offset = ((i03 * p_ne02) * p_ne01) * p_ne00;
+    uint param_3 = idx - i03_offset;
+    uint param_4 = p_ne0_01mp;
+    uint param_5 = p_ne0_01L;
+    uint i02 = fastdiv(param_3, param_4, param_5);
+    uint i02_offset = (i02 * p_ne01) * p_ne00;
+    uint param_6 = (idx - i03_offset) - i02_offset;
+    uint param_7 = p_ne0_0mp;
+    uint param_8 = p_ne0_0L;
+    uint i01 = fastdiv(param_6, param_7, param_8);
+    uint i00 = ((idx - i03_offset) - i02_offset) - (i01 * p_ne00);
+    return (((i03 * p_nb03) + (i02 * p_nb02)) + (i01 * p_nb01)) + (i00 * p_nb00);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    uint param_1 = idx;
+    _297.Store<half>((get_doffset() + dst_idx(param)) * 2 + 0, _306.Load<half>((get_aoffset() + src0_idx(param_1)) * 2 + 0));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="count_experts.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _59;
+RWByteAddressBuffer _130;
+cbuffer parameter
+{
+    uint p_ne00 : packoffset(c0);
+    uint p_ne01 : packoffset(c0.y);
+    uint p_nb00 : packoffset(c0.z);
+    uint p_nb01 : packoffset(c0.w);
+    uint p_a_offset : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+groupshared uint vals[256];
+
+void comp_main()
+{
+    uint expert_id = gl_WorkGroupID.x;
+    uint num_elements = p_ne00 * p_ne01;
+    uint tid = gl_LocalInvocationID.x;
+    uint count = 0u;
+    for (uint idx = tid; idx < num_elements; idx += 256u)
+    {
+        uint i01 = idx / p_ne00;
+        uint i00 = idx % p_ne00;
+        uint a = _59.Load<uint>(((p_a_offset + (i01 * p_nb01)) + (i00 * p_nb00)) * 4 + 0);
+        count += uint(a == expert_id);
+    }
+    vals[tid] = count;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint s = 128u; s > 0u; s = s >> uint(1))
+    {
+        if (tid < s)
+        {
+            vals[tid] += vals[tid + s];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (tid == 0u)
+    {
+        _130.Store<uint>(expert_id * 4 + 0, vals[0]);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="d3d12_dispatch_reference.h">
+// =============================================================================
+// d3d12_dispatch_reference.h
+// Extracted from ggml-vulkan.cpp — D3D12/DirectPort backend dispatch guide
+// All push constants map directly to SetComputeRoot32BitConstants(0, N, &pc, 0)
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// DISPATCH FORMULA (universal for all unary/binary/activation ops)
+// From ggml-vulkan.cpp:6537 — wg_denoms[0] = 512 for all standard element ops
+//   Dispatch( CEIL_DIV(ne, 512), 1, 1 )
+// where ne = ggml_nelements(dst)
+// Your HLSL shaders are compiled with [numthreads(512, 1, 1)]
+// -----------------------------------------------------------------------------
+#define CEIL_DIV(a, b) (((a) + (b) - 1) / (b))
+
+inline uint32_t dispatch_x(const ggml_tensor* dst) {
+    return CEIL_DIV((uint32_t)ggml_nelements(dst), 512u);
+}
+
+// For norm/rms_norm/group_norm: one workgroup per row
+inline uint32_t dispatch_rows(const ggml_tensor* src0) {
+    return (uint32_t)(ggml_nelements(src0) / src0->ne[0]);
+}
+
+// =============================================================================
+// PUSH CONSTANT STRUCTS (verbatim from ggml-vulkan.cpp, renamed for D3D12)
+// Use: cmdList->SetComputeRoot32BitConstants(0, sizeof(pc)/4, &pc, 0)
+// =============================================================================
+
+// --- Simple ops: SCALE, SQR, SQRT, SIN, COS, CLAMP, DIAG_MASK_INF -----------
+struct PushConst_Simple {
+    uint32_t KX;     // = (uint32_t)ggml_nelements(dst)
+    uint32_t KY;     // = 0
+    float    param1; // op-specific: scale factor, clamp min, n_past (cast), etc.
+    float    param2; // op-specific: clamp max, etc.
+    float    param3; // = 0
+    float    param4; // = 0
+};
+
+// --- Unary ops: SILU, GELU, RELU, TANH, SIGMOID, ELU, EXP, LOG, NEG, etc. --
+// Also: NORM, RMS_NORM, GROUP_NORM (per-row normalization ops)
+// From ggml-vulkan.cpp:1127
+struct PushConst_Unary {
+    uint32_t ne;                                // total elements
+    uint32_t ne00, ne01, ne02, ne03;            // src0 shape
+    uint32_t nb00, nb01, nb02, nb03;            // src0 byte strides
+    uint32_t ne10, ne11, ne12, ne13;            // dst shape
+    uint32_t nb10, nb11, nb12, nb13;            // dst byte strides
+    uint32_t misalign_offsets;                  // = 0 if buffers are aligned
+    float    param1;                            // e.g. eps for norm ops
+    float    param2;                            // = 0
+    // fastdiv fields (can zero-initialize if not using fastdiv path)
+    uint32_t ne0_012mp, ne0_012L;
+    uint32_t ne0_01mp,  ne0_01L;
+    uint32_t ne0_0mp,   ne0_0L;
+    uint32_t ne1_012mp, ne1_012L;
+    uint32_t ne1_01mp,  ne1_01L;
+    uint32_t ne1_0mp,   ne1_0L;
+};
+// IMPORTANT: zero-initialize this struct, then fill ne/ne0x/ne1x fields.
+// fastdiv fields are an optimization — zero them to use the fallback path.
+
+// Helper to populate the basic fields (fastdiv left zeroed):
+inline PushConst_Unary make_unary_pc(const ggml_tensor* src0, const ggml_tensor* dst, float param1 = 0.0f, float param2 = 0.0f) {
+    PushConst_Unary pc = {};
+    pc.ne   = (uint32_t)ggml_nelements(dst);
+    pc.ne00 = (uint32_t)src0->ne[0]; pc.ne01 = (uint32_t)src0->ne[1];
+    pc.ne02 = (uint32_t)src0->ne[2]; pc.ne03 = (uint32_t)src0->ne[3];
+    pc.nb00 = (uint32_t)src0->nb[0]; pc.nb01 = (uint32_t)src0->nb[1];
+    pc.nb02 = (uint32_t)src0->nb[2]; pc.nb03 = (uint32_t)src0->nb[3];
+    pc.ne10 = (uint32_t)dst->ne[0];  pc.ne11 = (uint32_t)dst->ne[1];
+    pc.ne12 = (uint32_t)dst->ne[2];  pc.ne13 = (uint32_t)dst->ne[3];
+    pc.nb10 = (uint32_t)dst->nb[0];  pc.nb11 = (uint32_t)dst->nb[1];
+    pc.nb12 = (uint32_t)dst->nb[2];  pc.nb13 = (uint32_t)dst->nb[3];
+    pc.param1 = param1;
+    pc.param2 = param2;
+    return pc;
+}
+
+// --- Binary ops: ADD, SUB, MUL, DIV, ACC, SET --------------------------------
+// From ggml-vulkan.cpp:1258
+struct PushConst_Binary {
+    uint32_t ne;
+    uint32_t ne00, ne01, ne02, ne03, nb00, nb01, nb02, nb03; // src0
+    uint32_t ne10, ne11, ne12, ne13, nb10, nb11, nb12, nb13; // src1
+    uint32_t ne20, ne21, ne22, ne23, nb20, nb21, nb22, nb23; // dst
+    uint32_t misalign_offsets;
+    float    param1;   // = 0 for ADD/MUL/DIV; = alpha for ACC
+    float    param2;   // = 0
+    int32_t  param3;   // = 0
+};
+// Dispatch: CEIL_DIV(ggml_nelements(dst), 512), 1, 1
+
+// --- GLU family: SWIGLU, GEGLU, REGLU, GEGLU_ERF, GEGLU_QUICK, SWIGLU_OAI --
+// From ggml-vulkan.cpp:1108
+struct PushConst_GLU {
+    uint32_t N;     // = (uint32_t)(dst->ne[0] * dst->ne[1] * dst->ne[2] * dst->ne[3])
+    uint32_t ne00;  // src0->ne[0]
+    uint32_t ne20;  // dst->ne[0]
+    uint32_t mode;  // 0=default, 1=swapped, 2=split
+    float    alpha; // for SWIGLU_OAI only
+    float    limit; // = 0
+    uint32_t nb01, nb02, nb03;
+    uint32_t ne01, ne02;
+    uint32_t nb11, nb12, nb13;
+    uint32_t ne11, ne12;
+};
+// Dispatch: CEIL_DIV(N, 512), 1, 1
+
+// --- Soft-max ----------------------------------------------------------------
+// From ggml-vulkan.cpp:1341
+struct PushConst_SoftMax {
+    uint32_t KX;          // src0->ne[0] (sequence length)
+    uint32_t KY;          // src0->ne[1] (n_heads)
+    uint32_t ne00, ne01, ne02;
+    uint32_t ne12, ne13;
+    uint32_t nb11, nb12, nb13;
+    float    scale;
+    float    max_bias;
+    float    m0, m1;
+    uint32_t n_head_log2;
+    uint32_t nrows_x;
+    uint32_t has_sinks;   // = 0 usually
+};
+// Dispatch: 1 workgroup per row → (ne01*ne02*ne03, 1, 1) with wg_size=1
+// Actually: pipeline picks wg512 variant if ne[0]>1024, else normal
+// Dispatch: (CEIL_DIV(KY, 1), 1, 1) — one thread group per head
+
+// --- RoPE --------------------------------------------------------------------
+// From ggml-vulkan.cpp:1308
+// Use op_params from ggml_tensor: ((int32_t*)node->op_params)
+struct PushConst_RoPE {
+    uint32_t rope_mode;    // op_params[2]
+    uint32_t nrows;        // src0->ne[1]*src0->ne[2]*src0->ne[3]
+    uint32_t n_dims;       // op_params[1]
+    float    freq_scale;   // op_params as float [4]
+    float    freq_base;    // op_params as float [5]  (default 10000.0)
+    float    ext_factor;   // op_params as float [6]
+    float    attn_factor;  // op_params as float [7]
+    float    corr_dims[2]; // derived from n_dims, n_ctx_orig, freq_base
+    float    theta_scale;  // = powf(freq_base, -2.0f/n_dims)
+    uint32_t has_ff;       // src2 != nullptr ? 1 : 0
+    int32_t  sections[4];  // op_params[12..15], used for mrope
+    uint32_t is_imrope;    // = 0 unless mode==VISION
+    uint32_t is_back;      // = 1 for ROPE_BACK
+    uint32_t set_rows_stride; // = 0
+    uint32_t ne00, ne01, ne02;
+    uint32_t nb01, nb02, nb03;
+    uint32_t nb11, nb12, nb13;
+};
+// Dispatch: (ne01*ne02*ne03 / 2, 1, 1) — each thread handles 2 elements (complex pair)
+// Note: for neox variant this is (CEIL_DIV(ne01*ne02*ne03, 1), 1, 1)
+
+// --- Diag Mask Inf -----------------------------------------------------------
+// From ggml-vulkan.cpp:1302
+struct PushConst_DiagMask {
+    uint32_t ncols;            // src0->ne[0]
+    uint32_t rows_per_channel; // src0->ne[1]
+    int32_t  n_past;           // ((int32_t*)node->op_params)[0]
+};
+// Dispatch: CEIL_DIV(ggml_nelements(dst), 512), 1, 1
+
+// --- Count Experts (for MoE) -------------------------------------------------
+// From ggml-vulkan.cpp:1100
+struct PushConst_CountExperts {
+    uint32_t ne00;
+    uint32_t ne01;
+    uint32_t nb00;
+    uint32_t nb01;
+    uint32_t a_offset; // = 0
+};
+
+// --- SSM Conv (Mamba) --------------------------------------------------------
+// From ggml-vulkan.cpp:1494
+struct PushConst_SSMConv {
+    uint32_t d_inner;  // dst->ne[0]
+    uint32_t n_seqs;   // src0->ne[2]
+    uint32_t d_conv;   // src1->ne[0]
+};
+// Dispatch: (d_inner, n_seqs, 1)
+
+// --- SSM Scan (Mamba) --------------------------------------------------------
+// From ggml-vulkan.cpp:1487
+struct PushConst_SSMScan {
+    uint32_t d_state; // src1->ne[0]
+    uint32_t d_inner; // src0->ne[0]
+    uint32_t n_seq_tokens;
+    uint32_t n_seqs;
+};
+// Dispatch uses wave ops — needs native HLSL rewrite with WaveActiveScan*
+
+// --- Quantize Q8_1 -----------------------------------------------------------
+// From ggml-vulkan.cpp:1594
+struct PushConst_QuantQ8_1 {
+    uint32_t ne;         // ggml_nelements(src0)
+    uint32_t ne0_padded; // GGML_PAD(src0->ne[0], 256)
+};
+
+// --- Flash Attn Split-K Reduce -----------------------------------------------
+// From ggml-vulkan.cpp:1599
+struct PushConst_FAReduceK {
+    uint32_t ne01;   // Q sequence length
+    uint32_t ne02;   // n_heads
+    uint32_t split_k;
+    uint32_t k_num; // = ne11 (KV sequence length)
+    uint32_t stride_q;
+    uint32_t stride_kv;
+};
+
+// =============================================================================
+// OP → SHADER + DISPATCH TABLE
+// For your WorkerThread switch(node->op) dispatch loop
+// =============================================================================
+
+/*
+GGML_OP_UNARY (check ggml_get_unary_op(node)):
+    GGML_UNARY_OP_SILU        → silu.dxil       PushConst_Unary  Dispatch(CEIL_DIV(ne,512), 1, 1)
+    GGML_UNARY_OP_GELU        → gelu.dxil
+    GGML_UNARY_OP_GELU_ERF    → gelu_erf.dxil
+    GGML_UNARY_OP_GELU_QUICK  → gelu_quick.dxil
+    GGML_UNARY_OP_RELU        → relu.dxil
+    GGML_UNARY_OP_TANH        → tanh.dxil
+    GGML_UNARY_OP_SIGMOID     → sigmoid.dxil
+    GGML_UNARY_OP_HARDSIGMOID → hardsigmoid.dxil
+    GGML_UNARY_OP_HARDSWISH   → hardswish.dxil
+    GGML_UNARY_OP_EXP         → exp.dxil
+    GGML_UNARY_OP_NEG         → neg.dxil
+    GGML_UNARY_OP_ABS         → abs.dxil
+    GGML_UNARY_OP_SOFTPLUS    → softplus.dxil
+    GGML_UNARY_OP_STEP        → step.dxil
+    GGML_UNARY_OP_ROUND       → round.dxil
+    GGML_UNARY_OP_CEIL        → ceil.dxil
+    GGML_UNARY_OP_FLOOR       → floor.dxil
+    GGML_UNARY_OP_TRUNC       → trunc.dxil
+    GGML_UNARY_OP_SGN         → sgn.dxil
+    GGML_UNARY_OP_XIELU       → xielu.dxil
+
+GGML_OP_ADD / SUB / MUL / DIV / ACC
+    → binary shader           PushConst_Binary  Dispatch(CEIL_DIV(ne,512), 1, 1)
+
+GGML_OP_GLU (check ggml_get_glu_op(node)):
+    GGML_GLU_OP_SWIGLU        → swiglu.dxil     PushConst_GLU   Dispatch(CEIL_DIV(N,512), 1, 1)
+    GGML_GLU_OP_SWIGLU_OAI    → swiglu_oai.dxil
+    GGML_GLU_OP_GEGLU         → geglu.dxil
+    GGML_GLU_OP_GEGLU_ERF     → geglu_erf.dxil
+    GGML_GLU_OP_GEGLU_QUICK   → geglu_quick.dxil
+    GGML_GLU_OP_REGLU         → reglu.dxil
+
+GGML_OP_NORM       → norm.dxil       PushConst_Unary  param1=eps   Dispatch(nrows, 1, 1)
+GGML_OP_GROUP_NORM → group_norm.dxil PushConst_Unary  param1=eps   Dispatch(n_groups, 1, 1)
+GGML_OP_RMS_NORM   → [use DML or native HLSL]
+
+GGML_OP_LOG         → log.dxil
+GGML_OP_SUM / MEAN  → [reduce — use DirectML Reduce]
+
+GGML_OP_DIAG_MASK_INF → diag_mask_inf.dxil  PushConst_DiagMask  Dispatch(CEIL_DIV(ne,512),1,1)
+
+GGML_OP_SOFT_MAX    → [prefer DirectML Softmax operator]
+
+GGML_OP_ROPE        → [native HLSL — rope.dxil needs WaveGetLaneIndex fix first]
+
+GGML_OP_MUL_MAT     → DirectML GEMM (DML_OPERATOR_GEMM)
+
+GGML_OP_CPY / CONT / DUP
+    → copy.dxil or contig_copy.dxil   PushConst_Unary  Dispatch(CEIL_DIV(ne,512),1,1)
+
+GGML_OP_PAD        → pad.dxil
+GGML_OP_ROLL       → roll.dxil
+GGML_OP_REPEAT     → repeat.dxil
+GGML_OP_DIAG       → diag.dxil
+GGML_OP_UPSCALE    → upscale.dxil
+GGML_OP_IM2COL     → [3D variant: im2col_3d.dxil]
+
+GGML_OP_REGLU      → reglu.dxil
+GGML_OP_GEGLU      → geglu.dxil
+
+GGML_OP_SSM_CONV   → ssm_conv.dxil   PushConst_SSMConv   Dispatch(d_inner, n_seqs, 1)
+GGML_OP_SSM_SCAN   → needs native Wave rewrite (subgroup ops)
+
+GGML_OP_COUNT_EXPERTS → count_experts.dxil  PushConst_CountExperts
+GGML_OP_TOP_K      → topk.dxil (needs Wave rewrite — uses subgroup shuffle)
+
+// DEQUANT (for fp16 inference with quantized weights):
+// Map these to your native-rewritten DXIL shaders
+GGML_OP_GET_ROWS with GGML_TYPE_Q4_0 → dequant_q4_0.dxil (DONE)
+GGML_OP_GET_ROWS with GGML_TYPE_Q4_1 → dequant_q4_1_native.dxil (TODO)
+GGML_OP_GET_ROWS with GGML_TYPE_Q8_0 → dequant_q8_0_native.dxil (TODO)
+GGML_OP_GET_ROWS with GGML_TYPE_Q5_0 → dequant_q5_0_native.dxil (TODO)
+GGML_OP_GET_ROWS with GGML_TYPE_Q5_1 → dequant_q5_1_native.dxil (TODO)
+// All dequant: Dispatch(CEIL_DIV(ne, 32), 1, 1) — 32 threads per block (QK=32)
+
+// MATMUL DEQUANT path (mat-vec, quantized weights × fp32 activations):
+// Two-stage: dequant → DirectML GEMM
+// OR: use ggml-vulkan's mul_mat path logic — for now route to dequant+GEMM
+*/
+
+// =============================================================================
+// ADAPTER SELECTION (skip P2000 at index 0, target V340 dies 1-4)
+// =============================================================================
+/*
+IDXGIFactory4* factory = nullptr;
+CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+
+// Die index mapping (from your DML probe results):
+// DML device 0 → P2000 (SKIP)
+// DML device 1 → V340 die 0
+// DML device 2 → V340 die 1
+// DML device 3 → V340 die 2
+// DML device 4 → V340 die 3
+
+int target_adapters[] = {1, 2, 3, 4};  // skip 0
+
+for (int i = 0; i < 4; i++) {
+    IDXGIAdapter1* adapter = nullptr;
+    factory->EnumAdapters1(target_adapters[i], &adapter);
+
+    ID3D12Device* device = nullptr;
+    D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
+
+    // Verify DML support
+    DML_CREATE_DEVICE_FLAGS dmlFlags = DML_CREATE_DEVICE_FLAG_NONE;
+    IDMLDevice* dmlDevice = nullptr;
+    DMLCreateDevice(device, dmlFlags, IID_PPV_ARGS(&dmlDevice));
+
+    // Store per-die: device, dmlDevice, commandQueue, commandAllocator
+    // Pin worker thread: SetThreadAffinityMask(thread_handle, 1ull << (i + 2))
+    // (skip core 0=OS, core 1=llama master, cores 2-5=die workers)
+}
+*/
+</file>
+<file path="dequant_f32.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+RWByteAddressBuffer _44 : register(u1, space0);
+ByteAddressBuffer _53 : register(t0, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = gl_GlobalInvocationID.x * 16u;
+    if (i >= p_nel)
+    {
+        return;
+    }
+    [unroll]
+    for (uint l = 0u; l < 16u; l++)
+    {
+        _44.Store<half>((i + l) * 2 + 0, half(_53.Load<float>((i + l) * 4 + 0)));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q1_0.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q1_0
+{
+    half d;
+    ??? qs[16];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _77 : register(t0, space0);
+RWByteAddressBuffer _103 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 4u;
+    uint ir = tid % 4u;
+    uint ib = (4u * i) + ir;
+    if (ib >= (p_nel / 128u))
+    {
+        return;
+    }
+    uint b_idx = ((512u * i) + (128u * ir)) + (8u * il);
+    float d = float(_77.Load<half>(ib * 18 + 0));
+    uint bits = uint(_77.Load<???>(ib * 18 + il * 1 + 2));
+    float _113;
+    [unroll]
+    for (uint l = 0u; l < 8u; l++)
+    {
+        if ((bits & (1u << l)) != 0u)
+        {
+            _113 = d;
+        }
+        else
+        {
+            _113 = -d;
+        }
+        _103.Store<half>((b_idx + l) * 2 + 0, half(_113));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q4_0_native.hlsl">
+// Native HLSL implementation of GGML Q4_0 Dequantization
+// 32 FP16 elements are compressed into 16 bytes of data + 2 bytes for the FP16 scale (d)
+
+ByteAddressBuffer input_blocks : register(t0);
+RWStructuredBuffer<min16float> output_tensor : register(u0);
+
+[numthreads(32, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    // Each thread processes one Q4_0 block (32 elements)
+    uint block_idx = tid.x;
+    
+    // Q4_0 block size is 18 bytes (2 byte scale + 16 bytes data)
+    uint block_offset = block_idx * 18;
+    
+    // Read the FP16 scale 'd' (first 2 bytes)
+    uint d_raw = input_blocks.Load(block_offset);
+    min16float d = asfloat16(uint16_t(d_raw & 0xFFFF));
+    
+    uint out_offset = block_idx * 32;
+    
+    // Unpack the 16 bytes of data (which hold 32 4-bit nibbles)
+    for (uint i = 0; i < 4; i++) {
+        // Read 4 bytes at a time
+        uint packed_data = input_blocks.Load(block_offset + 2 + (i * 4));
+        
+        for (uint j = 0; j < 4; j++) {
+            // Extract the 8-bit byte
+            uint byte_val = (packed_data >> (j * 8)) & 0xFF;
+            
+            // Lower nibble (first weight)
+            int v0 = (int)(byte_val & 0x0F) - 8;
+            // Upper nibble (second weight)
+            int v1 = (int)(byte_val >> 4) - 8;
+            
+            // Calculate final indices (GGML layout puts second nibble 16 elements later)
+            uint out_idx_0 = out_offset + (i * 4) + j;
+            uint out_idx_1 = out_offset + (i * 4) + j + 16;
+            
+            output_tensor[out_idx_0] = (min16float)(v0) * d;
+            output_tensor[out_idx_1] = (min16float)(v1) * d;
+        }
+    }
+}
+</file>
+<file path="dequant_q4_0.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q4_0
+{
+    half d;
+    ??? qs[16];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _79 : register(t0, space0);
+RWByteAddressBuffer _97 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 32u;
+    uint ir = tid % 32u;
+    uint ib = (32u * i) + ir;
+    if (ib >= (p_nel / 32u))
+    {
+        return;
+    }
+    uint q_idx = 8u * il;
+    uint b_idx = ((1024u * i) + (32u * ir)) + q_idx;
+    float d = float(_79.Load<half>(ib * 18 + 0));
+    [unroll]
+    for (uint l = 0u; l < 8u; l++)
+    {
+        _97.Store<half>(((b_idx + l) + 0u) * 2 + 0, half(d * (float(int(uint(_79.Load<???>(ib * 18 + (q_idx + l) * 1 + 2))) & 15) - 8.0f)));
+        _97.Store<half>(((b_idx + l) + 16u) * 2 + 0, half(d * (float(_79.Load<???>(ib * 18 + (q_idx + l) * 1 + 2) >> 4) - 8.0f)));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q4_1.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q4_1
+{
+    half d;
+    half m;
+    ??? qs[16];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _77 : register(t0, space0);
+RWByteAddressBuffer _104 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 32u;
+    uint ir = tid % 32u;
+    uint ib = (32u * i) + ir;
+    if (ib >= (p_nel / 32u))
+    {
+        return;
+    }
+    uint b_idx = ((1024u * i) + (32u * ir)) + (8u * il);
+    float d = float(_77.Load<half>(ib * 20 + 0));
+    float m = float(_77.Load<half>(ib * 20 + 2));
+    uint q_idx = 8u * il;
+    [unroll]
+    for (uint l = 0u; l < 8u; l++)
+    {
+        _104.Store<half>(((b_idx + l) + 0u) * 2 + 0, half((d * float(int(uint(_77.Load<???>(ib * 20 + (q_idx + l) * 1 + 4))) & 15)) + m));
+        _104.Store<half>(((b_idx + l) + 16u) * 2 + 0, half((d * float(_77.Load<???>(ib * 20 + (q_idx + l) * 1 + 4) >> 4)) + m));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q5_0.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q5_0
+{
+    half d;
+    uint16_t qh[2];
+    ??? qs[16];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _80 : register(t0, space0);
+RWByteAddressBuffer _127 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 32u;
+    uint ir = tid % 32u;
+    uint ib = (32u * i) + ir;
+    if (ib >= (p_nel / 32u))
+    {
+        return;
+    }
+    uint b_idx = ((1024u * i) + (32u * ir)) + (8u * il);
+    float d = float(_80.Load<half>(ib * 22 + 0));
+    uint qh = (uint(_80.Load<uint16_t>(ib * 22 + 4)) << uint(16)) | uint(_80.Load<uint16_t>(ib * 22 + 2));
+    uint q_idx = 8u * il;
+    [unroll]
+    for (uint l = 0u; l < 8u; l++)
+    {
+        uint iqs = q_idx + l;
+        uint vui = uint(_80.Load<???>(ib * 22 + iqs * 1 + 6));
+        _127.Store<half>(((b_idx + l) + 0u) * 2 + 0, half(d * (float((vui & 15u) | (((qh >> iqs) << uint(4)) & 16u)) - 16.0f)));
+        _127.Store<half>(((b_idx + l) + 16u) * 2 + 0, half(d * (float((vui >> uint(4)) | ((qh >> (iqs + 12u)) & 16u)) - 16.0f)));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q5_1.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q5_1
+{
+    half d;
+    half m;
+    uint qh;
+    ??? qs[16];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _77 : register(t0, space0);
+RWByteAddressBuffer _122 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 32u;
+    uint ir = tid % 32u;
+    uint ib = (32u * i) + ir;
+    if (ib >= (p_nel / 32u))
+    {
+        return;
+    }
+    uint b_idx = ((1024u * i) + (32u * ir)) + (8u * il);
+    float d = float(_77.Load<half>(ib * 24 + 0));
+    float m = float(_77.Load<half>(ib * 24 + 2));
+    uint qh = _77.Load<uint>(ib * 24 + 4);
+    uint q_idx = 8u * il;
+    [unroll]
+    for (uint l = 0u; l < 8u; l++)
+    {
+        uint iqs = q_idx + l;
+        uint vui = uint(_77.Load<???>(ib * 24 + iqs * 1 + 8));
+        _122.Store<half>(((b_idx + l) + 0u) * 2 + 0, half((d * float((vui & 15u) | (((qh >> iqs) << uint(4)) & 16u))) + m));
+        _122.Store<half>(((b_idx + l) + 16u) * 2 + 0, half((d * float((vui >> uint(4)) | ((qh >> (iqs + 12u)) & 16u))) + m));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="dequant_q8_0.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+struct block_q8_0
+{
+    half d;
+    ??? qs[32];
+};
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _76 : register(t0, space0);
+RWByteAddressBuffer _97 : register(u1, space0);
+cbuffer parameter
+{
+    uint p_M : packoffset(c0);
+    uint p_K : packoffset(c0.y);
+    uint p_stride_a : packoffset(c0.z);
+    uint p_stride_b : packoffset(c0.w);
+    uint p_nel : packoffset(c1);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+void comp_main()
+{
+    uint i = (gl_WorkGroupID.x * 4u) + (gl_LocalInvocationID.x / 64u);
+    uint tid = gl_LocalInvocationID.x % 64u;
+    uint il = tid / 32u;
+    uint ir = tid % 32u;
+    uint ib = (32u * i) + ir;
+    if (ib >= (p_nel / 32u))
+    {
+        return;
+    }
+    uint b_idx = ((1024u * i) + (32u * ir)) + (16u * il);
+    float d = float(_76.Load<half>(ib * 34 + 0));
+    uint q_idx = 16u * il;
+    [unroll]
+    for (uint l = 0u; l < 16u; l += 2u)
+    {
+        _97.Store<half>((b_idx + l) * 2 + 0, half(d * float(_76.Load<???>(ib * 34 + (q_idx + l) * 1 + 2))));
+        _97.Store<half>(((b_idx + l) + 1u) * 2 + 0, half(d * float(_76.Load<???>(ib * 34 + ((q_idx + l) + 1u) * 1 + 2))));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="diag_mask_inf.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(1u, 512u, 1u);
+
+RWByteAddressBuffer _58;
+ByteAddressBuffer _71;
+cbuffer parameter
+{
+    uint p_ncols : packoffset(c0);
+    uint p_rows_per_channel : packoffset(c0.y);
+    uint p_n_past : packoffset(c0.z);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint col = gl_GlobalInvocationID.y;
+    uint row = gl_GlobalInvocationID.x;
+    if (col >= p_ncols)
+    {
+        return;
+    }
+    uint i = (row * p_ncols) + col;
+    if (col > (p_n_past + (row % p_rows_per_channel)))
+    {
+        _58.Store<half>(i * 2 + 0, half(asfloat(4286578688u)));
+    }
+    else
+    {
+        _58.Store<half>(i * 2 + 0, _71.Load<half>(i * 2 + 0));
+    }
+}
+
+[numthreads(1, 512, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="diag.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _267;
+RWByteAddressBuffer _299;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _70;
+    umulExtended(n, mp, _70._m1, _70._m0);
+    uint lsbs = _70._m0;
+    uint msbs = _70._m1;
+    return (msbs + n) >> L;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint dst_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return (((i13 * p_nb13) + (i12 * p_nb12)) + (i11 * p_nb11)) + (i10 * p_nb10);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    if (i10 == i11)
+    {
+        float val = float(_267.Load<half>(((((get_aoffset() + (i13 * p_nb03)) + (i12 * p_nb02)) + (0u * p_nb01)) + (i10 * p_nb00)) * 2 + 0));
+        uint param_9 = idx;
+        _299.Store<half>((get_doffset() + dst_idx(param_9)) * 2 + 0, half(val));
+    }
+    else
+    {
+        uint param_10 = idx;
+        _299.Store<half>((get_doffset() + dst_idx(param_10)) * 2 + 0, half(0.0f));
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="DieWorker.cpp">
+// DieWorker.cpp
+// Per-die D3D12 compute worker implementation.
+// Template: Consumer.cpp / PipelineNode from VirtuaCam.
+// Transport: DirectPort NT handle sharing + dp12_queue_wait for GPU-side sync.
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <sddl.h>
+#include <format>
+#include <filesystem>
+#include "DieWorker.h"
+#include "directport.h"
+
+// Pull in ggml op enums — adjust path to match your llama.cpp location
+#include "C:/BUILD/llama.cpp/ggml/include/ggml.h"
+
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "advapi32.lib")
+
+using Microsoft::WRL::ComPtr;
+
+// ---------------------------------------------------------------------------
+// Push constant structs (from d3d12_dispatch_reference.h)
+// SetComputeRoot32BitConstants(0, sizeof(pc)/4, &pc, 0)
+// ---------------------------------------------------------------------------
+struct PC_Unary {
+    uint32_t ne;
+    uint32_t ne00, ne01, ne02, ne03, nb00, nb01, nb02, nb03;
+    uint32_t ne10, ne11, ne12, ne13, nb10, nb11, nb12, nb13;
+    uint32_t misalign_offsets;
+    float    param1, param2;
+    uint32_t pad[12]; // fastdiv fields — zeroed
+};
+
+struct PC_Binary {
+    uint32_t ne;
+    uint32_t ne00, ne01, ne02, ne03, nb00, nb01, nb02, nb03;
+    uint32_t ne10, ne11, ne12, ne13, nb10, nb11, nb12, nb13;
+    uint32_t ne20, ne21, ne22, ne23, nb20, nb21, nb22, nb23;
+    uint32_t misalign_offsets;
+    float    param1, param2;
+    int32_t  param3;
+};
+
+struct PC_GLU {
+    uint32_t N;
+    uint32_t ne00, ne20, mode;
+    float    alpha, limit;
+    uint32_t nb01, nb02, nb03;
+    uint32_t ne01, ne02;
+    uint32_t nb11, nb12, nb13;
+    uint32_t ne11, ne12;
+};
+
+// ---------------------------------------------------------------------------
+// DXIL loader — reads a pre-compiled .dxil blob from disk
+// ---------------------------------------------------------------------------
+static std::vector<uint8_t> LoadDXIL(const char* name) {
+    auto path = std::filesystem::path("C:/BUILD/native_hlsl") / (std::string(name) + ".dxil");
+    HANDLE hFile = CreateFileA(path.string().c_str(), GENERIC_READ, FILE_SHARE_READ,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return {};
+    DWORD size = GetFileSize(hFile, nullptr);
+    std::vector<uint8_t> blob(size);
+    DWORD read = 0;
+    ReadFile(hFile, blob.data(), size, &read, nullptr);
+    CloseHandle(hFile);
+    return blob;
+}
+
+// ---------------------------------------------------------------------------
+// Root signature builder
+// All shaders share the same layout:
+//   b0 = root constants (up to 32 DWORDs)
+//   t0 = SRV (src)
+//   u0 = UAV (dst)
+// ---------------------------------------------------------------------------
+static HRESULT CreateComputeRootSig(ID3D12Device* device, ID3D12RootSignature** ppSig) {
+    D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_DESCRIPTOR_RANGE uavRange = { D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 4, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+
+    D3D12_ROOT_PARAMETER params[3] = {};
+    // [0] Root constants — push constants
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    params[0].Constants.ShaderRegister = 0;
+    params[0].Constants.RegisterSpace  = 0;
+    params[0].Constants.Num32BitValues = 32; // max push constant size
+    params[0].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
+    // [1] SRV table (t0..t3)
+    params[1].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[1].DescriptorTable.NumDescriptorRanges = 1;
+    params[1].DescriptorTable.pDescriptorRanges   = &srvRange;
+    params[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+    // [2] UAV table (u0..u3)
+    params[2].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[2].DescriptorTable.NumDescriptorRanges = 1;
+    params[2].DescriptorTable.pDescriptorRanges   = &uavRange;
+    params[2].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC desc = {};
+    desc.NumParameters = 3;
+    desc.pParameters   = params;
+    desc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    ComPtr<ID3DBlob> blob, err;
+    HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
+    if (FAILED(hr)) return hr;
+    return device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
+                                       IID_PPV_ARGS(ppSig));
+}
+
+// ---------------------------------------------------------------------------
+// DieWorker
+// ---------------------------------------------------------------------------
+DieWorker::DieWorker(int die_index, int cpu_core, const wchar_t* upstream_manifest)
+    : m_dieIndex(die_index)
+    , m_cpuCore(cpu_core)
+    , m_upstreamManifestName(upstream_manifest ? upstream_manifest : L"")
+{
+    // Each die publishes its manifest under a well-known name
+    // Downstream die opens this by name — same auto-discovery as VirtuaCam Multiplexer
+    m_manifestName = std::wstring(kManifestPrefix) + std::to_wstring(die_index);
+}
+
+DieWorker::~DieWorker() {
+    StopWorker();
+
+    // Mirror PipelineNode::ShutdownSharing / DisconnectFromProducer
+    if (m_upstream.pManifest)  UnmapViewOfFile(m_upstream.pManifest);
+    if (m_upstream.hManifest)  CloseHandle(m_upstream.hManifest);
+    if (m_upstream.hSharedTex) CloseHandle(m_upstream.hSharedTex);
+    if (m_upstream.hSharedFence) CloseHandle(m_upstream.hSharedFence);
+
+    if (m_pManifestOut)    UnmapViewOfFile(m_pManifestOut);
+    if (m_hManifestOut)    CloseHandle(m_hManifestOut);
+    if (m_hBoundaryTex)    CloseHandle(m_hBoundaryTex);
+    if (m_hBoundaryFence)  CloseHandle(m_hBoundaryFence);
+    if (m_hKickEvent)      CloseHandle(m_hKickEvent);
+}
+
+HRESULT DieWorker::Initialize(uint32_t tensor_width, uint32_t tensor_height) {
+    HRESULT hr;
+    hr = InitD3D12();       if (FAILED(hr)) return hr;
+    hr = LoadPSOs();        if (FAILED(hr)) return hr;
+
+    if (!m_upstreamManifestName.empty()) {
+        hr = ConnectToUpstream(); if (FAILED(hr)) return hr;
+    } else {
+        // Die 0: no upstream die, gets kicked by host via event
+        m_hKickEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    }
+
+    hr = InitBoundaryOutput(tensor_width, tensor_height); if (FAILED(hr)) return hr;
+    PublishManifest(tensor_width, tensor_height);
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+// InitD3D12 — mirrors PipelineNode::InitD3D11 but targets a specific adapter
+// The v1.0 constraint fix: each die gets its own device on its own adapter.
+// ---------------------------------------------------------------------------
+HRESULT DieWorker::InitD3D12() {
+    ComPtr<IDXGIFactory6> factory;
+    HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+    if (FAILED(hr)) return hr;
+
+    // Enumerate to our target adapter — skip adapter 0 (P2000)
+    int targetIndex = kDieAdapterBase + m_dieIndex;
+    hr = factory->EnumAdapters1(targetIndex, &m_adapter);
+    if (FAILED(hr)) return hr;
+
+    DXGI_ADAPTER_DESC1 desc;
+    m_adapter->GetDesc1(&desc);
+    m_adapterLuid = desc.AdapterLuid;
+
+    hr = D3D12CreateDevice(m_adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&m_device));
+    if (FAILED(hr)) return hr;
+
+    // Compute-only queue — no graphics needed
+    D3D12_COMMAND_QUEUE_DESC qDesc = {};
+    qDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+    hr = m_device->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&m_computeQueue));
+    if (FAILED(hr)) return hr;
+
+    hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&m_cmdAlloc));
+    if (FAILED(hr)) return hr;
+
+    hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
+                                     m_cmdAlloc.Get(), nullptr, IID_PPV_ARGS(&m_cmdList));
+    if (FAILED(hr)) return hr;
+    m_cmdList->Close(); // start closed, reset before each use
+
+    // Descriptor heap for SRV/UAV bindings
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.NumDescriptors = 1024;
+    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    hr = m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_uavHeap));
+    return hr;
+}
+
+// ---------------------------------------------------------------------------
+// LoadPSOs — load every DXIL blob from C:\BUILD\native_hlsl at startup.
+// All command lists are pre-recorded against these PSOs.
+// ---------------------------------------------------------------------------
+HRESULT DieWorker::LoadPSOs() {
+    // Shared root signature for all compute shaders
+    ComPtr<ID3D12RootSignature> rootSig;
+    HRESULT hr = CreateComputeRootSig(m_device.Get(), &rootSig);
+    if (FAILED(hr)) return hr;
+
+    // List of all compiled DXIL shaders
+    const char* shaders[] = {
+        "silu", "gelu", "gelu_erf", "gelu_quick", "relu", "tanh", "sigmoid",
+        "hardsigmoid", "hardswish", "exp", "neg", "abs", "softplus",
+        "step", "round", "ceil", "floor", "trunc", "sgn", "xielu", "elu",
+        "swiglu", "swiglu_oai", "geglu", "geglu_erf", "geglu_quick", "reglu",
+        "norm", "group_norm",
+        "copy", "contig_copy", "repeat", "roll", "pad", "diag", "diag_mask_inf",
+        "log", "arange", "fill", "upscale", "tri",
+        "im2col_3d", "count_experts",
+        "mul_mat_split_k_reduce", "flash_attn_split_k_reduce", "ssm_conv",
+        "dequant_q4_0",  // native rewrite — already compiled
+        // TODO: dequant_q8_0, dequant_q4_1, dequant_q5_0, dequant_q5_1
+    };
+
+    for (const char* name : shaders) {
+        auto blob = LoadDXIL(name);
+        if (blob.empty()) continue; // skip missing — will assert at dispatch if needed
+
+        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+        psoDesc.pRootSignature     = rootSig.Get();
+        psoDesc.CS.pShaderBytecode = blob.data();
+        psoDesc.CS.BytecodeLength  = blob.size();
+
+        PsoEntry entry;
+        entry.rootSig = rootSig;
+        hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&entry.pso));
+        if (SUCCEEDED(hr)) {
+            m_psoCache[name] = std::move(entry);
+        }
+    }
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+// ConnectToUpstream — mirrors PipelineNode::ConnectToProducer
+// Opens the upstream die's shared texture and fence by NT name.
+// Uses the device's OpenSharedHandleByName (the v1.0 fix — per-device, not global).
+// ---------------------------------------------------------------------------
+HRESULT DieWorker::ConnectToUpstream() {
+    const wchar_t* manifestName = m_upstreamManifestName.c_str();
+
+    HANDLE hMap = OpenFileMappingW(FILE_MAP_READ, FALSE, manifestName);
+    if (!hMap) return E_FAIL;
+
+    TensorManifest* pMani = (TensorManifest*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, sizeof(TensorManifest));
+    if (!pMani) { CloseHandle(hMap); return E_FAIL; }
+
+    // Validate we're on the same adapter
+    if (memcmp(&pMani->adapterLuid, &m_adapterLuid, sizeof(LUID)) != 0) {
+        // Cross-adapter: allowed — the Switchtec fabric handles P2P
+        // Don't fail, but note it for the cross-adapter heap flag
+    }
+
+    // Open texture NT handle by name using THIS die's device (v1.0 constraint fix)
+    HRESULT hr = m_device->OpenSharedHandleByName(pMani->texName, GENERIC_ALL, &m_upstream.hSharedTex);
+    if (FAILED(hr)) { UnmapViewOfFile(pMani); CloseHandle(hMap); return hr; }
+
+    hr = m_device->OpenSharedHandle(m_upstream.hSharedTex, IID_PPV_ARGS(&m_upstream.sharedTex));
+    if (FAILED(hr)) { CloseHandle(m_upstream.hSharedTex); UnmapViewOfFile(pMani); CloseHandle(hMap); return hr; }
+
+    hr = m_device->OpenSharedHandleByName(pMani->fenceName, GENERIC_ALL, &m_upstream.hSharedFence);
+    if (FAILED(hr)) { m_upstream.sharedTex.Reset(); CloseHandle(m_upstream.hSharedTex); UnmapViewOfFile(pMani); CloseHandle(hMap); return hr; }
+
+    hr = m_device->OpenSharedHandle(m_upstream.hSharedFence, IID_PPV_ARGS(&m_upstream.sharedFence));
+    if (FAILED(hr)) { CloseHandle(m_upstream.hSharedFence); m_upstream.sharedTex.Reset(); CloseHandle(m_upstream.hSharedTex); UnmapViewOfFile(pMani); CloseHandle(hMap); return hr; }
+
+    // Private copy texture — compute reads from here, not directly from shared
+    D3D12_RESOURCE_DESC rd = m_upstream.sharedTex->GetDesc();
+    D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_DEFAULT };
+    m_device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
+                                      D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                      IID_PPV_ARGS(&m_upstream.privateTex));
+
+    m_upstream.hManifest  = hMap;
+    m_upstream.pManifest  = pMani;
+    m_upstream.isConnected = true;
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+// InitBoundaryOutput — mirrors PipelineNode::InitializeSharing
+// Creates this die's output texture published downstream.
+// Uses THIS die's device directly (bypasses DirectPort singleton — v1.0 fix).
+// ---------------------------------------------------------------------------
+HRESULT DieWorker::InitBoundaryOutput(uint32_t width, uint32_t height) {
+    D3D12_RESOURCE_DESC rd = {};
+    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rd.Width            = width;
+    rd.Height           = height;
+    rd.DepthOrArraySize = 1;
+    rd.MipLevels        = 1;
+    rd.Format           = DXGI_FORMAT_R16_FLOAT; // DP_FORMAT_HALF — activations
+    rd.SampleDesc.Count = 1;
+    rd.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS |
+                          D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    rd.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+    D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_DEFAULT };
+
+    HRESULT hr = m_device->CreateCommittedResource(
+        &hp,
+        D3D12_HEAP_FLAG_SHARED,
+        &rd,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&m_boundaryTex));
+    if (FAILED(hr)) return hr;
+
+    hr = m_device->CreateFence(0,
+        D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,
+        IID_PPV_ARGS(&m_boundaryFence));
+    if (FAILED(hr)) return hr;
+
+    // NT handle names for downstream auto-discovery
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        L"D:P(A;;GA;;;AU)", SDDL_REVISION_1, &sd, nullptr);
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), sd, FALSE };
+
+    std::wstring texName   = std::wstring(L"Global\\DirectPort_InferenceTex_")   + std::to_wstring(m_dieIndex);
+    std::wstring fenceName = std::wstring(L"Global\\DirectPort_InferenceFence_") + std::to_wstring(m_dieIndex);
+
+    m_device->CreateSharedHandle(m_boundaryTex.Get(),   &sa, GENERIC_ALL, texName.c_str(),   &m_hBoundaryTex);
+    m_device->CreateSharedHandle(m_boundaryFence.Get(), &sa, GENERIC_ALL, fenceName.c_str(), &m_hBoundaryFence);
+    LocalFree(sd);
+
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+// PublishManifest — writes the TensorManifest to named shared memory.
+// Downstream die's ConnectToUpstream() opens this by m_manifestName.
+// ---------------------------------------------------------------------------
+void DieWorker::PublishManifest(uint32_t width, uint32_t height) {
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        L"D:P(A;;GA;;;AU)", SDDL_REVISION_1, &sd, nullptr);
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), sd, FALSE };
+
+    m_hManifestOut = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+                                        0, sizeof(TensorManifest), m_manifestName.c_str());
+    m_pManifestOut = (TensorManifest*)MapViewOfFile(m_hManifestOut, FILE_MAP_ALL_ACCESS,
+                                                     0, 0, sizeof(TensorManifest));
+    LocalFree(sd);
+    if (!m_pManifestOut) return;
+
+    ZeroMemory(m_pManifestOut, sizeof(TensorManifest));
+    m_pManifestOut->width       = width;
+    m_pManifestOut->height      = height;
+    m_pManifestOut->format      = DXGI_FORMAT_R16_FLOAT;
+    m_pManifestOut->adapterLuid = m_adapterLuid;
+
+    std::wstring texName   = std::wstring(L"Global\\DirectPort_InferenceTex_")   + std::to_wstring(m_dieIndex);
+    std::wstring fenceName = std::wstring(L"Global\\DirectPort_InferenceFence_") + std::to_wstring(m_dieIndex);
+    wcscpy_s(m_pManifestOut->texName,   texName.c_str());
+    wcscpy_s(m_pManifestOut->fenceName, fenceName.c_str());
+}
+
+void DieWorker::AssignNodes(ggml_cgraph* graph, int start_node, int end_node) {
+    m_graph     = graph;
+    m_nodeStart = start_node;
+    m_nodeEnd   = end_node;
+}
+
+// ---------------------------------------------------------------------------
+// StartWorker — spins the pinned thread
+// ---------------------------------------------------------------------------
+void DieWorker::StartWorker() {
+    m_isRunning = true;
+    m_thread = std::thread([this] {
+        // Pin to assigned physical core
+        SetThreadAffinityMask(GetCurrentThread(), 1ull << m_cpuCore);
+
+        // Name the thread for PIX/RGP debugging
+        std::wstring name = L"DieWorker_" + std::to_wstring(m_dieIndex);
+        SetThreadDescription(GetCurrentThread(), name.c_str());
+
+        WorkerThread();
+    });
+}
+
+void DieWorker::StopWorker() {
+    m_isRunning = false;
+    if (m_hKickEvent) SetEvent(m_hKickEvent); // unblock die 0
+    if (m_thread.joinable()) m_thread.join();
+}
+
+void DieWorker::KickInference(uint64_t token_index) {
+    // Die 0 only: host kicks off a new token
+    m_tokenValue = token_index;
+    if (m_hKickEvent) SetEvent(m_hKickEvent);
+}
+
+// ---------------------------------------------------------------------------
+// WorkerThread — THE HOT LOOP
+// Mirrors BrokerThreadFunction from Broker.cpp and ProcessLoop from Consumer.cpp.
+//
+// Die 0:  WaitForSingleObject(kickEvent) → DispatchGraph → SignalFence
+// Die N:  dp12_queue_wait → CopyTex → DispatchGraph → SignalFence
+//
+// dp12_queue_wait is GPU-side only — CPU returns immediately.
+// The command queue stalls at hardware level until upstream fence fires.
+// 170ns PCIe crossbar latency per the DirectPort architecture doc.
+// ---------------------------------------------------------------------------
+void DieWorker::WorkerThread() {
+    while (m_isRunning) {
+        if (m_upstream.isConnected) {
+            // --- Consumer path (dies 1-3) ---
+            // Poll for a new token from upstream (non-blocking read)
+            uint64_t latestToken = m_upstream.pManifest->tokenValue;
+            if (latestToken <= m_upstream.lastSeenToken) {
+                // Nothing new yet — yield and check again
+                // With pinned core + speculative prefetch this is ~ns loop
+                _mm_pause();
+                continue;
+            }
+
+            // GPU queue waits on upstream fence — CPU returns immediately
+            // pQueue will stall at hardware level until fence value is met
+            m_upstream.lastSeenToken = latestToken;
+            m_computeQueue->Wait(m_upstream.sharedFence.Get(), latestToken);
+
+            // Copy upstream boundary tex to private (same pattern as Consumer.cpp)
+            m_cmdAlloc->Reset();
+            m_cmdList->Reset(m_cmdAlloc.Get(), nullptr);
+
+            // Transition shared → copy source
+            D3D12_RESOURCE_BARRIER barriers[2] = {};
+            barriers[0].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[0].Transition.pResource   = m_upstream.sharedTex.Get();
+            barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            barriers[0].Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
+            barriers[1]                        = barriers[0];
+            barriers[1].Transition.pResource   = m_upstream.privateTex.Get();
+            barriers[1].Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
+            m_cmdList->ResourceBarrier(2, barriers);
+
+            m_cmdList->CopyResource(m_upstream.privateTex.Get(), m_upstream.sharedTex.Get());
+
+            // Transition private back to UAV for compute
+            barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            barriers[1].Transition.StateAfter  = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            m_cmdList->ResourceBarrier(1, &barriers[1]);
+
+            DispatchGraph();
+
+            m_cmdList->Close();
+            ID3D12CommandList* lists[] = { m_cmdList.Get() };
+            m_computeQueue->ExecuteCommandLists(1, lists);
+
+        } else {
+            // --- Die 0: wait for host kick ---
+            WaitForSingleObject(m_hKickEvent, INFINITE);
+            if (!m_isRunning) break;
+
+            m_cmdAlloc->Reset();
+            m_cmdList->Reset(m_cmdAlloc.Get(), nullptr);
+            DispatchGraph();
+            m_cmdList->Close();
+            ID3D12CommandList* lists[] = { m_cmdList.Get() };
+            m_computeQueue->ExecuteCommandLists(1, lists);
+        }
+
+        // --- Signal downstream (same as Broker.cpp InterlockedExchange64 pattern) ---
+        m_tokenValue++;
+        m_computeQueue->Signal(m_boundaryFence.Get(), m_tokenValue);
+        if (m_pManifestOut) {
+            InterlockedExchange64(
+                reinterpret_cast<volatile LONGLONG*>(&m_pManifestOut->tokenValue),
+                (LONGLONG)m_tokenValue);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DispatchGraph — walks assigned graph nodes and dispatches each op
+// ---------------------------------------------------------------------------
+void DieWorker::DispatchGraph() {
+    if (!m_graph) return;
+
+    m_cmdList->SetDescriptorHeaps(1, m_uavHeap.GetAddressOf());
+
+    for (int i = m_nodeStart; i < m_nodeEnd; i++) {
+        ggml_tensor* node = m_graph->nodes[i];
+        DispatchNode(node);
+    }
+}
+
+void DieWorker::DispatchNode(ggml_tensor* node) {
+    switch (node->op) {
+    case GGML_OP_MUL_MAT:
+        DispatchMulMat(node);
+        break;
+
+    case GGML_OP_UNARY: {
+        const char* name = nullptr;
+        switch (ggml_get_unary_op(node)) {
+            case GGML_UNARY_OP_SILU:        name = "silu";        break;
+            case GGML_UNARY_OP_GELU:        name = "gelu";        break;
+            case GGML_UNARY_OP_GELU_ERF:    name = "gelu_erf";    break;
+            case GGML_UNARY_OP_GELU_QUICK:  name = "gelu_quick";  break;
+            case GGML_UNARY_OP_RELU:        name = "relu";        break;
+            case GGML_UNARY_OP_TANH:        name = "tanh";        break;
+            case GGML_UNARY_OP_SIGMOID:     name = "sigmoid";     break;
+            case GGML_UNARY_OP_NEG:         name = "neg";         break;
+            case GGML_UNARY_OP_ABS:         name = "abs";         break;
+            case GGML_UNARY_OP_EXP:         name = "exp";         break;
+            case GGML_UNARY_OP_SGN:         name = "sgn";         break;
+            case GGML_UNARY_OP_CEIL:        name = "ceil";        break;
+            case GGML_UNARY_OP_FLOOR:       name = "floor";       break;
+            case GGML_UNARY_OP_ROUND:       name = "round";       break;
+            case GGML_UNARY_OP_TRUNC:       name = "trunc";       break;
+            case GGML_UNARY_OP_STEP:        name = "step";        break;
+            case GGML_UNARY_OP_SOFTPLUS:    name = "softplus";    break;
+            case GGML_UNARY_OP_HARDSIGMOID: name = "hardsigmoid"; break;
+            case GGML_UNARY_OP_HARDSWISH:   name = "hardswish";   break;
+            case GGML_UNARY_OP_XIELU:       name = "xielu";       break;
+            default: return;
+        }
+        auto it = m_psoCache.find(name);
+        if (it != m_psoCache.end()) DispatchUnary(node, it->second);
+        break;
+    }
+
+    case GGML_OP_ADD:
+    case GGML_OP_SUB:
+    case GGML_OP_MUL:
+    case GGML_OP_DIV: {
+        // All binary ops use the same shader key pattern
+        // TODO: map to correct binary shader name
+        break;
+    }
+
+    case GGML_OP_GLU: {
+        const char* name = nullptr;
+        switch (ggml_get_glu_op(node)) {
+            case GGML_GLU_OP_SWIGLU:       name = "swiglu";       break;
+            case GGML_GLU_OP_SWIGLU_OAI:   name = "swiglu_oai";   break;
+            case GGML_GLU_OP_GEGLU:        name = "geglu";        break;
+            case GGML_GLU_OP_GEGLU_ERF:    name = "geglu_erf";    break;
+            case GGML_GLU_OP_GEGLU_QUICK:  name = "geglu_quick";  break;
+            case GGML_GLU_OP_REGLU:        name = "reglu";        break;
+            default: return;
+        }
+        auto it = m_psoCache.find(name);
+        if (it != m_psoCache.end()) DispatchGLU(node, it->second);
+        break;
+    }
+
+    case GGML_OP_NORM: {
+        auto it = m_psoCache.find("norm");
+        if (it != m_psoCache.end()) DispatchNorm(node, it->second);
+        break;
+    }
+    case GGML_OP_GROUP_NORM: {
+        auto it = m_psoCache.find("group_norm");
+        if (it != m_psoCache.end()) DispatchNorm(node, it->second);
+        break;
+    }
+
+    case GGML_OP_CPY:
+    case GGML_OP_CONT:
+    case GGML_OP_DUP: {
+        auto it = m_psoCache.find("copy");
+        if (it != m_psoCache.end()) DispatchCopy(node, it->second);
+        break;
+    }
+
+    case GGML_OP_GET_ROWS: {
+        // Dequant path — pick shader by weight type
+        const char* name = nullptr;
+        if (node->src[0]) {
+            switch (node->src[0]->type) {
+                case GGML_TYPE_Q4_0: name = "dequant_q4_0"; break;
+                // TODO: case GGML_TYPE_Q8_0: name = "dequant_q8_0"; break;
+                // TODO: case GGML_TYPE_Q4_1: name = "dequant_q4_1"; break;
+                default: break;
+            }
+        }
+        if (name) {
+            auto it = m_psoCache.find(name);
+            if (it != m_psoCache.end()) DispatchDequant(node, it->second);
+        }
+        break;
+    }
+
+    case GGML_OP_NONE:
+    case GGML_OP_RESHAPE:
+    case GGML_OP_VIEW:
+    case GGML_OP_TRANSPOSE:
+    case GGML_OP_PERMUTE:
+        break; // metadata ops — no GPU work
+
+    default:
+        // TODO: log unhandled op
+        break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch helpers
+// ---------------------------------------------------------------------------
+void DieWorker::DispatchUnary(ggml_tensor* node, PsoEntry& pso) {
+    PC_Unary pc = {};
+    pc.ne   = (uint32_t)ggml_nelements(node);
+    auto* s = node->src[0];
+    pc.ne00 = (uint32_t)s->ne[0]; pc.ne01 = (uint32_t)s->ne[1];
+    pc.ne02 = (uint32_t)s->ne[2]; pc.ne03 = (uint32_t)s->ne[3];
+    pc.nb00 = (uint32_t)s->nb[0]; pc.nb01 = (uint32_t)s->nb[1];
+    pc.nb02 = (uint32_t)s->nb[2]; pc.nb03 = (uint32_t)s->nb[3];
+    pc.ne10 = (uint32_t)node->ne[0]; pc.ne11 = (uint32_t)node->ne[1];
+    pc.ne12 = (uint32_t)node->ne[2]; pc.ne13 = (uint32_t)node->ne[3];
+    pc.nb10 = (uint32_t)node->nb[0]; pc.nb11 = (uint32_t)node->nb[1];
+    pc.nb12 = (uint32_t)node->nb[2]; pc.nb13 = (uint32_t)node->nb[3];
+
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(CEIL_DIV(pc.ne, kComputeThreads), 1, 1);
+}
+
+void DieWorker::DispatchNorm(ggml_tensor* node, PsoEntry& pso) {
+    PC_Unary pc = {};
+    pc.ne   = (uint32_t)ggml_nelements(node);
+    auto* s = node->src[0];
+    pc.ne00 = (uint32_t)s->ne[0]; pc.ne01 = (uint32_t)s->ne[1];
+    pc.ne02 = (uint32_t)s->ne[2]; pc.ne03 = (uint32_t)s->ne[3];
+    pc.nb00 = (uint32_t)s->nb[0]; pc.nb01 = (uint32_t)s->nb[1];
+    pc.nb02 = (uint32_t)s->nb[2]; pc.nb03 = (uint32_t)s->nb[3];
+    pc.param1 = 1e-6f; // eps — override from node->op_params if exposed
+
+    uint32_t nrows = pc.ne / pc.ne00; // one workgroup per row
+
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(nrows, 1, 1);
+}
+
+void DieWorker::DispatchGLU(ggml_tensor* node, PsoEntry& pso) {
+    PC_GLU pc = {};
+    pc.N    = (uint32_t)ggml_nelements(node);
+    pc.ne00 = (uint32_t)node->src[0]->ne[0];
+    pc.ne20 = (uint32_t)node->ne[0];
+    pc.mode = 0;
+
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(CEIL_DIV(pc.N, kComputeThreads), 1, 1);
+}
+
+void DieWorker::DispatchCopy(ggml_tensor* node, PsoEntry& pso) {
+    PC_Unary pc = {};
+    pc.ne = (uint32_t)ggml_nelements(node);
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(CEIL_DIV(pc.ne, kComputeThreads), 1, 1);
+}
+
+void DieWorker::DispatchDequant(ggml_tensor* node, PsoEntry& pso) {
+    // Dequant shaders: [numthreads(32,1,1)], one thread per element (QK=32 per block)
+    uint32_t ne = (uint32_t)ggml_nelements(node);
+    PC_Unary pc = {};
+    pc.ne = ne;
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(CEIL_DIV(ne, 32u), 1, 1);
+}
+
+void DieWorker::DispatchMulMat(ggml_tensor* node) {
+    // Route to DirectML GEMM — placeholder
+    // TODO: bind DML operator, set input/output descriptors, record via IDMLCommandRecorder
+    (void)node;
+}
+
+void DieWorker::DispatchBinary(ggml_tensor* node, PsoEntry& pso) {
+    PC_Binary pc = {};
+    pc.ne = (uint32_t)ggml_nelements(node);
+    // TODO: fill ne/nb fields from node->src[0], src[1], node
+    m_cmdList->SetPipelineState(pso.pso.Get());
+    m_cmdList->SetComputeRootSignature(pso.rootSig.Get());
+    m_cmdList->SetComputeRoot32BitConstants(0, sizeof(pc) / 4, &pc, 0);
+    m_cmdList->Dispatch(CEIL_DIV(pc.ne, kComputeThreads), 1, 1);
+}
+</file>
+<file path="DieWorker.h">
+// DieWorker.h
+// Per-die D3D12 compute worker.
+// Mirrors PipelineNode from Consumer.h — one instance per V340 die.
+// Each worker:
+//   - Owns its own ID3D12Device* targeting a specific DXGI adapter
+//   - Connects to the upstream die's boundary texture via DirectPort NT names
+//   - Publishes its own boundary texture downstream
+//   - Runs a pinned CPU thread that blocks on dp12_queue_wait then dispatches
+#pragma once
+#include "ggml-d3d12-shared.h"
+#include "directport.h"
+#include <atomic>
+#include <thread>
+#include <vector>
+#include <unordered_map>
+#include <string>
+
+// Forward declare ggml types to avoid pulling in all of ggml.h
+struct ggml_tensor;
+struct ggml_cgraph;
+
+// PSO entry — one per DXIL blob loaded at startup
+struct PsoEntry {
+    ComPtr<ID3D12PipelineState> pso;
+    ComPtr<ID3D12RootSignature> rootSig;
+};
+
+class DieWorker {
+public:
+    // die_index: 0-3, maps to DXGI adapter (kDieAdapterBase + die_index)
+    // cpu_core:  physical core to pin the worker thread to
+    // upstream_manifest: NT name of the upstream die's TensorManifest
+    //                    (nullptr for die 0 — it reads from host)
+    DieWorker(int die_index, int cpu_core, const wchar_t* upstream_manifest);
+    ~DieWorker();
+
+    // Call once after construction. Creates D3D12 device, loads PSOs,
+    // connects to upstream, publishes downstream manifest.
+    HRESULT Initialize(uint32_t tensor_width, uint32_t tensor_height);
+
+    // Assign the ggml graph nodes this die is responsible for.
+    // Called before StartWorker. start_node..end_node exclusive.
+    void AssignNodes(ggml_cgraph* graph, int start_node, int end_node);
+
+    // Spin up the pinned worker thread. Blocks internally on upstream fence.
+    void StartWorker();
+
+    // Signal the worker to drain and stop.
+    void StopWorker();
+
+    // The NT manifest name this die publishes (downstream die calls dp12_open on it)
+    const wchar_t* GetManifestName() const { return m_manifestName.c_str(); }
+
+    bool IsRunning() const { return m_isRunning.load(); }
+
+    // For die 0 only: called by host to kick off a new token
+    void KickInference(uint64_t token_index);
+
+private:
+    // --- Init helpers (mirror PipelineNode::InitD3D11 / ConnectToProducer) ---
+    HRESULT InitD3D12();
+    HRESULT LoadPSOs();
+    HRESULT ConnectToUpstream();
+    HRESULT InitBoundaryOutput(uint32_t width, uint32_t height);
+    void    PublishManifest(uint32_t width, uint32_t height);
+
+    // --- Hot path (mirrors PipelineNode::RenderFrame) ---
+    void WorkerThread();
+    void DispatchGraph();
+    void DispatchNode(ggml_tensor* node);
+
+    // --- Per-op dispatch ---
+    void DispatchUnary(ggml_tensor* node, PsoEntry& pso);
+    void DispatchBinary(ggml_tensor* node, PsoEntry& pso);
+    void DispatchGLU(ggml_tensor* node, PsoEntry& pso);
+    void DispatchNorm(ggml_tensor* node, PsoEntry& pso);
+    void DispatchMulMat(ggml_tensor* node);   // routes to DirectML GEMM
+    void DispatchDequant(ggml_tensor* node, PsoEntry& pso);
+    void DispatchCopy(ggml_tensor* node, PsoEntry& pso);
+
+    // --- D3D12 core ---
+    ComPtr<IDXGIAdapter1>           m_adapter;
+    ComPtr<ID3D12Device>            m_device;
+    ComPtr<ID3D12CommandQueue>      m_computeQueue;
+    ComPtr<ID3D12CommandAllocator>  m_cmdAlloc;
+    ComPtr<ID3D12GraphicsCommandList> m_cmdList;
+    ComPtr<ID3D12DescriptorHeap>    m_uavHeap;
+    LUID                            m_adapterLuid = {};
+
+    // --- Boundary output (this die → downstream) ---
+    ComPtr<ID3D12Resource>  m_boundaryTex;      // shared texture published downstream
+    ComPtr<ID3D12Fence>     m_boundaryFence;    // shared fence
+    HANDLE                  m_hBoundaryTex    = nullptr;
+    HANDLE                  m_hBoundaryFence  = nullptr;
+    uint64_t                m_tokenValue      = 0;
+    HANDLE                  m_hManifestOut    = nullptr;
+    TensorManifest*         m_pManifestOut    = nullptr;
+
+    // --- Upstream connection (mirrors ProducerConnection) ---
+    DiePort                 m_upstream;
+
+    // --- PSO cache ---
+    // Key: shader name (e.g. "silu", "norm", "dequant_q4_0")
+    std::unordered_map<std::string, PsoEntry> m_psoCache;
+
+    // --- Graph work ---
+    ggml_cgraph*  m_graph      = nullptr;
+    int           m_nodeStart  = 0;
+    int           m_nodeEnd    = 0;
+
+    // --- Thread ---
+    std::thread         m_thread;
+    std::atomic<bool>   m_isRunning  = false;
+    HANDLE              m_hKickEvent = nullptr; // used by die 0 only
+
+    // --- Identity ---
+    int            m_dieIndex;
+    int            m_cpuCore;
+    std::wstring   m_upstreamManifestName;
+    std::wstring   m_manifestName; // this die's published manifest name
+};
+</file>
+<file path="elu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _67;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    if (x < 0.0f)
+    {
+        x = exp(x) - 1.0f;
+    }
+    _67.Store<half>(i * 2 + 0, half(x));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="exp.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _52;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(exp(float(_52.Load<half>(i * 2 + 0)))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="fill.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _35;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _35.Store<half>(i * 2 + 0, half(p_param1));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="flash_attn_split_k_reduce.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 32u
+#endif
+static const uint BLOCK_SIZE = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint _162 = (BLOCK_SIZE / 2u);
+static const uint _236 = (BLOCK_SIZE / 2u);
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 1u
+#endif
+static const uint _425 = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint3 gl_WorkGroupSize = uint3(_425, 1u, 1u);
+
+ByteAddressBuffer _136;
+ByteAddressBuffer _273;
+RWByteAddressBuffer _405;
+cbuffer parameter
+{
+    uint p_D : packoffset(c0);
+    uint p_ne1 : packoffset(c0.y);
+    uint p_ne2 : packoffset(c0.z);
+    uint p_ne3 : packoffset(c0.w);
+    uint p_k_num : packoffset(c1);
+    uint p_sinks : packoffset(c1.y);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+groupshared float tmpsh[BLOCK_SIZE];
+
+void comp_main()
+{
+    uint n = gl_WorkGroupID.x;
+    uint tid = gl_LocalInvocationID.x;
+    uint i2 = gl_WorkGroupID.z % p_ne2;
+    uint i3 = gl_WorkGroupID.z / p_ne2;
+    uint D = p_D;
+    uint k_num = p_k_num;
+    uint l_offset = (((((D * p_ne1) * p_ne2) * p_ne3) * k_num) + ((p_ne1 * 2u) * (0u + (p_k_num * (i2 + (p_ne2 * i3)))))) + n;
+    uint m_offset = ((((((D * p_ne1) * p_ne2) * p_ne3) * k_num) + ((p_ne1 * 2u) * (0u + (p_k_num * (i2 + (p_ne2 * i3)))))) + p_ne1) + n;
+    uint lm_stride = p_ne1 * 2u;
+    float m_max = asfloat(0xff800000u /* -inf */);
+    for (uint k = 0u; (k + tid) < k_num; k += BLOCK_SIZE)
+    {
+        float m = _136.Load<float>((m_offset + ((k + tid) * lm_stride)) * 4 + 0);
+        m_max = max(m_max, m);
+    }
+    tmpsh[tid] = m_max;
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for (uint s = _162; s > 0u; s = s >> uint(1))
+    {
+        if (tid < s)
+        {
+            m_max = max(m_max, tmpsh[tid + s]);
+            tmpsh[tid] = m_max;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    m_max = tmpsh[0];
+    GroupMemoryBarrierWithGroupSync();
+    float L = 0.0f;
+    for (uint k_1 = 0u; (k_1 + tid) < k_num; k_1 += BLOCK_SIZE)
+    {
+        float l = _136.Load<float>((l_offset + ((k_1 + tid) * lm_stride)) * 4 + 0);
+        float m_1 = _136.Load<float>((m_offset + ((k_1 + tid) * lm_stride)) * 4 + 0);
+        L += (exp(m_1 - m_max) * l);
+    }
+    tmpsh[tid] = L;
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for (uint s_1 = _236; s_1 > 0u; s_1 = s_1 >> uint(1))
+    {
+        if (tid < s_1)
+        {
+            L += tmpsh[tid + s_1];
+            tmpsh[tid] = L;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    L = tmpsh[0];
+    float sink;
+    if (p_sinks != 0u)
+    {
+        sink = _273.Load<float>(n * 4 + 0);
+        float ms = 1.0f;
+        float vs = 1.0f;
+        if (sink > m_max)
+        {
+            ms = exp(m_max - sink);
+        }
+        else
+        {
+            vs = exp(sink - m_max);
+        }
+        L = (L * ms) + vs;
+    }
+    float _301;
+    if (L == 0.0f)
+    {
+        _301 = 0.0f;
+    }
+    else
+    {
+        _301 = 1.0f / L;
+    }
+    L = _301;
+    uint d = tid + (gl_WorkGroupID.y * BLOCK_SIZE);
+    if (d < D)
+    {
+        float O = 0.0f;
+        [loop]
+        for (uint k_2 = 0u; k_2 < k_num; k_2++)
+        {
+            uint o_offset = (((D * p_ne1) * (k_2 + (p_k_num * (i2 + (p_ne2 * i3))))) + (D * n)) + d;
+            float m_2 = _136.Load<float>((m_offset + (k_2 * lm_stride)) * 4 + 0);
+            O += (exp(m_2 - m_max) * _136.Load<float>(o_offset * 4 + 0));
+        }
+        if (p_sinks != 0u)
+        {
+            if (sink > m_max)
+            {
+                float ms_1 = 1.0f;
+                ms_1 = exp(m_max - sink);
+                O *= ms_1;
+            }
+        }
+        O *= L;
+        float FLT_MAX = asfloat(2139095039u);
+        O = clamp(O, -FLT_MAX, FLT_MAX);
+        _405.Store<float>(((((((i3 * p_ne2) + i2) * p_ne1) * D) + (D * n)) + d) * 4 + 0, O);
+    }
+}
+
+[numthreads(SPIRV_CROSS_CONSTANT_ID_0, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="floor.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(floor(x)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="geglu_erf.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _229;
+ByteAddressBuffer _234;
+ByteAddressBuffer _290;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    float a_div_sqr2 = a * 0.707106769084930419921875f;
+    float sign_x = sign(a_div_sqr2);
+    float x = abs(a_div_sqr2);
+    float t = 1.0f / (1.0f + (0.3275910913944244384765625f * x));
+    float y = 1.0f - ((((((((((1.0614054203033447265625f * t) + (-1.45315206050872802734375f)) * t) + 1.42141377925872802734375f) * t) + (-0.284496724605560302734375f)) * t) + 0.254829585552215576171875f) * t) * exp((-x) * x));
+    float erf_approx = sign_x * y;
+    return ((0.5f * a) * (1.0f + erf_approx)) * b;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_234.Load<half>(idx * 2 + 0));
+        float param_1 = float(_234.Load<half>((idx + offset) * 2 + 0));
+        _229.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_234.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_234.Load<half>(idx_1 * 2 + 0));
+            _229.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_234.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_290.Load<half>(idx_2 * 2 + 0));
+            _229.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="geglu_quick.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _184;
+ByteAddressBuffer _189;
+ByteAddressBuffer _245;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    return (a * (1.0f / (1.0f + exp((-1.70200002193450927734375f) * a)))) * b;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_189.Load<half>(idx * 2 + 0));
+        float param_1 = float(_189.Load<half>((idx + offset) * 2 + 0));
+        _184.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_189.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_189.Load<half>(idx_1 * 2 + 0));
+            _184.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_189.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_245.Load<half>(idx_2 * 2 + 0));
+            _184.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="geglu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _198;
+ByteAddressBuffer _203;
+ByteAddressBuffer _259;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    float val = (0.79788458347320556640625f * a) * (1.0f + ((0.0447149984538555145263671875f * a) * a));
+    return ((0.5f * a) * (2.0f - (2.0f / (exp(2.0f * val) + 1.0f)))) * b;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_203.Load<half>(idx * 2 + 0));
+        float param_1 = float(_203.Load<half>((idx + offset) * 2 + 0));
+        _198.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_203.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_203.Load<half>(idx_1 * 2 + 0));
+            _198.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_203.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_259.Load<half>(idx_2 * 2 + 0));
+            _198.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="gelu_erf.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _106;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float a = float(_49.Load<half>(i * 2 + 0));
+    float a_div_sqr2 = a * 0.707106769084930419921875f;
+    float sign_x = sign(a_div_sqr2);
+    float x = abs(a_div_sqr2);
+    float t = 1.0f / (1.0f + (0.3275910913944244384765625f * x));
+    float y = 1.0f - ((((((((((1.0614054203033447265625f * t) + (-1.45315206050872802734375f)) * t) + 1.42141377925872802734375f) * t) + (-0.284496724605560302734375f)) * t) + 0.254829585552215576171875f) * t) * exp((-x) * x));
+    float erf_approx = sign_x * y;
+    _106.Store<half>(i * 2 + 0, half((0.5f * a) * (1.0f + erf_approx)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="gelu_quick.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(x * (1.0f / (1.0f + exp((-1.70200002193450927734375f) * x)))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="gelu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _70;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float xi = float(_49.Load<half>(i * 2 + 0));
+    float val = (0.79788458347320556640625f * xi) * (1.0f + ((0.0447149984538555145263671875f * xi) * xi));
+    _70.Store<half>(i * 2 + 0, half((0.5f * xi) * (2.0f - (2.0f / (exp(2.0f * val) + 1.0f)))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="ggml-d3d12-shared.h">
+// ggml-d3d12-shared.h
+// Shared types for the D3D12 inference pipeline.
+// Mirrors BroadcastManifest/ProducerConnection from VirtuaCam,
+// adapted for compute tensor boundaries instead of video frames.
+#pragma once
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <wrl/client.h>
+#include <stdint.h>
+
+using Microsoft::WRL::ComPtr;
+
+// ---------------------------------------------------------------------------
+// TensorManifest
+// Written by producer, read by consumer. Lives in named shared memory.
+// Mirrors BroadcastManifest from Utilities.h — same InterlockedExchange64
+// pattern on tokenValue so consumer sees a consistent snapshot.
+// ---------------------------------------------------------------------------
+struct TensorManifest {
+    volatile uint64_t tokenValue;   // incremented per inference step, read by consumer
+    uint32_t          width;        // tensor layout: cols  (e.g. hidden_dim)
+    uint32_t          height;       // tensor layout: rows  (e.g. seq_len)
+    DXGI_FORMAT       format;       // DP_FORMAT_HALF (R16_FLOAT) for activations
+    LUID              adapterLuid;  // producer's adapter — consumer validates match
+    WCHAR             texName[256]; // NT name of the shared boundary texture
+    WCHAR             fenceName[256];
+};
+
+// ---------------------------------------------------------------------------
+// DiePort  (replaces ProducerConnection from VirtuaCam)
+// One instance per upstream die connection. Owned by the consuming DieWorker.
+// ---------------------------------------------------------------------------
+struct DiePort {
+    bool                    isConnected   = false;
+    uint64_t                lastSeenToken = 0;
+
+    // Shared resources opened from upstream die's NT names
+    ComPtr<ID3D12Resource>  sharedTex;       // upstream boundary texture (read-only)
+    ComPtr<ID3D12Fence>     sharedFence;     // upstream fence
+    HANDLE                  hSharedTex    = nullptr;
+    HANDLE                  hSharedFence  = nullptr;
+
+    // Private copy — compute reads from here, never from the shared tex directly
+    ComPtr<ID3D12Resource>  privateTex;
+
+    // Manifest
+    HANDLE                  hManifest     = nullptr;
+    TensorManifest*         pManifest     = nullptr;
+};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+// DXGI adapter indices on Scott's ThinkStation P520:
+//   0 = Quadro P2000 (display, skip)
+//   1 = V340 die 0   \
+//   2 = V340 die 1    |  target
+//   3 = V340 die 2    |
+//   4 = V340 die 3   /
+static constexpr int   kDieCount          = 4;
+static constexpr int   kDieAdapterBase    = 1;   // skip adapter 0 (P2000)
+static constexpr UINT  kComputeThreads    = 512; // matches HLSL [numthreads(512,1,1)]
+static constexpr WCHAR kManifestPrefix[]  = L"Global\\DirectPort_InferenceDie_Manifest_";
+
+#define CEIL_DIV(a,b) (((a)+(b)-1)/(b))
+</file>
+<file path="group_norm.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _71;
+RWByteAddressBuffer _143;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+groupshared float tmp[512];
+
+void comp_main()
+{
+    uint group_size = p_KX;
+    float eps = p_param1;
+    uint tid = gl_LocalInvocationID.x;
+    uint start = (gl_WorkGroupID.x * group_size) + tid;
+    uint end = (gl_WorkGroupID.x + 1u) * group_size;
+    tmp[tid] = 0.0f;
+    [loop]
+    for (uint col = start; col < end; col += 512u)
+    {
+        tmp[tid] += float(_71.Load<half>(col * 2 + 0));
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for (int s = 256; s > 0; s = s >> 1)
+    {
+        if (tid < uint(s))
+        {
+            tmp[tid] += tmp[tid + uint(s)];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float mean = tmp[0] / float(group_size);
+    GroupMemoryBarrierWithGroupSync();
+    tmp[tid] = 0.0f;
+    [loop]
+    for (uint col_1 = start; col_1 < end; col_1 += 512u)
+    {
+        float xi = float(_71.Load<half>(col_1 * 2 + 0)) - mean;
+        _143.Store<half>(col_1 * 2 + 0, half(xi));
+        tmp[tid] += (xi * xi);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for (int s_1 = 256; s_1 > 0; s_1 = s_1 >> 1)
+    {
+        if (tid < uint(s_1))
+        {
+            tmp[tid] += tmp[tid + uint(s_1)];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float variance = tmp[0] / float(group_size);
+    float scale = rsqrt(variance + eps);
+    [loop]
+    for (uint col_2 = start; col_2 < end; col_2 += 512u)
+    {
+        _143.Store<half>(col_2 * 2 + 0, _143.Load<half>(col_2 * 2 + 0) * half(scale));
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="hardsigmoid.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(min(1.0f, max(0.0f, (x + 3.0f) / 6.0f))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="hardswish.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(x * min(1.0f, max(0.0f, (x + 3.0f) / 6.0f))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="im2col_3d.hlsl">
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 32u
+#endif
+static const uint BLOCK_SIZE = SPIRV_CROSS_CONSTANT_ID_0;
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 1u
+#endif
+static const uint _341 = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint3 gl_WorkGroupSize = uint3(_341, 1u, 1u);
+
+RWByteAddressBuffer _311;
+ByteAddressBuffer _328;
+cbuffer SPIRV_Cross_NumWorkgroups
+{
+    uint3 SPIRV_Cross_NumWorkgroups_1_count : packoffset(c0);
+};
+
+cbuffer parameter
+{
+    uint2 p_dst_addr : packoffset(c0);
+    uint p_nb10 : packoffset(c0.z);
+    uint p_nb11 : packoffset(c0.w);
+    uint p_nb12 : packoffset(c1);
+    uint p_nb13 : packoffset(c1.y);
+    uint p_s0 : packoffset(c1.z);
+    uint p_s1 : packoffset(c1.w);
+    uint p_s2 : packoffset(c2);
+    uint p_p0 : packoffset(c2.y);
+    uint p_p1 : packoffset(c2.z);
+    uint p_p2 : packoffset(c2.w);
+    uint p_d0 : packoffset(c3);
+    uint p_d1 : packoffset(c3.y);
+    uint p_d2 : packoffset(c3.z);
+    uint p_IW : packoffset(c3.w);
+    uint p_IH : packoffset(c4);
+    uint p_ID : packoffset(c4.y);
+    uint p_IC : packoffset(c4.z);
+    uint p_KW : packoffset(c4.w);
+    uint p_OH : packoffset(c5);
+    uint p_KD_KH_KW : packoffset(c5.y);
+    uint p_KH_KW : packoffset(c5.z);
+    uint p_IC_KD_KH_KW : packoffset(c5.w);
+    uint p_N_OD_OH : packoffset(c6);
+    uint p_OD_OH : packoffset(c6.y);
+    uint p_OD_OH_OW_IC_KD_KH_KW : packoffset(c6.z);
+    uint p_OH_OW_IC_KD_KH_KW : packoffset(c6.w);
+    uint p_OW_IC_KD_KH_KW : packoffset(c7);
+    uint p_misalign_offsets : packoffset(c7.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+void comp_main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    uint nb10 = p_nb10;
+    uint nb11 = p_nb11;
+    uint nb12 = p_nb12;
+    uint nb13 = p_nb13;
+    uint s0 = p_s0;
+    uint s1 = p_s1;
+    uint s2 = p_s2;
+    uint p0 = p_p0;
+    uint p1 = p_p1;
+    uint p2 = p_p2;
+    uint d0 = p_d0;
+    uint d1 = p_d1;
+    uint d2 = p_d2;
+    uint IW = p_IW;
+    uint IH = p_IH;
+    uint ID = p_ID;
+    uint IC = p_IC;
+    uint KW = p_KW;
+    uint OH = p_OH;
+    uint KD_KH_KW = p_KD_KH_KW;
+    uint KH_KW = p_KH_KW;
+    uint IC_KD_KH_KW = p_IC_KD_KH_KW;
+    uint N_OD_OH = p_N_OD_OH;
+    uint OD_OH = p_OD_OH;
+    uint OD_OH_OW_IC_KD_KH_KW = p_OD_OH_OW_IC_KD_KH_KW;
+    uint OH_OW_IC_KD_KH_KW = p_OH_OW_IC_KD_KH_KW;
+    uint OW_IC_KD_KH_KW = p_OW_IC_KD_KH_KW;
+    if (i >= IC_KD_KH_KW)
+    {
+        return;
+    }
+    uint iic = i / KD_KH_KW;
+    uint ikd = (i - (iic * KD_KH_KW)) / KH_KW;
+    uint ikh = ((i - (iic * KD_KH_KW)) - (ikd * KH_KW)) / KW;
+    uint ikw = i % KW;
+    uint iow = gl_GlobalInvocationID.y;
+    for (uint iz = gl_GlobalInvocationID.z; iz < N_OD_OH; iz += SPIRV_Cross_NumWorkgroups_1_count.z)
+    {
+        uint in_ = iz / OD_OH;
+        uint iod = (iz - (in_ * OD_OH)) / OH;
+        uint ioh = iz % OH;
+        uint iiw = ((iow * s0) + (ikw * d0)) - p0;
+        uint iih = ((ioh * s1) + (ikh * d1)) - p1;
+        uint iid = ((iod * s2) + (ikd * d2)) - p2;
+        uint offset_dst = (((((((in_ * OD_OH_OW_IC_KD_KH_KW) + (iod * OH_OW_IC_KD_KH_KW)) + (ioh * OW_IC_KD_KH_KW)) + (iow * IC_KD_KH_KW)) + (iic * KD_KH_KW)) + (ikd * KH_KW)) + (ikh * KW)) + ikw;
+        uint offset_src = (((((in_ * IC) + iic) * nb13) + (iid * nb12)) + (iih * nb11)) + (iiw * nb10);
+        if (((iih >= IH) || (iiw >= IW)) || (iid >= ID))
+        {
+            _311.Store<half>((offset_dst + get_doffset()) * 2 + 0, half(0.0f));
+        }
+        else
+        {
+            _311.Store<half>((offset_dst + get_doffset()) * 2 + 0, _328.Load<half>((offset_src + get_aoffset()) * 2 + 0));
+        }
+    }
+}
+
+[numthreads(SPIRV_CROSS_CONSTANT_ID_0, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="leaky_relu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float val = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(max(val, 0.0f) + (min(val, 0.0f) * p_param1)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="log.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _299;
+RWByteAddressBuffer _312;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _73;
+    umulExtended(n, mp, _73._m1, _73._m0);
+    uint lsbs = _73._m0;
+    uint msbs = _73._m1;
+    return (msbs + n) >> L;
+}
+
+uint src0_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne0_012mp;
+    uint param_2 = p_ne0_012L;
+    uint i03 = fastdiv(param, param_1, param_2);
+    uint i03_offset = ((i03 * p_ne02) * p_ne01) * p_ne00;
+    uint param_3 = idx - i03_offset;
+    uint param_4 = p_ne0_01mp;
+    uint param_5 = p_ne0_01L;
+    uint i02 = fastdiv(param_3, param_4, param_5);
+    uint i02_offset = (i02 * p_ne01) * p_ne00;
+    uint param_6 = (idx - i03_offset) - i02_offset;
+    uint param_7 = p_ne0_0mp;
+    uint param_8 = p_ne0_0L;
+    uint i01 = fastdiv(param_6, param_7, param_8);
+    uint i00 = ((idx - i03_offset) - i02_offset) - (i01 * p_ne00);
+    return (((i03 * p_nb03) + (i02 * p_nb02)) + (i01 * p_nb01)) + (i00 * p_nb00);
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint dst_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return (((i13 * p_nb13) + (i12 * p_nb12)) + (i11 * p_nb11)) + (i10 * p_nb10);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    float val = float(_299.Load<half>((get_aoffset() + src0_idx(param)) * 2 + 0));
+    uint param_1 = idx;
+    _312.Store<half>((get_doffset() + dst_idx(param_1)) * 2 + 0, half(log(val)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="mul_mat_split_k_reduce.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+static const uint3 gl_WorkGroupSize = uint3(256u, 1u, 1u);
+
+ByteAddressBuffer _67;
+RWByteAddressBuffer _85;
+ByteAddressBuffer _122;
+RWByteAddressBuffer _141;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_k_num : packoffset(c0.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint idx = gl_GlobalInvocationID.x * 4u;
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    bool _37 = (idx + 3u) < p_ne;
+    bool _44;
+    if (_37)
+    {
+        _44 = (p_ne % 4u) == 0u;
+    }
+    else
+    {
+        _44 = _37;
+    }
+    if (_44)
+    {
+        float4 result = 0.0f.xxxx;
+        [loop]
+        for (uint i = 0u; i < p_k_num; i++)
+        {
+            result += _67.Load<float4>((((i * p_ne) + idx) / 4u) * 16 + 0);
+        }
+        _85.Store<float4>((idx / 4u) * 16 + 0, result);
+    }
+    else
+    {
+        [loop]
+        for (uint j = 0u; j < 4u; j++)
+        {
+            if ((idx + j) < p_ne)
+            {
+                float result_1 = 0.0f;
+                [loop]
+                for (uint i_1 = 0u; i_1 < p_k_num; i_1++)
+                {
+                    result_1 += _122.Load<float>((((i_1 * p_ne) + idx) + j) * 4 + 0);
+                }
+                _141.Store<float>((idx + j) * 4 + 0, result_1);
+            }
+        }
+    }
+}
+
+[numthreads(256, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="neg.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _52;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(-float(_52.Load<half>(i * 2 + 0))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="norm.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _66;
+RWByteAddressBuffer _165;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+groupshared float2 sum[512];
+
+void comp_main()
+{
+    uint row = ((gl_WorkGroupID.z * 262144u) + (gl_WorkGroupID.y * 512u)) + gl_WorkGroupID.x;
+    uint tid = gl_LocalInvocationID.x;
+    sum[tid] = 0.0f.xx;
+    [loop]
+    for (uint col = tid; col < p_KX; col += 512u)
+    {
+        float xi = float(_66.Load<half>(((row * p_KX) + col) * 2 + 0));
+        sum[tid].x += xi;
+        sum[tid].y += (xi * xi);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for (int s = 256; s > 0; s = s >> 1)
+    {
+        if (tid < uint(s))
+        {
+            sum[tid] += sum[tid + uint(s)];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float mean = sum[0].x / float(p_KX);
+    float var = (sum[0].y / float(p_KX)) - (mean * mean);
+    float inv_std = rsqrt(var + p_param1);
+    [loop]
+    for (uint col_1 = tid; col_1 < p_KX; col_1 += 512u)
+    {
+        _165.Store<half>(((row * p_KX) + col_1) * 2 + 0, half((float(_66.Load<half>(((row * p_KX) + col_1) * 2 + 0)) - mean) * inv_std));
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="pad.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _283;
+ByteAddressBuffer _290;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    uint p_circular : packoffset(c4.z);
+    uint p_lp0 : packoffset(c4.w);
+    uint p_rp0 : packoffset(c5);
+    uint p_lp1 : packoffset(c5.y);
+    uint p_rp1 : packoffset(c5.z);
+    uint p_lp2 : packoffset(c5.w);
+    uint p_rp2 : packoffset(c6);
+    uint p_lp3 : packoffset(c6.y);
+    uint p_rp3 : packoffset(c6.z);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint wrap_around(int coord, uint size)
+{
+    return uint(coord + int(size)) % size;
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+void comp_main()
+{
+    uint idx = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint i3 = idx / ((p_ne12 * p_ne11) * p_ne10);
+    uint i3_offset = ((i3 * p_ne12) * p_ne11) * p_ne10;
+    uint i2 = (idx - i3_offset) / (p_ne11 * p_ne10);
+    uint i2_offset = (i2 * p_ne11) * p_ne10;
+    uint i1 = ((idx - i3_offset) - i2_offset) / p_ne10;
+    uint i0 = ((idx - i3_offset) - i2_offset) - (i1 * p_ne10);
+    uint src0_idx = ((((i3 - p_lp3) * p_nb03) + ((i2 - p_lp2) * p_nb02)) + ((i1 - p_lp1) * p_nb01)) + ((i0 - p_lp0) * p_nb00);
+    uint dst_idx = (((i3 * p_nb13) + (i2 * p_nb12)) + (i1 * p_nb11)) + (i0 * p_nb10);
+    if (p_circular != 0u)
+    {
+        int param = int(i0) - int(p_lp0);
+        uint param_1 = p_ne00;
+        uint ci0 = wrap_around(param, param_1);
+        int param_2 = int(i1) - int(p_lp1);
+        uint param_3 = p_ne01;
+        uint ci1 = wrap_around(param_2, param_3);
+        int param_4 = int(i2) - int(p_lp2);
+        uint param_5 = p_ne02;
+        uint ci2 = wrap_around(param_4, param_5);
+        int param_6 = int(i3) - int(p_lp3);
+        uint param_7 = p_ne03;
+        uint ci3 = wrap_around(param_6, param_7);
+        uint circular_src_idx = (((ci3 * p_nb03) + (ci2 * p_nb02)) + (ci1 * p_nb01)) + (ci0 * p_nb00);
+        _283.Store<half>((get_doffset() + dst_idx) * 2 + 0, _290.Load<half>((get_aoffset() + circular_src_idx) * 2 + 0));
+    }
+    else
+    {
+        bool _304 = i0 >= p_lp0;
+        bool _315;
+        if (_304)
+        {
+            _315 = i0 < (p_ne10 - p_rp0);
+        }
+        else
+        {
+            _315 = _304;
+        }
+        bool _322;
+        if (_315)
+        {
+            _322 = i1 >= p_lp1;
+        }
+        else
+        {
+            _322 = _315;
+        }
+        bool _333;
+        if (_322)
+        {
+            _333 = i1 < (p_ne11 - p_rp1);
+        }
+        else
+        {
+            _333 = _322;
+        }
+        bool _340;
+        if (_333)
+        {
+            _340 = i2 >= p_lp2;
+        }
+        else
+        {
+            _340 = _333;
+        }
+        bool _351;
+        if (_340)
+        {
+            _351 = i2 < (p_ne12 - p_rp2);
+        }
+        else
+        {
+            _351 = _340;
+        }
+        bool _358;
+        if (_351)
+        {
+            _358 = i3 >= p_lp3;
+        }
+        else
+        {
+            _358 = _351;
+        }
+        bool _370;
+        if (_358)
+        {
+            _370 = i3 < (p_ne13 - p_rp3);
+        }
+        else
+        {
+            _370 = _358;
+        }
+        bool is_src0 = _370;
+        float _377;
+        if (is_src0)
+        {
+            _377 = float(_290.Load<half>((get_aoffset() + src0_idx) * 2 + 0));
+        }
+        else
+        {
+            _377 = 0.0f;
+        }
+        _283.Store<half>((get_doffset() + dst_idx) * 2 + 0, half(_377));
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="quantize_q8_1.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) {
+    uint64_t r = (uint64_t)a * (uint64_t)b;
+    hi = (uint)(r >> 32);
+    lo = (uint)(r & 0xFFFFFFFF);
+}
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 32u
+#endif
+static const uint GROUP_SIZE = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint blocks_per_group = (GROUP_SIZE / 8u);
+
+struct block_q8_1_packed32
+{
+    half2 ds;
+    int qs[8];
+};
+
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 1u
+#endif
+static const uint _244 = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint3 gl_WorkGroupSize = uint3(_244, 1u, 1u);
+
+ByteAddressBuffer _61 : register(t0, space0);
+RWByteAddressBuffer _155 : register(u1, space0);
+cbuffer SPIRV_Cross_NumWorkgroups
+{
+    uint3 SPIRV_Cross_NumWorkgroups_1_count : packoffset(c0);
+};
+
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_num_blocks : packoffset(c0.y);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+};
+
+groupshared float shmem[GROUP_SIZE];
+
+void quantize(uint wgid)
+{
+    uint tid = gl_LocalInvocationID.x;
+    uint block_in_wg = tid / 8u;
+    uint ib = (wgid * blocks_per_group) + block_in_wg;
+    uint iqs = tid % 8u;
+    uint a_idx = (ib * 8u) + iqs;
+    float4 _55;
+    if (a_idx < (p_ne / 4u))
+    {
+        _55 = _61.Load<float4>(a_idx * 16 + 0);
+    }
+    else
+    {
+        _55 = 0.0f.xxxx;
+    }
+    float4 vals = _55;
+    float4 abs_vals = abs(vals);
+    float thread_max = max(max(abs_vals.x, abs_vals.y), max(abs_vals.z, abs_vals.w));
+    shmem[tid] = thread_max;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint s = 4u; s > 0u; s = s >> uint(1))
+    {
+        if (iqs < s)
+        {
+            shmem[tid] = max(shmem[tid], shmem[tid + s]);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float amax = shmem[block_in_wg * 8u];
+    float d = amax / 127.0f;
+    float _136;
+    if (d != 0.0f)
+    {
+        _136 = 1.0f / d;
+    }
+    else
+    {
+        _136 = 0.0f;
+    }
+    float d_inv = _136;
+    vals = round(vals * d_inv);
+    _155.Store<int>(ib * 36 + iqs * 4 + 4, (???(round(vals))));
+    GroupMemoryBarrierWithGroupSync();
+    float thread_sum = ((vals.x + vals.y) + vals.z) + vals.w;
+    shmem[tid] = thread_sum;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint s_1 = 4u; s_1 > 0u; s_1 = s_1 >> uint(1))
+    {
+        if (iqs < s_1)
+        {
+            shmem[tid] += shmem[tid + s_1];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (iqs == 0u)
+    {
+        float sum = shmem[tid];
+        _155.Store<half2>(ib * 36 + 0, half2(float2(d, sum * d)));
+    }
+}
+
+void comp_main()
+{
+    uint wgid = gl_WorkGroupID.x;
+    while (wgid < p_num_blocks)
+    {
+        quantize(wgid);
+        wgid += SPIRV_Cross_NumWorkgroups_1_count.x;
+    }
+}
+
+[numthreads(SPIRV_CROSS_CONSTANT_ID_0, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    comp_main();
+}
+</file>
+<file path="reglu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _178;
+ByteAddressBuffer _183;
+ByteAddressBuffer _239;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    return max(a, 0.0f) * b;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_183.Load<half>(idx * 2 + 0));
+        float param_1 = float(_183.Load<half>((idx + offset) * 2 + 0));
+        _178.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_183.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_183.Load<half>(idx_1 * 2 + 0));
+            _178.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_183.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_239.Load<half>(idx_2 * 2 + 0));
+            _178.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="relu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _52;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(max(float(_52.Load<half>(i * 2 + 0)), 0.0f)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="repeat.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _298;
+ByteAddressBuffer _307;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _73;
+    umulExtended(n, mp, _73._m1, _73._m0);
+    uint lsbs = _73._m0;
+    uint msbs = _73._m1;
+    return (msbs + n) >> L;
+}
+
+uint dst_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return (((i13 * p_nb13) + (i12 * p_nb12)) + (i11 * p_nb11)) + (i10 * p_nb10);
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+uint src0_idx_mod(uint idx)
+{
+    uint i13 = idx / ((p_ne12 * p_ne11) * p_ne10);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint i12 = (idx - i13_offset) / (p_ne11 * p_ne10);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint i11 = ((idx - i13_offset) - i12_offset) / p_ne10;
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return ((((i13 % p_ne03) * p_nb03) + ((i12 % p_ne02) * p_nb02)) + ((i11 % p_ne01) * p_nb01)) + ((i10 % p_ne00) * p_nb00);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    uint param_1 = idx;
+    _298.Store<half>((get_doffset() + dst_idx(param)) * 2 + 0, _307.Load<half>((get_aoffset() + src0_idx_mod(param_1)) * 2 + 0));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="roll.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _317;
+ByteAddressBuffer _324;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _72;
+    umulExtended(n, mp, _72._m1, _72._m0);
+    uint lsbs = _72._m0;
+    uint msbs = _72._m1;
+    return (msbs + n) >> L;
+}
+
+uint wrap_idx(int i, uint ne)
+{
+    if (i < 0)
+    {
+        return uint(i) + ne;
+    }
+    else
+    {
+        if (uint(i) >= ne)
+        {
+            return uint(i) - ne;
+        }
+    }
+    return uint(i);
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i3 = fastdiv(param, param_1, param_2);
+    uint i3_offset = ((i3 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i3_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i2 = fastdiv(param_3, param_4, param_5);
+    uint i2_offset = (i2 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i3_offset) - i2_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i1 = fastdiv(param_6, param_7, param_8);
+    uint i0 = ((idx - i3_offset) - i2_offset) - (i1 * p_ne10);
+    uint p1 = asuint(p_param1);
+    uint p2 = asuint(p_param2);
+    int s0 = int(p1 >> uint(16)) - 32768;
+    int s1 = int(p1 & 65535u) - 32768;
+    int s2 = int(p2 >> uint(16)) - 32768;
+    int s3 = int(p2 & 65535u) - 32768;
+    int param_9 = int(i0) - s0;
+    uint param_10 = p_ne10;
+    uint i00 = wrap_idx(param_9, param_10);
+    int param_11 = int(i1) - s1;
+    uint param_12 = p_ne11;
+    uint i01 = wrap_idx(param_11, param_12);
+    int param_13 = int(i2) - s2;
+    uint param_14 = p_ne12;
+    uint i02 = wrap_idx(param_13, param_14);
+    int param_15 = int(i3) - s3;
+    uint param_16 = p_ne13;
+    uint i03 = wrap_idx(param_15, param_16);
+    uint a_idx = (((i03 * p_nb03) + (i02 * p_nb02)) + (i01 * p_nb01)) + (i00 * p_nb00);
+    uint d_idx = (((i3 * p_nb13) + (i2 * p_nb12)) + (i1 * p_nb11)) + (i0 * p_nb10);
+    _317.Store<half>((get_doffset() + d_idx) * 2 + 0, _324.Load<half>((get_aoffset() + a_idx) * 2 + 0));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="round.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _72;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    float result;
+    if (x >= 0.0f)
+    {
+        result = floor(x + 0.5f);
+    }
+    else
+    {
+        result = ceil(x - 0.5f);
+    }
+    _72.Store<half>(i * 2 + 0, half(result));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="sgn.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _52;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(sign(float(_52.Load<half>(i * 2 + 0)))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="sigmoid.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _54;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(1.0f / (1.0f + exp((-1.0f) * float(_54.Load<half>(i * 2 + 0))))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="silu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float xi = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(xi / (1.0f + exp(-xi))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="softplus.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _73;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    float _59;
+    if (x > 20.0f)
+    {
+        _59 = x;
+    }
+    else
+    {
+        _59 = log(1.0f + exp(x));
+    }
+    float result = _59;
+    _73.Store<half>(i * 2 + 0, half(result));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="ssm_conv.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+#ifndef SPIRV_CROSS_CONSTANT_ID_1
+#define SPIRV_CROSS_CONSTANT_ID_1 16u
+#endif
+static const uint TOKENS_PER_WG = SPIRV_CROSS_CONSTANT_ID_1;
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 32u
+#endif
+static const uint BLOCK_SIZE = SPIRV_CROSS_CONSTANT_ID_0;
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 1u
+#endif
+static const uint _191 = SPIRV_CROSS_CONSTANT_ID_0;
+#ifndef SPIRV_CROSS_CONSTANT_ID_1
+#define SPIRV_CROSS_CONSTANT_ID_1 1u
+#endif
+static const uint _192 = SPIRV_CROSS_CONSTANT_ID_1;
+static const uint3 gl_WorkGroupSize = uint3(_191, _192, 1u);
+
+ByteAddressBuffer _100;
+ByteAddressBuffer _123;
+RWByteAddressBuffer _186;
+cbuffer PushConstants
+{
+    uint _35_nb01 : packoffset(c0);
+    uint _35_nb02 : packoffset(c0.y);
+    uint _35_nb11 : packoffset(c0.z);
+    uint _35_dst_nb0 : packoffset(c0.w);
+    uint _35_dst_nb1 : packoffset(c1);
+    uint _35_dst_nb2 : packoffset(c1.y);
+    uint _35_nc : packoffset(c1.z);
+    uint _35_ncs : packoffset(c1.w);
+    uint _35_nr : packoffset(c2);
+    uint _35_n_t : packoffset(c2.y);
+    uint _35_n_s : packoffset(c2.z);
+};
+
+static uint3 gl_WorkGroupID;
+static uint3 gl_LocalInvocationID;
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_WorkGroupID : SV_GroupID;
+    uint3 gl_LocalInvocationID : SV_GroupThreadID;
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i1 = gl_GlobalInvocationID.x;
+    uint i2 = (gl_WorkGroupID.y * TOKENS_PER_WG) + gl_LocalInvocationID.y;
+    uint i3 = gl_WorkGroupID.z;
+    bool _41 = i1 >= _35_nr;
+    bool _50;
+    if (!_41)
+    {
+        _50 = i2 >= _35_n_t;
+    }
+    else
+    {
+        _50 = _41;
+    }
+    bool _59;
+    if (!_50)
+    {
+        _59 = i3 >= _35_n_s;
+    }
+    else
+    {
+        _59 = _50;
+    }
+    if (_59)
+    {
+        return;
+    }
+    uint src0_base = ((i3 * (_35_nb02 / 4u)) + i2) + (i1 * (_35_nb01 / 4u));
+    uint src1_base = i1 * (_35_nb11 / 4u);
+    float sum = 0.0f;
+    if (_35_nc == 4u)
+    {
+        sum = dot(float4(_100.Load<float>(src0_base * 4 + 0), _100.Load<float>((src0_base + 1u) * 4 + 0), _100.Load<float>((src0_base + 2u) * 4 + 0), _100.Load<float>((src0_base + 3u) * 4 + 0)), float4(_123.Load<float>(src1_base * 4 + 0), _123.Load<float>((src1_base + 1u) * 4 + 0), _123.Load<float>((src1_base + 2u) * 4 + 0), _123.Load<float>((src1_base + 3u) * 4 + 0)));
+    }
+    else
+    {
+        [loop]
+        for (uint i0 = 0u; i0 < _35_nc; i0++)
+        {
+            sum += (_100.Load<float>((src0_base + i0) * 4 + 0) * _123.Load<float>((src1_base + i0) * 4 + 0));
+        }
+    }
+    uint dst_idx = ((i3 * (_35_dst_nb2 / 4u)) + (i2 * (_35_dst_nb1 / 4u))) + i1;
+    _186.Store<float>(dst_idx * 4 + 0, sum);
+}
+
+[numthreads(SPIRV_CROSS_CONSTANT_ID_0, SPIRV_CROSS_CONSTANT_ID_1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_WorkGroupID = stage_input.gl_WorkGroupID;
+    gl_LocalInvocationID = stage_input.gl_LocalInvocationID;
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="step.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(float(x >= 0.0f)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="swiglu_oai.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _206;
+ByteAddressBuffer _211;
+ByteAddressBuffer _267;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    float xi = min(a, p_limit);
+    float gi = max(min(b, p_limit), -p_limit);
+    float out_glu = xi / (1.0f + exp((-xi) * p_alpha));
+    out_glu *= (1.0f + gi);
+    return out_glu;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_211.Load<half>(idx * 2 + 0));
+        float param_1 = float(_211.Load<half>((idx + offset) * 2 + 0));
+        _206.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_211.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_211.Load<half>(idx_1 * 2 + 0));
+            _206.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_211.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_267.Load<half>(idx_2 * 2 + 0));
+            _206.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="swiglu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _182;
+ByteAddressBuffer _187;
+ByteAddressBuffer _243;
+cbuffer parameter
+{
+    uint p_N : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne20 : packoffset(c0.z);
+    uint p_mode : packoffset(c0.w);
+    float p_alpha : packoffset(c1);
+    float p_limit : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne01 : packoffset(c2.y);
+    uint p_ne02 : packoffset(c2.z);
+    uint p_nb11 : packoffset(c2.w);
+    uint p_nb12 : packoffset(c3);
+    uint p_nb13 : packoffset(c3.y);
+    uint p_ne11 : packoffset(c3.z);
+    uint p_ne12 : packoffset(c3.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float op(float a, float b)
+{
+    return (a / (1.0f + exp(-a))) * b;
+}
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_N)
+    {
+        return;
+    }
+    uint row = i / p_ne20;
+    uint col = i - (row * p_ne20);
+    uint i3 = row / (p_ne01 * p_ne02);
+    uint i2 = (row % (p_ne01 * p_ne02)) / p_ne01;
+    uint i1 = row % p_ne01;
+    uint src_idx = (((i3 * p_nb03) + (i2 * p_nb02)) + (i1 * p_nb01)) + col;
+    uint dst_i3 = row / (p_ne11 * p_ne12);
+    uint dst_i2 = (row % (p_ne11 * p_ne12)) / p_ne11;
+    uint dst_i1 = row % p_ne11;
+    uint dst_idx = (((dst_i3 * p_nb13) + (dst_i2 * p_nb12)) + (dst_i1 * p_nb11)) + col;
+    if (p_mode == 0u)
+    {
+        uint offset = p_ne00 / 2u;
+        uint idx = src_idx;
+        float param = float(_187.Load<half>(idx * 2 + 0));
+        float param_1 = float(_187.Load<half>((idx + offset) * 2 + 0));
+        _182.Store<half>(dst_idx * 2 + 0, half(op(param, param_1)));
+    }
+    else
+    {
+        if (p_mode == 1u)
+        {
+            uint offset_1 = p_ne00 / 2u;
+            uint idx_1 = src_idx;
+            float param_2 = float(_187.Load<half>((idx_1 + offset_1) * 2 + 0));
+            float param_3 = float(_187.Load<half>(idx_1 * 2 + 0));
+            _182.Store<half>(dst_idx * 2 + 0, half(op(param_2, param_3)));
+        }
+        else
+        {
+            uint idx_2 = src_idx;
+            float param_4 = float(_187.Load<half>(idx_2 * 2 + 0));
+            float param_5 = float(_243.Load<half>(idx_2 * 2 + 0));
+            _182.Store<half>(dst_idx * 2 + 0, half(op(param_4, param_5)));
+        }
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="tanh.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+RWByteAddressBuffer _47;
+ByteAddressBuffer _54;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    _47.Store<half>(i * 2 + 0, half(1.0f - (2.0f / (exp(2.0f * float(_54.Load<half>(i * 2 + 0))) + 1.0f))));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="tri.hlsl">
+void umulExtended(uint a, uint b, out uint hi, out uint lo) { uint64_t r = (uint64_t)a * (uint64_t)b; hi = (uint)(r >> 32); lo = (uint)(r & 0xFFFFFFFF); }
+
+struct ResType
+{
+    uint _m0;
+    uint _m1;
+};
+
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _401;
+RWByteAddressBuffer _414;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_ne00 : packoffset(c0.y);
+    uint p_ne01 : packoffset(c0.z);
+    uint p_ne02 : packoffset(c0.w);
+    uint p_ne03 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    uint p_nb10 : packoffset(c3.y);
+    uint p_nb11 : packoffset(c3.z);
+    uint p_nb12 : packoffset(c3.w);
+    uint p_nb13 : packoffset(c4);
+    uint p_misalign_offsets : packoffset(c4.y);
+    float p_param1 : packoffset(c4.z);
+    float p_param2 : packoffset(c4.w);
+    uint p_ne0_012mp : packoffset(c5);
+    uint p_ne0_012L : packoffset(c5.y);
+    uint p_ne0_01mp : packoffset(c5.z);
+    uint p_ne0_01L : packoffset(c5.w);
+    uint p_ne0_0mp : packoffset(c6);
+    uint p_ne0_0L : packoffset(c6.y);
+    uint p_ne1_012mp : packoffset(c6.z);
+    uint p_ne1_012L : packoffset(c6.w);
+    uint p_ne1_01mp : packoffset(c7);
+    uint p_ne1_01L : packoffset(c7.y);
+    uint p_ne1_0mp : packoffset(c7.z);
+    uint p_ne1_0L : packoffset(c7.w);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+uint get_idx()
+{
+    return ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+}
+
+uint fastdiv(uint n, uint mp, uint L)
+{
+    ResType _73;
+    umulExtended(n, mp, _73._m1, _73._m0);
+    uint lsbs = _73._m0;
+    uint msbs = _73._m1;
+    return (msbs + n) >> L;
+}
+
+uint get_aoffset()
+{
+    return p_misalign_offsets >> uint(16);
+}
+
+uint src0_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne0_012mp;
+    uint param_2 = p_ne0_012L;
+    uint i03 = fastdiv(param, param_1, param_2);
+    uint i03_offset = ((i03 * p_ne02) * p_ne01) * p_ne00;
+    uint param_3 = idx - i03_offset;
+    uint param_4 = p_ne0_01mp;
+    uint param_5 = p_ne0_01L;
+    uint i02 = fastdiv(param_3, param_4, param_5);
+    uint i02_offset = (i02 * p_ne01) * p_ne00;
+    uint param_6 = (idx - i03_offset) - i02_offset;
+    uint param_7 = p_ne0_0mp;
+    uint param_8 = p_ne0_0L;
+    uint i01 = fastdiv(param_6, param_7, param_8);
+    uint i00 = ((idx - i03_offset) - i02_offset) - (i01 * p_ne00);
+    return (((i03 * p_nb03) + (i02 * p_nb02)) + (i01 * p_nb01)) + (i00 * p_nb00);
+}
+
+uint get_doffset()
+{
+    return p_misalign_offsets & 65535u;
+}
+
+uint dst_idx(uint idx)
+{
+    uint param = idx;
+    uint param_1 = p_ne1_012mp;
+    uint param_2 = p_ne1_012L;
+    uint i13 = fastdiv(param, param_1, param_2);
+    uint i13_offset = ((i13 * p_ne12) * p_ne11) * p_ne10;
+    uint param_3 = idx - i13_offset;
+    uint param_4 = p_ne1_01mp;
+    uint param_5 = p_ne1_01L;
+    uint i12 = fastdiv(param_3, param_4, param_5);
+    uint i12_offset = (i12 * p_ne11) * p_ne10;
+    uint param_6 = (idx - i13_offset) - i12_offset;
+    uint param_7 = p_ne1_0mp;
+    uint param_8 = p_ne1_0L;
+    uint i11 = fastdiv(param_6, param_7, param_8);
+    uint i10 = ((idx - i13_offset) - i12_offset) - (i11 * p_ne10);
+    return (((i13 * p_nb13) + (i12 * p_nb12)) + (i11 * p_nb11)) + (i10 * p_nb10);
+}
+
+void comp_main()
+{
+    uint idx = get_idx();
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint param = idx;
+    uint param_1 = p_ne0_012mp;
+    uint param_2 = p_ne0_012L;
+    uint i03 = fastdiv(param, param_1, param_2);
+    uint i03_offset = ((i03 * p_ne02) * p_ne01) * p_ne00;
+    uint param_3 = idx - i03_offset;
+    uint param_4 = p_ne0_01mp;
+    uint param_5 = p_ne0_01L;
+    uint i02 = fastdiv(param_3, param_4, param_5);
+    uint i02_offset = (i02 * p_ne01) * p_ne00;
+    uint param_6 = (idx - i03_offset) - i02_offset;
+    uint param_7 = p_ne0_0mp;
+    uint param_8 = p_ne0_0L;
+    uint i01 = fastdiv(param_6, param_7, param_8);
+    uint i00 = ((idx - i03_offset) - i02_offset) - (i01 * p_ne00);
+    int param_9 = asint(p_param1);
+    bool _pass = false;
+    switch (param_9)
+    {
+        case 0:
+        {
+            _pass = i00 >= i01;
+            break;
+        }
+        case 1:
+        {
+            _pass = i00 > i01;
+            break;
+        }
+        case 2:
+        {
+            _pass = i00 <= i01;
+            break;
+        }
+        case 3:
+        {
+            _pass = i00 < i01;
+            break;
+        }
+    }
+    if (_pass)
+    {
+        uint param_10 = idx;
+        float val = float(_401.Load<half>((get_aoffset() + src0_idx(param_10)) * 2 + 0));
+        uint param_11 = idx;
+        _414.Store<half>((get_doffset() + dst_idx(param_11)) * 2 + 0, half(val));
+    }
+    else
+    {
+        uint param_12 = idx;
+        _414.Store<half>((get_doffset() + dst_idx(param_12)) * 2 + 0, half(0.0f));
+    }
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="trunc.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _58;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    _58.Store<half>(i * 2 + 0, half(trunc(x)));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="upscale.hlsl">
+#ifndef SPIRV_CROSS_CONSTANT_ID_0
+#define SPIRV_CROSS_CONSTANT_ID_0 0u
+#endif
+static const uint scale_mode = SPIRV_CROSS_CONSTANT_ID_0;
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _105;
+RWByteAddressBuffer _1248;
+cbuffer parameter
+{
+    uint p_ne : packoffset(c0);
+    uint p_a_offset : packoffset(c0.y);
+    uint p_d_offset : packoffset(c0.z);
+    uint p_ne00 : packoffset(c0.w);
+    uint p_ne01 : packoffset(c1);
+    uint p_nb00 : packoffset(c1.y);
+    uint p_nb01 : packoffset(c1.z);
+    uint p_nb02 : packoffset(c1.w);
+    uint p_nb03 : packoffset(c2);
+    uint p_ne10 : packoffset(c2.y);
+    uint p_ne11 : packoffset(c2.z);
+    uint p_ne12 : packoffset(c2.w);
+    uint p_ne13 : packoffset(c3);
+    float p_sf0 : packoffset(c3.y);
+    float p_sf1 : packoffset(c3.z);
+    float p_sf2 : packoffset(c3.w);
+    float p_sf3 : packoffset(c4);
+    float p_pixel_offset : packoffset(c4.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+float fetch_nearest(uint i10, uint i11, uint i12, uint i13)
+{
+    uint i00 = uint(float(i10) / p_sf0);
+    uint i01 = uint(float(i11) / p_sf1);
+    uint i02 = uint(float(i12) / p_sf2);
+    uint i03 = uint(float(i13) / p_sf3);
+    return float(_105.Load<half>(((((p_a_offset + (i03 * p_nb03)) + (i02 * p_nb02)) + (i01 * p_nb01)) + (i00 * p_nb00)) * 2 + 0));
+}
+
+float fetch_bilinear(int2 c0, int2 c1, float2 d, uint i12, uint i13)
+{
+    uint i02 = uint(float(i12) / p_sf2);
+    uint i03 = uint(float(i13) / p_sf3);
+    uint base = (p_a_offset + (i03 * p_nb03)) + (i02 * p_nb02);
+    float v00 = float(_105.Load<half>(((base + (uint(c0.y) * p_nb01)) + (uint(c0.x) * p_nb00)) * 2 + 0));
+    float v01 = float(_105.Load<half>(((base + (uint(c0.y) * p_nb01)) + (uint(c1.x) * p_nb00)) * 2 + 0));
+    float v10 = float(_105.Load<half>(((base + (uint(c1.y) * p_nb01)) + (uint(c0.x) * p_nb00)) * 2 + 0));
+    float v11 = float(_105.Load<half>(((base + (uint(c1.y) * p_nb01)) + (uint(c1.x) * p_nb00)) * 2 + 0));
+    return ((((v00 * (1.0f - d.x)) * (1.0f - d.y)) + ((v01 * d.x) * (1.0f - d.y))) + ((v10 * (1.0f - d.x)) * d.y)) + ((v11 * d.x) * d.y);
+}
+
+float interpolate_bilinear(uint i10, uint i11, uint i12, uint i13)
+{
+    int2 ne0 = int2(int(p_ne00), int(p_ne01));
+    float2 c = ((float2(float(i10), float(i11)) + p_pixel_offset.xx) / float2(p_sf0, p_sf1)) - p_pixel_offset.xx;
+    float2 c0f = floor(c);
+    float2 d = c - c0f;
+    int2 c0 = max(int2(c0f), int2(0, 0));
+    int2 c1 = min(int2(c0f + 1.0f.xx), (ne0 - int2(1, 1)));
+    int2 param = c0;
+    int2 param_1 = c1;
+    float2 param_2 = d;
+    uint param_3 = i12;
+    uint param_4 = i13;
+    return fetch_bilinear(param, param_1, param_2, param_3, param_4);
+}
+
+float4 powers(float x)
+{
+    return float4((x * x) * x, x * x, x, 1.0f);
+}
+
+float bicubic(float p0, float p1, float p2, float p3, float x)
+{
+    float param = x + 1.0f;
+    float param_1 = x;
+    float param_2 = 1.0f - x;
+    float param_3 = 2.0f - x;
+    return (((p0 * dot(float4(-0.75f, 3.75f, -6.0f, 3.0f), powers(param))) + (p1 * dot(float4(1.25f, -2.25f, 0.0f, 1.0f), powers(param_1)))) + (p2 * dot(float4(1.25f, -2.25f, 0.0f, 1.0f), powers(param_2)))) + (p3 * dot(float4(-0.75f, 3.75f, -6.0f, 3.0f), powers(param_3)));
+}
+
+float interpolate_bicubic(uint i10, uint i11, uint i12, uint i13)
+{
+    int2 res = int2(int(p_ne00 - 1u), int(p_ne01 - 1u));
+    float2 coord = ((float2(float(i10), float(i11)) + p_pixel_offset.xx) / float2(p_sf0, p_sf1)) - p_pixel_offset.xx;
+    float2 d = frac(coord);
+    int2 i = int2(floor(coord));
+    uint i02 = uint(float(i12) / p_sf2);
+    uint i03 = uint(float(i13) / p_sf3);
+    uint base = (p_a_offset + (i03 * p_nb03)) + (i02 * p_nb02);
+    float param = float(_105.Load<half>(((base + (uint(clamp(i.x + (-1), 0, res.x)) * p_nb00)) + (uint(clamp(i.y + (-1), 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_1 = float(_105.Load<half>(((base + (uint(clamp(i.x + 0, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + (-1), 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_2 = float(_105.Load<half>(((base + (uint(clamp(i.x + 1, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + (-1), 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_3 = float(_105.Load<half>(((base + (uint(clamp(i.x + 2, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + (-1), 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_4 = d.x;
+    float param_5 = float(_105.Load<half>(((base + (uint(clamp(i.x + (-1), 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 0, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_6 = float(_105.Load<half>(((base + (uint(clamp(i.x + 0, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 0, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_7 = float(_105.Load<half>(((base + (uint(clamp(i.x + 1, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 0, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_8 = float(_105.Load<half>(((base + (uint(clamp(i.x + 2, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 0, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_9 = d.x;
+    float param_10 = float(_105.Load<half>(((base + (uint(clamp(i.x + (-1), 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 1, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_11 = float(_105.Load<half>(((base + (uint(clamp(i.x + 0, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 1, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_12 = float(_105.Load<half>(((base + (uint(clamp(i.x + 1, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 1, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_13 = float(_105.Load<half>(((base + (uint(clamp(i.x + 2, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 1, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_14 = d.x;
+    float param_15 = float(_105.Load<half>(((base + (uint(clamp(i.x + (-1), 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 2, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_16 = float(_105.Load<half>(((base + (uint(clamp(i.x + 0, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 2, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_17 = float(_105.Load<half>(((base + (uint(clamp(i.x + 1, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 2, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_18 = float(_105.Load<half>(((base + (uint(clamp(i.x + 2, 0, res.x)) * p_nb00)) + (uint(clamp(i.y + 2, 0, res.y)) * p_nb01)) * 2 + 0));
+    float param_19 = d.x;
+    float param_20 = bicubic(param, param_1, param_2, param_3, param_4);
+    float param_21 = bicubic(param_5, param_6, param_7, param_8, param_9);
+    float param_22 = bicubic(param_10, param_11, param_12, param_13, param_14);
+    float param_23 = bicubic(param_15, param_16, param_17, param_18, param_19);
+    float param_24 = d.y;
+    return bicubic(param_20, param_21, param_22, param_23, param_24);
+}
+
+float triangle_filter(float x)
+{
+    return max(1.0f - abs(x), 0.0f);
+}
+
+float interpolate_bilinear_antialias(uint i10, uint i11, uint i12, uint i13)
+{
+    float support1 = max(1.0f, 1.0f / p_sf1);
+    float invscale1 = 1.0f / support1;
+    float support0 = max(1.0f, 1.0f / p_sf0);
+    float invscale0 = 1.0f / support0;
+    uint i02 = uint(float(i12) / p_sf2);
+    uint i03 = uint(float(i13) / p_sf3);
+    float y = (float(i11) + p_pixel_offset) / p_sf1;
+    float x = (float(i10) + p_pixel_offset) / p_sf0;
+    int x_min = max(int((x - support0) + p_pixel_offset), 0);
+    int x_max = min(int((x + support0) + p_pixel_offset), int(p_ne00));
+    int y_min = max(int((y - support1) + p_pixel_offset), 0);
+    int y_max = min(int((y + support1) + p_pixel_offset), int(p_ne01));
+    float val = 0.0f;
+    float total_weight = 0.0f;
+    for (int sy = y_min; sy < y_max; sy++)
+    {
+        float param = ((float(sy) - y) + p_pixel_offset) * invscale1;
+        float weight_y = triangle_filter(param);
+        for (int sx = x_min; sx < x_max; sx++)
+        {
+            float param_1 = ((float(sx) - x) + p_pixel_offset) * invscale0;
+            float weight_x = triangle_filter(param_1);
+            float weight = weight_x * weight_y;
+            if (weight <= 0.0f)
+            {
+                continue;
+            }
+            float pixel = float(_105.Load<half>(((((p_a_offset + (i03 * p_nb03)) + (i02 * p_nb02)) + (uint(sy) * p_nb01)) + (uint(sx) * p_nb00)) * 2 + 0));
+            val += (pixel * weight);
+            total_weight += weight;
+        }
+    }
+    if (total_weight > 0.0f)
+    {
+        val /= total_weight;
+    }
+    return val;
+}
+
+void comp_main()
+{
+    uint idx = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (idx >= p_ne)
+    {
+        return;
+    }
+    uint i10 = idx % p_ne10;
+    uint i11 = (idx / p_ne10) % p_ne11;
+    uint i12 = (idx / (p_ne10 * p_ne11)) % p_ne12;
+    uint i13 = (idx / ((p_ne10 * p_ne11) * p_ne12)) % p_ne13;
+    float result;
+    switch (scale_mode)
+    {
+        case 0u:
+        {
+            uint param = i10;
+            uint param_1 = i11;
+            uint param_2 = i12;
+            uint param_3 = i13;
+            result = fetch_nearest(param, param_1, param_2, param_3);
+            break;
+        }
+        case 1u:
+        {
+            uint param_4 = i10;
+            uint param_5 = i11;
+            uint param_6 = i12;
+            uint param_7 = i13;
+            result = interpolate_bilinear(param_4, param_5, param_6, param_7);
+            break;
+        }
+        case 2u:
+        {
+            uint param_8 = i10;
+            uint param_9 = i11;
+            uint param_10 = i12;
+            uint param_11 = i13;
+            result = interpolate_bicubic(param_8, param_9, param_10, param_11);
+            break;
+        }
+        case 513u:
+        {
+            uint param_12 = i10;
+            uint param_13 = i11;
+            uint param_14 = i12;
+            uint param_15 = i13;
+            result = interpolate_bilinear_antialias(param_12, param_13, param_14, param_15);
+            break;
+        }
+    }
+    _1248.Store<half>((p_d_offset + idx) * 2 + 0, half(result));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+<file path="xielu.hlsl">
+static const uint3 gl_WorkGroupSize = uint3(512u, 1u, 1u);
+
+ByteAddressBuffer _49;
+RWByteAddressBuffer _106;
+cbuffer parameter
+{
+    uint p_KX : packoffset(c0);
+    uint p_KY : packoffset(c0.y);
+    float p_param1 : packoffset(c0.z);
+    float p_param2 : packoffset(c0.w);
+    float p_param3 : packoffset(c1);
+    float p_param4 : packoffset(c1.y);
+};
+
+static uint3 gl_GlobalInvocationID;
+struct SPIRV_Cross_Input
+{
+    uint3 gl_GlobalInvocationID : SV_DispatchThreadID;
+};
+
+void comp_main()
+{
+    uint i = ((gl_GlobalInvocationID.z * 262144u) + (gl_GlobalInvocationID.y * 512u)) + gl_GlobalInvocationID.x;
+    if (i >= p_KX)
+    {
+        return;
+    }
+    float x = float(_49.Load<half>(i * 2 + 0));
+    float alpha_n = p_param1;
+    float alpha_p = p_param2;
+    float beta = p_param3;
+    float eps = p_param4;
+    if (x > 0.0f)
+    {
+        x = ((alpha_p * x) * x) + (beta * x);
+    }
+    else
+    {
+        float min_x_eps = min(x, eps);
+        x = (((exp(min_x_eps) - 1.0f) - x) * alpha_n) + (beta * x);
+    }
+    _106.Store<half>(i * 2 + 0, half(x));
+}
+
+[numthreads(512, 1, 1)]
+void main(SPIRV_Cross_Input stage_input)
+{
+    gl_GlobalInvocationID = stage_input.gl_GlobalInvocationID;
+    comp_main();
+}
+</file>
+</source_code>
+</context_report>
