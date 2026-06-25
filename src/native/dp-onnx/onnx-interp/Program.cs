@@ -1859,6 +1859,11 @@ public class Interp
             case 7: { long[] l = t.Int64Data.Count > 0 ? t.Int64Data.ToArray() : Cast<long>(t.RawData.Span, (int)n); return Tensor.I(l, dims); }
             case 6: { int[] i = t.Int32Data.Count > 0 ? t.Int32Data.ToArray() : Cast<int>(t.RawData.Span, (int)n); return Tensor.I(Array.ConvertAll(i, x => (long)x), dims); }
             case 9: { var raw = t.RawData.Span; var l = new long[n]; for (int k = 0; k < n; k++) l[k] = raw[k]; return Tensor.I(l, dims); }
+            // Gemma-4 E2B gap #1 (CRQ135): half-precision initializer load. bf16 = top 16 bits of fp32;
+            // fp16 via Half. Unblocks the bf16 weights (768 MB tied embed + per-layer matrices). The
+            // 4.48 GB PLE still exceeds the float[] / 2 GB cap here — that's gap #2 (lazy region gather).
+            case 16: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = BitConverter.Int32BitsToSingle((int)((uint)(ushort)(raw[2 * k] | (raw[2 * k + 1] << 8)) << 16)); return Tensor.F(f, dims); } // BFLOAT16
+            case 10: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = (float)BitConverter.UInt16BitsToHalf((ushort)(raw[2 * k] | (raw[2 * k + 1] << 8))); return Tensor.F(f, dims); } // FLOAT16
             default: throw new NotImplementedException($"initializer dtype {t.DataType} ({t.Name})");
         }
     }
