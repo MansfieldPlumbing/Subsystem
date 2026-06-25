@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- dp-onnx: native .NET ONNX interpreter over the PREBUILT Onnx.dll (protobuf
-       decomposition). References the DLL directly — no rebuild of Onnx, no glob
-       contamination from the netstandard2.0 parent project. NO onnxruntime. -->
+  <!-- dp-onnx: native .NET ONNX interpreter over Onnx.dll (protobuf decomposition of the
+       ONNX schema). NO onnxruntime. Vendored into subsystem (CRQ143 P0): onnxnet is a sibling
+       ProjectReference, not a HintPath'd DLL — the repo's Directory.Build.props redirects build
+       output to a build/ sibling, so a fixed bin\ HintPath cannot resolve; the project graph can.
+       EnableDefaultCompileItems stays false so emitted/scratch .cs (io\*.cs) are never swept in. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net11.0</TargetFramework>
@@ -14,9 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Reference Include="Onnx">
-      <HintPath>..\onnxnet\bin\Release\netstandard2.0\Onnx.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="..\onnxnet\Onnx.csproj" />
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
   </ItemGroup>
 </Project>
