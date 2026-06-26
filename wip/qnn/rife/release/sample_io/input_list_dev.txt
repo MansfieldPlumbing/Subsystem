@@ -1,0 +1,1 @@
+img0:=/data/local/tmp/rife/img0.raw img1:=/data/local/tmp/rife/img1.raw timestep:=/data/local/tmp/rife/timestep.raw

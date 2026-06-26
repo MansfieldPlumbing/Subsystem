@@ -1,0 +1,1 @@
+img0:=S:\qnn\rife\out\img0.raw img1:=S:\qnn\rife\out\img1.raw timestep:=S:\qnn\rife\out\timestep.raw

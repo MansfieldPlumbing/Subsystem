@@ -1,0 +1,6 @@
+{
+  "backend_extensions": {
+    "config_file_path": "S:\\qnn\\demucs\\out\\tileproof\\ext_tiled.json",
+    "shared_library_path": "QnnHtpNetRunExtensions.dll"
+  }
+}

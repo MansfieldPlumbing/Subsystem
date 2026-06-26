@@ -1,0 +1,166 @@
+qnn-net-run pid:18408
+
+Command Line Options:
+  [ --help ]            Displays this help message.
+  [ --version ]         Displays version information.
+  [ --model=<val> ]     Path to the model containing a QNN network.
+                        --retrieve_context and --model are mutually exclusive.
+                        Only one of the options can be specified at a time.
+                        To compose multiple graphs, use comma-separated list of model.so files.
+                        The syntax is <qnn_model_name_1.so>,<qnn_model_name_2.so>
+  --backend=<val>       Path to a QNN backend to execute the model.
+  [ --dlc_path=<val> ]  Paths to a comma separated list of Deep Learning Containers (DLC) from which to load the models. Neccesitates QnnModelDlc.so
+                        To compose multiple graphs, use comma-separated list of DLC files.
+                        The syntax is <qnn_model_name_1.dlc>,<qnn_model_name_2.dlc>
+                        Default: None
+  [ --input_list=<val> ]
+                        Path to a file listing the inputs for the network.
+                        If there are multiple graphs in model.so, this has
+                        to be comma-separated list of input list files.
+                        When multiple graphs are present, to skip execution of a graph use
+                        "__"(double underscore without quotes) as the file name in the
+                        comma-seperated list of input list files.
+  [ --output_dir=<val> ]
+                        The directory to save output to. Defaults to ./output.
+  [ --op_packages=<val> ]
+                        Provide a comma-separated list of op packages,
+                        interface providers, and, optionally, targets to
+                        register. Valid values for target are CPU and HTP.
+                        The syntax is:
+                        op_package_path:interface_provider:target[,op_package_path:interface_provider:target...]
+  [ --output_data_type=<val> ]
+                        Please refer to flag --use_native_output_files as this option is deprecated
+  [ --input_data_type=<val> ]
+                        Please refer to flag --use_native_input_files as this option is deprecated
+  [ --native_input_tensor_names=<val> ]
+                        Provide a comma-separated list of input tensor names, 
+                        for which the input files would be read/parsed in native format 
+                        Note that options --use_native_input_files and --native_input_tensor_names
+                        are mutually exclusive. Only one of the options can be specified at a time.
+                        The syntax is: graphName0:tensorName0,tensorName1;graphName1:tensorName0,tensorName1
+  [ --profiling_level=<val> ]
+                        Enable profiling. Valid Values:
+                          1. basic:    captures execution and init time.
+                          2. detailed: in addition to basic, captures
+                                       per Op timing for execution.
+                          3. client  : captures only the performance metrics
+                                       measured by qnn-net-run
+                          4. backend:  backend-specific profiling level
+                                       specified in the backend extension
+                                       related JSON config file.
+  [ --profiling_option=<val> ]
+                        Set profiling options:
+                          1. optrace:    Generates an optrace of the run.
+  [ --model_prefix=<val> ]
+                        Function prefix to use when loading <qnn_model_name.so>.
+                        Default: QnnModel
+  [ --retrieve_context=<val> ]
+                        Path to cached binary from which to load a saved
+                        context from and execute graphs. --retrieve_context and
+                        --model are mutually exclusive. Only one of the options
+                        can be specified at a time.
+  [ --binary_updates=<val> ]
+                        Path to yaml that contains paths to binary updates.
+                        Updates are applied after initial graph execution on
+                        a per graph basis.
+  [ --perf_profile=<val> ]
+                        Specifies perf profile to set. Valid settings are
+                        "low_balanced", "balanced", "default","high_performance",
+                        "sustained_high_performance", "burst","low_power_saver",
+                        "power_saver", "high_power_saver", "custom(for internal use only)",
+                        "extreme_power_saver" and "system_settings".
+  [ --config_file=<val> ]
+                        Path to a JSON config file. The config file currently
+                        supports options related to backend extensions and
+                        context priority. Please refer to SDK documentation
+                        for more details.
+  [ --log_level=<val> ] 
+                        Specifies max logging level to be set. Valid settings:
+                        "error", "warn", "info" and "verbose".
+  [ --duration=<val> ]  Specifies the duration of the graph execution in seconds.
+                        Loops over the input_list until this amount of time has transpired.
+  [ --num_inferences=<val> ]
+                        Specifies the number of inferences.
+                        Loops over the input_list until the number of inferences has transpired.
+  [ --keep_num_outputs=<val> ]
+                        Specifies the number of outputs to be saved.
+                        Once the number of outputs saved reaches the limit, subsequent outputs are discarded
+  [ --batch_multiplier=<val> ]
+                        Specifies the value with which the batch value in input and output tensors dimensions will be multiplied.
+                        The modified input and output tensors will be used only during the execute graphs.
+                        Composed graphs will still use the tensor dimensions from model.
+  [ --timeout=<val> ]   Specifies the value of the timeout for execution of graph in micro seconds.
+                        Please note using this option with a backend that does not support timeout signals results in an error
+  [ --retrieve_context_timeout=<val> ]
+                        Specifies the value of the timeout for initialization of graph in micro seconds.
+                        Please note using this option with a backend that does not support timeout signals results in an error.
+                        Also note that this option can only be used when loading a saved context through--retrieve_context option.
+  [ --set_output_tensors=<val> ]
+                        Provide a comma-separated list of intermediate output tensor names, for which the outputs
+                        will be written in addition to final graph output tensors.
+                        Note that options --debug and --set_output_tensors
+                        are mutually exclusive. Only one of the options can be specified at a time.
+                        Also note that this option can not be used when graph is retrieved from context binary,
+                        since the graph is already finalized when retrieved from context binary.
+                        The syntax is: graphName0:tensorName0,tensorName1;graphName1:tensorName0,tensorName1In case of a single graph, its name is not necessary and a list of comma separated tensor
+                        names can be provided, e.g.: tensorName0,tensorName1.
+                        The same format can be provided in a .txt file.
+  [ --retrieve_context_list=<val> ]
+                        Provide the path to yaml file which contains info regarding multiple contexts
+  [ --debug ]           Specifies that output from all layers of the network will be saved
+                        Note that options --debug and --set_output_tensors are mutually exclusive.
+                        Only one of the options can be specified at a time.
+                        This option can not be used when loading saved context through --retrieve_context option.
+  [ --shared_buffer ]   Specifies creation of shared buffers for graph I/O between the application
+                        and the device/coprocessor associated with a backend directly.
+  [ --synchronous ]     Please refer to flag --asynchronous as this option is deprecated.
+                        Graphs are now executed synchronously by default.
+  [ --asynchronous ]    Specifies that graphs should be executed asynchronously rather than synchronously.
+                        If a backend does not support asynchronous execution, synchronous execution will be used.
+  [ --use_native_input_files ]
+                        Specifies that the input files will be parsed in the data
+                        type native to the graph. If not specified, input files will
+                        be parsed in floating point.
+                        Note that options --use_native_input_files and --native_input_tensor_names
+                        are mutually exclusive. Only one of the options can be specified at a time.
+  [ --use_native_output_files ]
+                        Specifies that the output files will be generated in the data
+                        type native to the graph. If not specified, output files will
+                        be generated in floating point.
+  [ --use_mmap ]        Specifies that the context binary that is being read should be loaded
+                        using the Memory-mapped (MMAP) file I/O. Please note some platforms
+                        may not support this due to OS limitations in which case an error
+                        is thrown when this option is used. This option is currently not supported
+                        for DLC offline prepare use case.
+  [ --validate_binary ] 
+                        Specifies that the context binary will be validated before creating a context.
+                        This option can only be used with backends that support binary validation.
+  [ --max_input_cache_tensor_sets=<val> ]
+                        Specifies the maximum number of input tensor sets that can be cached.
+                        Use value "-1" to cache all the input tensors created.
+                        Note that options --max_input_cache_tensor_sets and --max_input_cache_size_mb are mutually exclusive.
+                        Only one of the options can be specified at a time.
+  [ --max_input_cache_size_mb=<val> ]
+                        Specifies the maximum cache size in mega bytes(MB).
+                        Note that options --max_input_cache_tensor_sets and --max_input_cache_size_mb are mutually exclusive.
+                        Only one of the options can be specified at a time.
+  [ --platform_options=<val> ]
+                        Specifies values to pass as platform options. Multiple platform options can be provided using the syntax: key0:value0;key1:value1;key2:value2
+  [ --graph_profiling_start_delay=<val> ]
+                        Specifies graph profiling start delay in seconds. Please Note thatthis option can only be used
+                        in conjunction with graph-level profiling handles.
+  [ --graph_profiling_num_executions=<val> ]
+                        Specifies the maximum number of QnnGraph_execute/QnnGraph_executeAsynccalls to be profiled.
+                        Please Note that this option can only beused in conjunction with graph-level profiling handles.
+  [ --io_tensor_mem_handle_type=<val> ]
+                        Specifies mem handle type to be used for Input and output tensors during graph execution.
+                        Valid settings:"ion" and "dma_buf".
+  [ --device_options=<val> ]
+                        Specifies values to pass as device options. Multiple device options can be provided using the syntax: key0:value0;key1:value1;key2:value2.
+                        Currently supported options:
+                        device_id:<n> - selects a particular hardware device by ID to execute on. This ID will be used during QnnDevice creation. A default device will be chosen by the backend if an ID is not provided. This value will override a device ID selected in a backend config file.
+                        core_id:<n> - selects a particular core by ID to execute on the selected device. This ID will be used during QnnDevice creation. A default core will be chosen by the backend if an ID is not provided. This value will override a core ID selected in a backend config file.
+
+Arguments Invalid:
+ERROR:	None of the options --model, --retrieve_context, --retrieve_context_list anddlc_path are specified.
+One of the options should be specified.

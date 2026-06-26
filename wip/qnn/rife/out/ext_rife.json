@@ -1,0 +1,25 @@
+{
+  "devices": [
+    {
+      "cores": [
+        {
+          "perf_profile": "burst",
+          "core_id": 0,
+          "rpc_control_latency": 100
+        }
+      ],
+      "dsp_arch": "v73",
+      "soc_id": 68
+    }
+  ],
+  "graphs": [
+    {
+      "graph_names": [
+        "rife"
+      ],
+      "fp16_relaxed_precision": 1,
+      "vtcm_mb": 8,
+      "O": 2
+    }
+  ]
+}

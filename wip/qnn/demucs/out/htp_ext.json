@@ -1,0 +1,19 @@
+{
+  "graphs": [
+    {
+      "graph_names": ["demucsv4_atom"],
+      "fp16_relaxed_precision": 1,
+      "vtcm_mb": 8,
+      "O": 2
+    }
+  ],
+  "devices": [
+    {
+      "soc_id": 43,
+      "dsp_arch": "v73",
+      "cores": [
+        { "core_id": 0, "perf_profile": "burst", "rpc_control_latency": 100 }
+      ]
+    }
+  ]
+}

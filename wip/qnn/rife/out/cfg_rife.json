@@ -1,0 +1,6 @@
+{
+  "backend_extensions": {
+    "config_file_path": "S:\\qnn\\rife\\out\\ext_rife.json",
+    "shared_library_path": "QnnHtpNetRunExtensions.dll"
+  }
+}

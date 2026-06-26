@@ -1,0 +1,24 @@
+{
+  "graphs": [
+    {
+      "graph_names": [
+        "rife"
+      ],
+      "O": 3,
+      "vtcm_mb": 8
+    }
+  ],
+  "devices": [
+    {
+      "soc_id": 68,
+      "cores": [
+        {
+          "rpc_control_latency": 100,
+          "core_id": 0,
+          "perf_profile": "burst"
+        }
+      ],
+      "dsp_arch": "v73"
+    }
+  ]
+}
