@@ -1,0 +1,15 @@
+[SITREP] after: goto https://google.com/ai
+[DEVICE] 2026-06-17 07:26:04 Wednesday (Eastern Standard Time) @ Callahan, Florida, United States [30.5622, -81.8307]
+[PAGE] google.com/ai  |  Google Search
+[SCOPED] ask->/1
+[STALE] ok
+
+[TEXT]
+What's on your mind?
+Plan a weekend trip to a nearby national or state park
+What are smart ways to save money on groceries?
+Plan a fun scavenger hunt in my area
+
+[INTENTS] browse_type <id> "text" | browse_click <id> | browse_do <name> | browse_goto <url> | browse_back | browse_end
+[1] textarea[textarea] Ask anything
+
