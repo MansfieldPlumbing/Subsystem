@@ -1,21 +1,5 @@
 [
   {
-    "Id": 103,
-    "Kind": "Incident",
-    "Category": "Cm",
-    "Summary": "Resolve orphaned, missing, and fragmented requests by integrating backlog into portable build (#75)",
-    "RelatedFiles": [
-      "src/runspace/Cm/RequestHive.cs",
-      "src/runspace/Cm/requests.json"
-    ],
-    "Severity": 1,
-    "Status": "Open",
-    "Created": 1782060890,
-    "Closed": 0,
-    "Disposition": "",
-    "EosLog": []
-  },
-  {
     "Id": 1,
     "Kind": "Change",
     "Category": "build",
@@ -30,7 +14,21 @@
     "Created": 1782059606,
     "Closed": 0,
     "Disposition": "",
-    "EosLog": []
+    "EosLog": [
+      {
+        "Request": 1,
+        "Noted": 1782158972,
+        "Disposition": "reflection-launcher-retired-superseded-by-vom-loader",
+        "Body": "Directory-deploy A/B reflection launcher PROVEN BROKEN (tmp-test-ab/boot-failure.log: Assembly.LoadFrom payload cannot resolve System.Management.Automation; slot A a 29-byte stub) and conflicts with the single-file ouroboros. Retired to _retired/launcher-reflection-loader. SUPERSEDED per Scott: the loader IS the VOM - single exe, slot = refcounted handle, free-on-zero on code (collectible ALC backend; GC-kill later swaps the Reclaim backend behind the same seam, invariant 9). Stage 1 DONE: src/runspace/Vom/Slot.cs (LoadSlot/EnterSlot/LeaveSlot/SlotSwapTest), wired into selftest, receipt tests/test.vom.slot-swap.ps1 GREEN. Slots generalize N-way (C/D/E/F) = safe source-tree branching. Next: Stage 2 GC-kill backend, Stage 3 C++ VOM/parity."
+      },
+      {
+        "Request": 1,
+        "Noted": 1782170138,
+        "Disposition": "hotload-plus-rollback-mechanism-complete-tested",
+        "Body": "VOM loader does BOTH halves: hotload/swap and rollback (faulting candidate freed-on-zero, prior slot kept). Receipts GREEN in tests/: test.vom.slot-swap + test.vom.slot-rollback, both wired into ss selftest. Mechanism complete. OPEN residual: cross-restart boot-slot persistence (the retired launcher boot.json firmware-A/B) - under the single-exe VOM-loader thesis this is a thin Cm-record layer or out of scope; Scott to confirm before close."
+      }
+    ],
+    "Ref": "CRQ000000000001"
   },
   {
     "Id": 2,
@@ -48,6 +46,922 @@
     "Created": 1782059609,
     "Closed": 0,
     "Disposition": "",
-    "EosLog": []
+    "EosLog": [
+      {
+        "Request": 2,
+        "Noted": 1782210294,
+        "Disposition": "Progressed: the FLIP (in-proc pwsh -> cells, no ANSI) is DONE + verified via ss build self + runtime; interactive-in-window, xterm delete, foreign tui-mode, and Android remain OPEN. See body.",
+        "Body": "EOS — TUI/Compositor integration, \"the flip\" slice (Opus, 2026-06-23, ~0600).\nWorktree: cr/tui-integration @ S:\\subsystem-project\\subsystem-tui (off main HEAD 0d3cb63; main untouched, verified byte-identical).\n\n== DONE (verified against the binary) ==\n1. FOUNDATION already in ss (discovered, not re-ported): TuiCellBuffer.cs (Cell + CellBuffer), TuiVtRenderer.cs (VtRenderer cells->VT diff), Tui.cs (renders live VOM namespace as cells, VOM-owned \\Sessions\\Tui, cascade-terminate). Baseline build GREEN (0 errors).\n2. THE FLIP — built `ss repl <cmd>` (NEW: src/runspace/windows/Repl.cs + dispatch line in Program.cs). In-proc pwsh runspace -> pipeline PSObjects -> Out-String (text, NO SGR) -> CellBuffer -> render. NO ConPTY, NO external pwsh.exe, NO ANSI for native pwsh. Window is a real VOM owner (\\Sessions\\Repl); framebuffer registered as a handle; Terminate cascades on exit.\n3. VERIFIED end-to-end:\n   - Gate-clean: passes SS0xx analyzers; compiles via `ss build self` (Roslyn ouroboros) GREEN -> 174 MB exe.\n   - Ran: `ss repl 'Get-Date'` and `ss repl '$PSVersionTable.PSVersion; Get-Process -Id $PID | Select Name,Id,MB'` -> pwsh objects render THROUGH the cell grid.\n   - NO-ANSI proof: `cat -A` on output shows ZERO ESC (^[) sequences in the rendered text.\n   - VOM lifecycle proof: log shows \"OWNER + \\Sessions\\Repl\" on start, \"TERMINATE \\Sessions\\Repl: cancelled, reclaimed 1 handles\" on exit.\n4. Answered (factual): ConPTY is C# and always was (managed wrapper, from S:\\reference\\ConPTY-Comfy / windows/ConPTY.cs); ss has zero ConPTY (in-proc runspaces). `ss build self --out <file>` is NOT in-place (separate exe); --replace is the in-place self-swap (not used). The exe carries its own source (268-file genome; `ss extract` verified).\n\n== OPEN (precise next steps) ==\nA. INTERACTIVE SESSION IN WINDOW (the parity gate): wire `ss repl` to keystroke input + the live VtRenderer/surface. Today it is console-stdout / one-shot only. Pattern: Vom.Spawn(windowOwner,\"pwsh\",work) runs the ReplEngine-style loop on its own thread (cascade-kill); input -> runspace; objects -> cells each frame. THIS unblocks B, C(desktop), D(android).\nB. DELETE xterm.js — ONLY after A reaches parity. Consumers: subsystem-main + terminal-project + android-terminal terminal.obp (vendor/xterm). Deleting before A leaves a dead terminal presenter. (Scott: \"once we confirm xterm can fuck off we delete it\" — A is the confirm.)\nC. FOREIGN-PROGRAM \"tui mode\": VT parser survives ONLY for child processes that emit ANSI (git/npm/docker/vim/htop/ssh/wsl). They need a PTY (ConPTY/ptmx). Pull the VT500 state machine + tests from S:\\reference\\XtermSharp. Native pwsh never uses it.\nD. ANDROID: head build is BROKEN (Subsystem.csproj -> XA5207, Android SDK platform/NDK missing) AND the flip lives in the windows head (src/runspace/windows/) — must lift the cell/flip into shared core first. Then D3D12->Vulkan via src/runspace/Device/Android/Surfaces.cs. Device CONNECTED for test: adb $SS_SERIAL. Workload installed.\nE. DESKTOP SCREENSHOT: not possible yet — flip renders to stdout, not the floating-window surface (that GUI is standalone C:\\tui-dwm, not wired to ss's surface). Comes free once A lands.\nF. DOGFOOD the real self-replace / A-B update flow — this slice used `--out` temp, sidestepping --replace. Exercise it for real.\n\n== DESIGN DECISIONS SETTLED THIS SESSION (carry forward) ==\n- Cell = R32_UINT: 24-bit codepoint + 8-bit semantic ROLE; theme maps role->color at composite (recolor w/o re-render). Decode UTF-8 -> Rune (int), never store raw bytes; reserve sentinels above U+10FFFF.\n- Atlas is already MSDF (8-bit RGB, msdf-atlas-gen) — KEEP, do not go 1-bit.\n- \"uint32 or bust\": scale by parallel R32_UINT planes (SoA), NEVER r32g32 (AoS). Truecolor = +plane, not wider texel.\n- Scrollback = PSRP/CliXML objects (reflow-free): hot=visible cells, warm=live objects, cold=CliXML. \"Frame moves, not scrollback\" = over-scan ring + pan the viewport offset; regenerate at margins.\n- Emoji = RGBA sprite handle composited OVER the mask plane (mono default, color opt-in). Skia is OUT.\n- tui-dwm owns its surface (Win32/D3D12 win, Surface/Vulkan android). WT *renders* it fine; the rule is narrow: the pwsh SESSION must not be a conhost child (no ConPTY nesting). VT-out to a remote dumb terminal (producing) is fine.\n- Plugins (Clock/SysInfo/Terminal) are EXAMPLES of the window model — keep as reference; production widget model = json cards (OBP). Toy Vom.cs is OUT (use real Vom).\n- C VOM = independent RUNTIME oracle (N-version), NOT Wheeler DDC; WP S6 Trusting Trust stays OPEN (needs an independent C# compiler). [cross-ref CRQ #135]\n\n== FILES ==\nNEW: src/runspace/windows/Repl.cs. EDIT: src/runspace/windows/Program.cs (dispatch: \"repl\" => Repl.Run). Uncommitted on cr/tui-integration.\nRemoving coordination/workorder-tui-integration.md (no second store — the hive is the truth, per RequestCmdlets.cs).\n"
+      },
+      {
+        "Request": 2,
+        "Noted": 1782211456,
+        "Disposition": "Progressed",
+        "Body": "LAYER 2 (this session) ΓÇö tui-dwm renderer relocated to the SHARED module shell/tui; `ss coreui` multi-session surface delivered; Windows build paths aligned. Builds were verified to S:\\tmp only ΓÇö subsystem-main\\ss.exe is byte-untouched. Worktree cr/tui-integration holds all changes, uncommitted.\n\nSYMPTOM / DIRECTIVE\nEosLog #1 landed the one-shot flip (`ss repl`) but placed the renderer in src/runspace/windows ΓÇö a per-head fork (Android excludes windows\\** via DefaultItemExcludes, so it was invisible to the Android head). Scott: the renderer must live in shell/tui, shared, branching to per-head only at the d3d12<->vulkan present seam (\"none worth mentioning\"); the surface must LAUNCH, host MULTIPLE sessions, and END THEM POLITELY; and the Windows build paths must be aligned.\n\nROOT CAUSE (build misalignment, pre-existing)\nSubsystemWin.csproj shipped OutputType=Library + AssemblyName=SubsystemWin. The dotnet path (`ss build`) therefore produced SubsystemWin.exe and Library blocked PublishSingleFile (NETSDK1099); only `ss build self` (hardcoded ConsoleApplication, name derived from the bundle apphost) produced ss.exe ΓÇö so the two build paths had diverged and the dotnet path was latently broken. The retired launcher (windows/launcher/Program.cs) still carried a second Main(), which is inert under Library but is CS0017 under Exe.\n\nRESOLUTION\n1. New shared module src/shell/tui (namespace Subsystem.Shell.Tui): Cell/CellBuffer, ICellSurface (the one present seam), VtRenderer (console/VT binding implementing ICellSurface), Tui (namespace viewer), Repl (one-shot flip), CoreUi (multi-session). Deleted the four windows/ copies. The per-head cmdlet dependency (Shim.LoadProjectCmdlets) became an injected Action<InitialSessionState> seam so shared code binds to no head type; Program.cs passes Shim.LoadProjectCmdlets.\n2. CoreUi: each session is a VOM CHILD owner (Vom.Spawn under \\Sessions\\CoreUi) running its OWN in-proc runspace on its OWN thread; pipeline OBJECTS -> Out-String -> cells (no SGR, so NO ANSI between sessions). Close a session = Terminate(child); quit = Terminate(parent) cascades. Interactive (alt-screen via ICellSurface: Tab cycle, ^N new, ^W close, Enter run, Esc quit) plus a headless `--once` proof.\n3. Compiled into BOTH heads: SubsystemWin.csproj and Android Subsystem.csproj both add <Compile Include=\"...shell\\tui\\*.cs\">; the Android shell resource-embed glob now excludes shell\\tui\\**\\*.cs so source is not shipped twice. SelfBuild.cs compile roots += \"src/shell/tui/\" (the ouroboros bootstrap).\n4. Build alignment: SubsystemWin.csproj OutputType Library->Exe, AssemblyName SubsystemWin->ss; deleted the retired launcher (windows/launcher/*). Both paths now produce ss.exe from one source.\n\nVERIFICATION (binary + severe test; teardown observed via the PUBLIC namespace, not internals)\n- dotnet publish (worktree csproj) -> ss.exe, 0 compile errors; analyzer gate `ss check --gate` -> 286 findings / baseline 286 / NEW 0 -> GREEN.\n- `ss coreui --once`: OWNER \\Sessions\\CoreUi + two SPAWN children; Ps\\1 -> $PSVersionTable 7.7.0-preview.2, Ps\\2 -> (Get-Location) S:\\ (two independent runspaces, composited). ESC(0x1B) count = 0 over 1440 bytes -> ZERO ANSI. Terminate cascade -> live=0, surfaceGone=True, allSessionsReclaimed=True (via Vom.GetOwner/GetOwners ΓÇö arm's length, applying this session's privileged-self-test finding). exit 0, GREEN.\n- Ouroboros: `ss build self` from the rebuilt exe -> GREEN 165 MB; the OFFSPRING exe runs `coreui --once` -> GREEN. Confirms shell/tui is in the self-build roots and the new exe is named ss.exe.\n\nRESIDUAL / OPEN (CRQ2 stays Open)\n- ANDROID: shell/tui is compiled into Subsystem.csproj but NOT built/run. The Android head has a pre-existing XA5207 break (EosLog #1 item D). Next: a Vulkan/SurfaceView ICellSurface impl + an Activity front door (device $SS_SERIAL ready). d3d12<->vulkan is the only intended per-head delta.\n- Interactive coreui path (alt-screen multiplexer) is built but only --once is auto-verified (no interactive TTY in this env) ΓÇö needs a manual run.\n- Cosmetic: on cascade teardown a parked session thread unwinds via Thread.Interrupt (kill rung 2) and logs \"faulted: ThreadInterruptedException\"; functionally correct (handles reclaimed, runspace disposed) but reads alarming ΓÇö could cooperatively drain on cancel before reclaim.\n- Build alignment is now done in this worktree; the same launcher deletion + OutputType/AssemblyName fix should be carried to main (launcher already deleted there, uncommitted)."
+      },
+      {
+        "Request": 2,
+        "Noted": 1782215709,
+        "Disposition": "Progressed",
+        "Body": "LAYER 3 (continuation) ΓÇö the tui-dwm LOOK + interactive multi-session on the console floor, plus the GPU-surface direction settled. Builds verified to S:\\tmp only; subsystem-main\\ss.exe byte-untouched. Worktree cr/tui-integration, uncommitted.\n\nWHAT LANDED SINCE EOS #2\n- Ported the tui-dwm Compositor LOOK into shell/tui/CoreUi (de-larped per the work order: Mica-request background + rounded window chrome with focus-colored title bar + ΓùÅ close/min + lean taskbar; dropped gradients / 2.5D shadow / kinematics). Each pwsh session renders AS a floating cell-window; focused drawn on top.\n- Interactive multi-session via Console.ReadKey: type into the focused window -> Enter runs in that session's runspace -> output paints as cells; Tab cycles, ^N new, ^W close (VOM Terminate), Esc quit. Verified GREEN (dotnet publish, rc=0) and running on Windows (conhost). Three live independent runspaces shown simultaneously.\n\nFINDINGS (binary-grounded)\n- The console/VT renderer is the FLOOR, NOT D3D12 and NOT DirectPort: it builds a CPU cell grid and emits VT escapes to a terminal. It cannot draw Mica (Mica is a host/compositor effect ΓÇö only Windows Terminal acrylic shows it; conhost shows solid) and it does not touch any DirectPort handle. This is why it does not match Scott's DirectPort-based setup.\n- DirectPort is HANDLE-based (NT shared handle / fd + timeline fence); the GPU backend lives behind the handle ABI, so C# never touches COM. The earlier \"D3D12 is COM-hard\" framing was wrong for this reason ΓÇö corrected.\n- C# reaches the metal via P/Invoke to the platform driver (libvulkan / vulkan-1.dll): device, GPU memory, images, timeline semaphores, handle export (fd/Win32). directport.dll is NOT required ΓÇö virtuacam's DirectPortVk.cs is the existing pure-C# proof. Direction: retire directport.dll; the cell surface becomes a C# DirectPort R32 handle, presented on the GPU (Vulkan, one impl both heads).\n- Mouse-drag attempt via raw ReadConsoleInput broke keyboard interactivity (it fought .NET's own console-input reader for the buffer); reverted to Console.ReadKey. Drag needs a non-conflicting input path (or the GPU surface's own input loop), deferred.\n\nBUILD ENVIRONMENT (Android, all env not code)\n- XA5207 root cause: the .NET-Android workload ignores AndroidSdkDirectory and hard-resolves %LOCALAPPDATA%\\Android\\Sdk, which lacked the android-37.0 platform (S:\\bin\\android-sdk HAS it). FIX APPLIED: directory junction C:\\Users\\Scott\\AppData\\Local\\Android\\Sdk\\platforms\\android-37.0 -> S:\\bin\\android-sdk\\platforms\\android-37.0. XA5207 cleared.\n- Next Android error after the junction: XARDF7024 (System.IO RemoveDir Access-denied on the build obj assets dir) ΓÇö a file lock / transient, not code; retry needed.\n- Windows build alignment confirmed working: OutputType=Exe + AssemblyName=ss -> dotnet publish emits ss.exe (matching ss build self); the publish FAILS if a running coreui locks ss.exe (MSB4018) ΓÇö kill the running instance before rebuilding.\n\nOPEN / NEXT (decisions pending Scott)\n- THE pivot: take coreui off the console floor and onto the GPU surface ΓÇö cross-pollinate DirectPortVk + VulkanVk (virtuacam -> shared baseline), make the CoreUi cell buffer a DirectPort R32 handle (+ fence), and present that handle (Vulkan swapchain -> glyph atlas -> pixels) in a real GPU-owned window. That delivers owned Mica AND is the same impl on Android = the Razr+ 2024 cover display. Handle-based, in-process, no directport.dll.\n- Razr cover-display deploy still needs: green APK (clear the XARDF7024 lock), a cover-display Activity + SurfaceView, and the Vulkan present. Device: Razr+ 2024, external/cover display, plugged in.\n- Screenshare-to-Android (cross-device) is a SEPARATE leg: encode (H.264) + wire + decode ΓÇö not GPU-handle sharing. On-device cover-display present is local DirectPort->Vulkan.\n- File hierarchy: Scott flagged src/runspace/Device/Android/DirectPortVk placement as wrong (wants a cleaner android-head layout); deliberate reorg pending, not guessed.\n- Verified Windows exe: S:\\tmp\\ss-coreui-build\\ss.exe (coreui = interactive float multi-session; coreui --once = headless cascade-teardown proof)."
+      },
+      {
+        "Request": 2,
+        "Noted": 1782243568,
+        "Disposition": "HANDOFF (both sessions ending): multi-session in-proc pwsh TUI (CoreUi.cs) proven on the VT-console floor; GPU(Vulkan)/Android/cross-device(PSRP+YUV-blast+codec) OPEN. New session: ss onboard + Get-Request 2. See body.",
+        "Body": "HANDOFF — TUI/Compositor (#51), consolidated across BOTH sessions ending 2026-06-23 ~0800. Read this + ss onboard to resume cold.\n\n== WHERE YOU ARE ==\nWorktree: cr/tui-integration @ S:\\subsystem-project\\subsystem-tui (off main HEAD 0d3cb63). main is byte-untouched.\nBoth sessions worked this SAME worktree (the source of the chaos — fix: ONE cook per worktree next time).\nLive artifact = src/shell/tui/CoreUi.cs : a MULTI-SESSION floating-window TUI — N independent in-proc pwsh runspaces, each a VOM owner, rendered as cells -> VT to a terminal (the FLOOR renderer, not GPU). Keyboard input (Tab focus, ^N new, ^W close, Esc quit). Built GREEN and ran (pid since exited). Interactivity NOT yet visually confirmed (no screen access to verify a keystroke lands).\n\n== PROGRESS (both sessions) ==\n- THE FLIP proven: in-proc pwsh -> pipeline OBJECTS -> Out-String (text, NO ANSI) -> CellBuffer -> render. NO ConPTY, NO external pwsh.exe, NO \"pwsh in pwsh\" nesting. VOM-owned session lifecycle (Spawn child / Terminate cascade reclaims).\n- MULTI-SESSION proven: 3 live runspaces at once in floating windows (CoreUi.cs).\n- Gate-clean + builds via `ss build self` (Roslyn ouroboros) AND dotnet publish (SubsystemWin.csproj).\n- Restructure done by 2nd session: DELETED windows-head Tui.cs/TuiCellBuffer.cs/TuiVtRenderer.cs -> moved to src/shell/tui/CoreUi.cs. My (1st session) Repl.cs was CLOBBERED in that move — fine, CoreUi.cs subsumes it (multi-session > my single ss repl).\n\n== UNFINISHED ==\n1. CONFIRM INTERACTIVITY — run CoreUi, type in the focused window, verify it lands. (1st thing Scott wants to SEE: pwsh working in the windows, multiple sessions.)\n2. GPU SURFACE = the real desktop (real Mica, owned window). VULKAN, not D3D12: DllImport vulkan-1.dll (win) / libvulkan (android) — flat C API, classic DllImport, NO COM, NO source-gen, NO custom .dll. directport.dll is replaceable by managed Vulkan. Same cell model -> glyph atlas -> pixels. (Atlas is already MSDF, keep.)\n3. xterm DELETE — gated on the GPU/interactive terminal reaching parity. Consumers: terminal.obp in subsystem-main + terminal-project + android-terminal (vendor/xterm).\n4. FOREIGN \"tui mode\" VT parser (git/vim/ssh/htop) — pull VT500 state machine + tests from S:\\reference\\XtermSharp. Native pwsh never needs it.\n5. ANDROID head — build BROKEN (Subsystem.csproj XA5207, SDK platform/NDK) + lift cell/flip from windows head into SHARED core. Then D3D12->Vulkan via src/runspace/Device/Android/Surfaces.cs. Device CONNECTED: adb $SS_SERIAL.\n6. CROSS-DEVICE (Scott's actual plan, NOT started): PSRP cross-device + codecs + a \"BLAST\" of raw half-res YUV for the first few ms (latency hide while encoder warms) -> then encoded. adb screenshare if must; prefer native Android integrations; AIM RDP. Handles are machine-local (don't cross the wire); the wire is a stream (stdio/PSRP/adb-forward), the content is PSRP + encoded frames.\n\n== KEY DECISIONS (carry) ==\nCell = R32_UINT 24-bit codepoint + 8-bit ROLE; theme maps role->color at composite. uint32-or-bust (scale by SoA planes, never r32g32). Scrollback = PSRP/CliXML objects (reflow-free). \"Frame moves not scrollback\" = over-scan ring + pan. Emoji = RGBA sprite over the mask. tui-dwm owns its surface; pwsh session must NOT be a conhost child. C VOM = independent RUNTIME oracle (N-version), NOT Wheeler DDC (WP S6 stays open) [xref CRQ #135 = the other session's GC bleach].\n\n== NEXT (cold session, in order) ==\n1. `ss onboard` (from subsystem-main) + `ss Get-Request 2` (read this + the other EosLog entries).\n2. Pick ONE cook for subsystem-tui. Build CoreUi (dotnet publish SubsystemWin.csproj OR ss build self --out), RUN it, TEST typing -> screenshot. Confirm the multi-session pwsh.\n3. THEN choose the next frontier: GPU surface (Vulkan) for the real look, OR cross-device (PSRP + YUV-blast + codec).\nSNAPSHOT zipped: S:\\subsystem-tui-handoff-20260623.zip (src tree).\n"
+      },
+      {
+        "Request": 2,
+        "Noted": 1782251990,
+        "Disposition": "claim",
+        "Body": "claimed CRQ2 TUI->GPU weld @ 2026-06-23, ETA this session. Building D3D12 ICellPresenter (Windows, reuses existing directportd3d12 ABI, no Dawn/no new .dll) + Android VulkanCellPresenter SEAMED on DirectPortVk/VulkanVk (system libvulkan, stubbed TODO for next session). Bringing shell/tui into subsystem-main worktree (disjoint from cr/tui-integration). Ref CRQ117."
+      },
+      {
+        "Request": 2,
+        "Noted": 1782252603,
+        "Disposition": "correction",
+        "Body": "CORRECTION (Scott, live): directport.dll / DirectPortNative REJECTED - it is a native C++ DLL being retired, not the path. Pivot to PURE-C# presenters for BOTH heads: Windows = managed D3D12 via flat d3d12.dll/dxgi.dll exports + hand-rolled vtable interop (port directportd3d12.cpp as a RECIPE, not a link); Android = managed Vulkan via libvulkan + existing DirectPortVk/VulkanVk. No directport.dll, no COM runtime, no source-gen, no imports. D3D12 verified this session; Vulkan on-device swapchain is the residual."
+      },
+      {
+        "Request": 2,
+        "Noted": 1782255991,
+        "Disposition": "progressed",
+        "Body": "SESSION 2026-06-23 (solo, Scott driving) - shell/cell integration + atlases + branch consolidation. DONE+VERIFIED: (1) Collapsed tui+shaderui into ONE module src/shell/cell (namespace Subsystem.Shell.Cell). CoreUi renamed CellShell; ICellPresenter is the per-head seam; VtRenderer is the console floor. Deleted the old windows-head dup forks (Tui.cs/TuiCellBuffer.cs/TuiVtRenderer.cs). Wired into BOTH csprojs (SubsystemWin + Subsystem, shell/cell compiled not resource-embedded) + SelfBuild ouroboros roots + Program.cs dispatch (cell/repl/tui). (2) ss build GREEN (dotnet path, 167MB, self-replaced main exe - the bootstrap that bakes the new self-build root). Smokes GREEN: ss cell --once (2 pwsh sessions spawned/painted/cascade-terminated, zero residual), ss tui --once, ss repl. My files add 0 gate violations. (3) Atlases: generated MSDF cascadia-nf (3782 glyphs: ASCII+Latin+box+braille+~1500 NF icons) + selawik (196) from in-tree fonts src/shell/assets/fonts via C:/bin/msdf-atlas-gen, unicode-keyed, into src/shell/assets/glyphs. (4) GlyphAtlas.cs: pure-C# home-rolled MSDF rasterizer (PNG decode via ZLibStream + metrics + CPU median-distance), no imports, compiles both heads. (5) Branch sprawl cut: snapshotted WIP of cr/tui-integration cr/gc-seam cr/virtuacam-integration to their branches (lossless), removed all 4 cr/* worktrees; main is the only worktree, branches recoverable. RESIDUAL (the actual GPU weld, NOT done): D3d12CellPresenter (managed D3D12 pure-C#, flat d3d12.dll/dxgi.dll exports + hand-rolled vtable interop, port directportd3d12.cpp as recipe - NO directport.dll/COM/Dawn per Scott) + the headless frame-dump proof; VulkanCellPresenter on DirectPortVk/VulkanVk (bring those into main from cr/virtuacam-integration snapshot); wire GlyphAtlas resolver default to in-tree glyphs + name cascadia-nf + have a presenter actually CALL it; emoji color-bitmap atlas (NotoColorEmoji CBDT, separate pipeline). GATE: 7 reds remain but ALL non-mine - untracked Vom/Slot.cs (SS004/SS013, CRQ135 GC-seam) + new untracked SS026 analyzer flagging PeLoader.cs (HLE) - flagged for their owners. Co-Authored-By Opus 4.8."
+      },
+      {
+        "Request": 2,
+        "Noted": 1782257023,
+        "Disposition": "unified",
+        "Body": "UNIFIED MAIN (commit bc216ed, 2026-06-23). Collapsed all worktree sprawl into one committed main per Scott. Contents now in main + committed: (1) shell/cell - tui+shaderui as ONE module behind ICellPresenter (CoreUi->CellShell), home-rolled MSDF GlyphAtlas, cascadia-nf(3782)+selawik(196) atlases; ss build GREEN, smokes GREEN. (2) gc-seam: Sessions.cs runspace-as-VOM-handle single-teardown (PROGRESS toward no-GC, not slop). (3) virtuacam: DirectPortVk/VulkanVk (pure-C# Vulkan DirectPort - feeds the coming VulkanCellPresenter) + ScreenStream receiver/cmdlets. (4) in-tree GC/HLE/C-VOM: Slot.cs (65535 hot-load slots), PeLoader (real PE exec proof), native/vom (C VOM CRQ130). (5) tests/ suite. All 4 cr/* worktrees snapshotted lossless to their branches then removed; main is the ONLY worktree, branches recoverable. GATE BACKLOG (RED, 13 items, baseline HELD at 286 - deliberately NOT blessed; now visible on main, by owner): CRQ135/contract - Slot.cs SS013 x5 (Enter/Leave/Swap/Slot verbs - register deliberately or rename to approved) + SS004 path literal; HLE - PeLoader SS026 HleCreateFileW returns raw nint (return a VOM handle); contract - SS011 x2 register Device.Android as a component in SystemCatalog.json (Android is a peer head - obviously legal, just unregistered); virtuacam - SS007 empty catch + SS009 x2 Task.Run not VOM-owned (route via Vom.Spawn) + SS008 PackYuv420Flat byte[] across boundary. RESIDUAL of the actual GPU WELD (CRQ2 stays OPEN): D3d12CellPresenter (managed D3D12, flat d3d12/dxgi exports + hand-rolled vtable, port directportd3d12.cpp recipe, NO directport.dll/COM/Dawn) + headless frame-dump proof; VulkanCellPresenter on the now-in-main DirectPortVk/VulkanVk; wire GlyphAtlas resolver to in-tree glyphs + name cascadia-nf + have a presenter CALL it. Co-Authored-By Opus 4.8."
+      }
+    ],
+    "Ref": "CRQ000000000002"
+  },
+  {
+    "Id": 103,
+    "Kind": "Incident",
+    "Category": "Cm",
+    "Summary": "Resolve orphaned, missing, and fragmented requests by integrating backlog into portable build (#75)",
+    "RelatedFiles": [
+      "src/runspace/Cm/RequestHive.cs",
+      "src/runspace/Cm/requests.json"
+    ],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782060890,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "INC000000000103"
+  },
+  {
+    "Id": 104,
+    "Kind": "Change",
+    "Category": "Device",
+    "Summary": "Cross-pollinate Razr cover daily-driver integrations into subsystem - AppWidget system / Cm settings read-write / cover-display-aware accessibility",
+    "RelatedFiles": [
+      "src/runspace/Widgets/SubsystemWidgetProvider.cs",
+      "src/runspace/Cm/Cm.cs",
+      "src/runspace/Services/TerminalAccessibilityService.cs",
+      "S:/razrcover-project/PLAN.md"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782079388,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 104,
+        "Noted": 1782079418,
+        "Disposition": "scoped",
+        "Body": "Razr+ 2024 folded-cover daily-driver side project at S:/razrcover-project is the real-world forcing function for subsystems deep-Android-integration thesis. THREE integrations GRADUATE behind existing seams. 1) AppWidget system into SubsystemWidgetProvider - reference build S:/razrcover-project/coversettings.apk; RemoteViews are stateless so the loop is PendingIntent-broadcast then receiver then apply via WRITE_SETTINGS and WRITE_SECURE_SETTINGS then re-render, resizable with live labels; the provider is declared but thin, flesh it with this. 2) Cm settings read-write - subsystem reads via ConvertFrom-Settings.ps1; project proved the WRITE half live mutating System Secure and Global, turning Cm from settings-reader into settings-registry. 3) Cover and secondary-display-aware accessibility into TerminalAccessibilityService - the change is GestureDescription setDisplayId plus getWindows filtered to a target display so DispatchTap DispatchSwipe and perception work on the cover or any display, the foundation for the cover gesture layer. DEVICE-LOCAL and NOT graduating: climanager scripts, Lawnchair repackage, force_desktop flag, CoverSettings APK, scrcpy profiles. Full plan and recipe catalog at S:/razrcover-project/PLAN.md."
+      },
+      {
+        "Request": 104,
+        "Noted": 1782082179,
+        "Disposition": "seams-drafted",
+        "Body": "Seam reference drafts built in S:/razrcover-project/seams - lift in a worktree, no subsystem build here. SEAMS.md = index plus Seam 1 AppWidget system into SubsystemWidgetProvider with the RemoteViews stateless loop and reference build coversettings, and Seam 2 Cm settings read-write proven via WRITE_SETTINGS plus WRITE_SECURE_SETTINGS. a11y-display-aware.cs = Seam 3 exact TerminalAccessibilityService change - GestureDescription SetDisplayId on DispatchTap and DispatchSwipe plus RootForDisplay via WindowsOnAllDisplays so act and perceive work on cover display 1. directport-display-texture.cs = Seam 4 capture sink binding a VirtualDisplay to an ImageReader so each frame is an AHardwareBuffer handed to an IAndroidDirectPort backend; gaps - capture-to-texture small, Android Vulkan DirectPort backend is the real build, cross-device keeps H.264 on the wire. ScreenStreamCmdlets.cs already ports the scrcpy encoder path."
+      },
+      {
+        "Request": 104,
+        "Noted": 1782082537,
+        "Disposition": "gesture-seam",
+        "Body": "Seam 5 added cover-gesture-overlay.cs - no-root gesture control on the cover via a per-display WindowContext overlay - createDisplayContext display 1 plus TYPE_APPLICATION_OVERLAY edge strips mapping swipes to verbs, pairing with Seam 3 a11y act-perceive. CEILING - overlays are ADDITIVE; the system home-swipe stays Moto SecondaryDisplayLauncher which is non-disable, so a no-root single-screen device is about 95 percent. To verify Moto allows overlays on display 1, fold the phone and check Taskbar renders on the cover - it is the proof vehicle."
+      },
+      {
+        "Request": 104,
+        "Noted": 1782104286,
+        "Disposition": "launcher-unlock",
+        "Body": "Seam 6 launcher-reassert.cs - the AccessibilityService (now ENABLED and auto-starting, verified across reboot this session) re-asserts the cover launcher: on WINDOW_STATE_CHANGED where Moto SecondaryDisplayLauncher foregrounds on display 1, relaunch Lawnchair or subsystems own home via setLaunchDisplayId 1. It is an OVERRIDE not registered-home, so brief Moto flash, and the system home gesture itself cannot be suppressed no-root. One mechanism three wins - the same a11y service is auto-start anchor plus gesture engine plus launcher override. This is the launcher unlock."
+      },
+      {
+        "Request": 104,
+        "Noted": 1782105849,
+        "Disposition": "reference-launchers",
+        "Body": "Razr community reference launchers to clone+inspect next session (validate Seam 5/6). LYNX launcher - reported working great on the COVER of a Razr 50 Ultra (arcfox = our device), works on both cover and inner; since the cover home-role is locked (proven), Lynx is almost certainly the overlay+a11y approach (not registered home) = live proof of the overlay-cover + re-assert architecture; inspect HOW it owns the cover and lift the technique. Also CoverScreen OS - Samsung-flip-first with a Razr port, still beta. Takeaway - a no-root third-party cover launcher is achievable and good; subsystem should match Lynx via the a11y service it already has resident."
+      }
+    ],
+    "Ref": "CRQ000000000104"
+  },
+  {
+    "Id": 105,
+    "Kind": "Incident",
+    "Category": "Pwsh",
+    "Summary": "ss CLI re-parses argv into a pwsh command line so a multi-word Summary or EosLog body is re-tokenized on spaces and breaks on parenthesis or semicolon characters, which blocks external callers from filing Requests with normal prose",
+    "RelatedFiles": [
+      "src/runspace/windows/Program.cs",
+      "src/runspace/windows/RequestCmdlets.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782109750,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 105,
+        "Noted": 1782109852,
+        "Disposition": "filed via the workaround it documents",
+        "Body": "Repro from an external shell, call ss.exe with Remedy-ChangeRequest and a quoted multi-word Summary. The quotes are lost when ss joins argv into one string and re-parses it as a pwsh command line, so only the first word binds to Summary and the rest fail as extra positional parameters. Parenthesis and semicolon characters anywhere in the Summary or in an Add-EosLog body get evaluated by that re-parse and error. Impact, no external caller including Claude can file a Request or EOS log with normal prose, so the 2026-06-22 session handoff went to ss-log.md instead of the hive. Fix direction, on verb dispatch pass the original argv array straight to the cmdlet binder rather than rejoining argv into a string and re-tokenizing, or quote-escape each argv element before the rejoin. Current workaround, wrap each multi-word arg in literal double quotes."
+      },
+      {
+        "Request": 105,
+        "Noted": 1782259369,
+        "Disposition": "Confirmed live and still open - fresh repro from the audit session 2026-06-23",
+        "Body": "Re-hit INC105 first-hand while filing CRQ136. ss.exe Remedy-ChangeRequest with a normal-prose Summary failed: ss: At line:1 char:665 Missing argument in parameter list - ss.exe reconstructed the argv into a pwsh command line and broke on a parenthesis and a -A token embedded in the prose. The path that SUCCEEDED: file via the MCP ss_run runspace with a single-quoted pwsh string, which binds -Summary as a literal and never re-tokenizes. So the runspace cmdlet surface is usable for prose but the ss.exe CLI is not. Confirms INC105 is load-bearing for any external caller filing Requests. Cleanest fix: have ss.exe bind argv straight to the cmdlet parameters instead of joining argv and re-parsing as a script line."
+      }
+    ],
+    "Ref": "INC000000000105"
+  },
+  {
+    "Id": 106,
+    "Kind": "Change",
+    "Category": "shell",
+    "Summary": "Rename surface to port to resolve name collision with Android Surface",
+    "RelatedFiles": [
+      "src/runspace/windows/Surface.cs",
+      "src/runspace/windows/Program.cs",
+      "src/runspace/windows/Camera.cs",
+      "src/runspace/windows/Gateway.cs",
+      "src/runspace/windows/Help.cs",
+      "src/runspace/windows/Shim.cs",
+      "src/runspace/Vom/Vom.Native.cs",
+      "src/runspace/Device/WebDrive.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782114723,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000106"
+  },
+  {
+    "Id": 108,
+    "Kind": "Change",
+    "Category": "agent",
+    "Summary": "Build the living onboarder - a cite-or-refuse procedure tree resolved against the live compilation via DocumentationCommentId, with a deny-analyzer so a stale citation fails the build. Whitepaper section 8 and 10.6. Collapses hand-written memory to a seed plus non-derivable intent.",
+    "RelatedFiles": [
+      "src/runspace/windows/Onboard.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 108,
+        "Noted": 1782154571,
+        "Disposition": "brick-1-anchor-written-not-verified",
+        "Body": "Living onboarder progress 2026-06-22. Brick 1 the anchor is WRITTEN not yet gate-verified - src/runspace/windows/Procedures.cs, three procedures no-gc handle-authority deterministic-reclaim, each pinned to a real Vom mechanism by a compiler-checked see-cref. Net-new finding - DocumentationCommentId is not used anywhere in the tree yet, so the cite primitive is new and needs a built Compilation which the Refs.cs syntax-only pipeline lacks but the 24 SS analyzers have. Remaining - brick 2 the ss procedures resolver walks the anchor resolves crefs pulls summaries cite-or-refuse, brick 3 the SS025 deny-analyzer makes a dangling cref fail the build, then ss build self to gate-verify anchor plus resolver together."
+      },
+      {
+        "Request": 108,
+        "Noted": 1782174067,
+        "Disposition": "cold-start-orientation-canonized-and-wired",
+        "Body": "SYMPTOM: every cold session re-derives the same orientation from scratch - this session spent heavy budget re-discovering the VOM, the DirectPort/VOM unification, the build state, and the honest microkernel/GC positions - and outsourced agents (Qwen/Antigravity/AI Studio) had no single aligned entry point. ROOT CAUSE: the cold-start knowledge (the one-primitive thesis + the current proven state + the honest edges) lived only in transcripts, never in canon. RESOLUTION: wrote docs/COLD-START.md - a 60-second canon orientation: who Scott is + how to work (peer, severe honesty, no hater report, descriptive Remedy EOS, cite-or-refuse); the VOM-equals-DirectPort one-primitive thesis (256-region + timeline fence + free-on-zero pushed across a boundary, interop-agnostic, one-trick-pony); what is TRUE now with pointers (build green both ways, VOM loader free-on-zero + rollback, Fence.WaitN, SS026, one-hive-per-drive, RIFE-on-V73-NPU); the honest edges (microkernel-SHAPED not microkernel - enforced isolation is the one gap, capabilities cross but the pointer never does; GC-kill SETTLED - no collector to build, the SPI/NativeAOT line struck; QNN per-op VTCM walls); the live frontiers (C++ VOM via the vom.h C-ABI parity seam, CRQ128 isolation, the QNN .bin writer); and where live truth is (ss onboard, Get-Request, staging/MANIFEST, tests/README, binary wins). Wired a FIRST-read pointer into the umbrella S:/subsystem-project/CLAUDE.md so every cold session is routed there before ss onboard. VERIFICATION: file present in docs/ (canon, session-boundary ingest set); CLAUDE.md pointer in place. STATUS: drafted to canon - Scott ratifies (canon is his to bless; adjust freely). RESIDUAL: optionally project COLD-START from the binary too (a one-line add to Onboard.cs) so ss onboard surfaces it; the living ss-procedures resolver + the SS025 cref deny-analyzer (this CRQ original scope) remain open."
+      }
+    ],
+    "Ref": "CRQ000000000108"
+  },
+  {
+    "Id": 109,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "Generalize the Runtime contract past its LLM shape into ConversationalRuntime and GraphRuntime so Rb brokers LiteRT, no-ORT ONNX graph, and QNN or GGML behind one contract.",
+    "RelatedFiles": [],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 109,
+        "Noted": 1782119758,
+        "Disposition": "dp-onnx-is-directport",
+        "Body": "Grounding from Scott - the bespoke ONNX runtime dp-onnx IS DirectPort-based, the one trick again, and it already runs Kokoro TTS. The GraphRuntime is not greenfield - dp-onnx exists and works, scattered across direct3d12-compute-kernel-project and qnn-project. Integration = park it into subsystem as the GraphRuntime behind the generalized Runtime contract, kokoro CRQ121 as proof model, onnxsurgeon for pre-convert graph surgery."
+      }
+    ],
+    "Ref": "CRQ000000000109"
+  },
+  {
+    "Id": 110,
+    "Kind": "Change",
+    "Category": "Rs",
+    "Summary": "Build a real NT-shaped Service Control Manager and Task Scheduler. Today Services are Android-only and the scheduler is a stub.",
+    "RelatedFiles": [],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000110"
+  },
+  {
+    "Id": 111,
+    "Kind": "Incident",
+    "Category": "gate",
+    "Summary": "ss check is not self-sufficient - the gate still needs dotnet plus a published checker because the semantic analyzers need the Android reference closure carried in-proc. Cheap wins are list and syntax-only modes.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "INC000000000111"
+  },
+  {
+    "Id": 112,
+    "Kind": "Change",
+    "Category": "Rs",
+    "Summary": "Collapse per-head duplication of Dg, Runtime and LiteRT into one shared core with thin per-head seams. Heads are peers, not forks. C-API LiteRT only, JNI removed.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000112"
+  },
+  {
+    "Id": 113,
+    "Kind": "Change",
+    "Category": "Device",
+    "Summary": "Build the Android DirectPort backend - import AHardwareBuffer as an external VkImage mirroring the Windows D3D12 backend - and the Android-to-Windows VirtuaCam bridge. DirectPort is the local zero-copy leg, H.264 stays on the cross-device wire. Worktree cr/directport-seam.",
+    "RelatedFiles": [
+      "src/native/directport/directport.h",
+      "src/runspace/Pwsh/Cmdlets/ScreenStreamCmdlets.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782114875,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 113,
+        "Noted": 1782115169,
+        "Disposition": "antigravity-owned",
+        "Body": "Antigravity is actively building directport-android in its own worktree as of 2026-06-22. This Claude must NOT dive into the Android DirectPort backend - avoid the two-agent collision. Reconcile the cr/directport-seam worktree against Antigravitys worktree before any work here."
+      },
+      {
+        "Request": 113,
+        "Noted": 1782119758,
+        "Disposition": "wired-blast-pipe-plan",
+        "Body": "Wired transport design - VOM-managed P2P over the raw ADB stdin/stdout USB pipe, no TCP/UDP. Blast first 5 frames raw YUV420p on channel 0 for sub-5ms first frame, then hand over to H.264 NALUs on channel 1 once the encoder is live; stdin carries input events on channel 2 injected via TerminalAccessibilityService. stdout is isolated for binary media under VOM, all logs to stderr/logcat. Files - Android VulkanVk.cs, DirectPortVk.cs, ScreenStreamCmdlets.cs; Windows ScreenStreamReceiver.cs, View.cs. Active in subsystem-virtuacam worktree."
+      }
+    ],
+    "Ref": "CRQ000000000113"
+  },
+  {
+    "Id": 114,
+    "Kind": "Change",
+    "Category": "gate",
+    "Summary": "Establish a tests surface as the proof/benchmarks home - tests is cleaner than proofs. Today proof is SelfTest.cs deriving smoketest-log.md plus perf receipts scattered in prose. Consolidate into a tests directory and add a derived ss benchmark verb so benchmarks are produced live by the binary, not frozen in memory. Open detail - tests location, umbrella S:/subsystem-project/tests vs in-tree subsystem-main.",
+    "RelatedFiles": [
+      "src/runspace/windows/SelfTest.cs",
+      "smoketest-log.md"
+    ],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782118495,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 114,
+        "Noted": 1782118653,
+        "Disposition": "proving-ground-gauntlet",
+        "Body": "Sharpened - the PROOF pillar is a PROVING GROUND, an adversarial GAUNTLET of severe tests built to satisfy the toughest critic. This is whitepaper section 7 severity made runnable - each test is one a false version of the claim would fail. Integrate the smoke/proof artifacts scattered across S:/*-project dirs - 42 candidates found, subsystem 24, qnn 15, terminal 2, razrcover 1, many pending integration - into ONE runnable gauntlet derived by an ss verb. The gauntlet IS the benchmarks pillar of the seed and the fitness-function seed from whitepaper section 9."
+      },
+      {
+        "Request": 114,
+        "Noted": 1782118812,
+        "Disposition": "reframe-standard-test-suite",
+        "Body": "Correcting the prior entry framing. This is NOT a proving ground, gauntlet, or defense against critics - drop that language. It is a standard, objective test suite to industry norms - unit, integration, smoke, regression - formalized as a standing part of our engineering methodology. We have tested ad-hoc all along, with smoke tests scattered across the project dirs - we simply never ceremonialized it into one named, runnable, maintained suite, and we should have. Scope unchanged - consolidate the ~42 scattered test artifacts into one suite, run and reported by an ss verb. It is the concrete near-term form of the objective fitness function in WHITEPAPER section 9. Framing is methodology, not marketing."
+      },
+      {
+        "Request": 114,
+        "Noted": 1782170776,
+        "Disposition": "tests-surface-standard-established",
+        "Body": "tests/ is the proof home with an AUDITABLE standard documented in tests/README.md: naming test.<component>.<what>.ps1 (self-explanatory, mirrors the namespace); the Cutler-tier receipt template (reflection-resolved type so cold-runnable, Assert helper, pscustomobject receipt with test/pass/measured-numbers/verdict); rules - cold-runnable, dot-source-safe, no collateral, sober mechanism-named. Conformed the one outlier runspace-reclaim.tests.ps1 -> test.vom.runspace-reclaim.ps1. All 6 tests run cold GREEN via the repo binary: get-process, fence-waitn, no-gc, runspace-reclaim, slot-rollback, slot-swap. Followable by the next session/agent. RESIDUAL: the derived ss benchmark verb not yet built - left OPEN for that."
+      },
+      {
+        "Request": 114,
+        "Noted": 1782174657,
+        "Disposition": "tests-folder-hydrated-17-of-17-green-claims-proven-not-asserted",
+        "Body": "SYMPTOM: the COLD-START.md / MANIFEST claims (free-on-zero, generational handles, 256-byte alignment, per-owner quota, managed-object-as-handle, monotonic timeline fence, Cm registry projection, pwsh-superset) were stated in prose but not each backed by a runnable receipt - so reporting leaned on hedges instead of proof. RESOLUTION: hydrated tests/ with 9 new Cutler-tier receipts, one per claim - test.vom.refcount, test.vom.generational-handle, test.vom.dropprefix, test.vom.alignment, test.vom.quota, test.vom.register-managed, test.vom.fence-timeline, test.cm.register-rehydrate, test.pwsh.project-cmdlets - each resolving the type by reflection (cold-runnable), mutating only throwaway owners it Terminates, returning a pscustomobject receipt. TWO LATENT BUGS surfaced while proving and were fixed: (1) Owner.PathToId is an INTERNAL field, so PowerShell reflection returns null - rewrote the receipts to the PUBLIC Owner.Handles surface (IsValid / LiveCount); (2) the pre-existing no-gc probe B asserted exactly zero collections, which is flaky because the per-handle bookkeeping (HandleEntry + the Reclaim closure) is managed - re-stated it to the TRUE invariant-7 claim: 200MB native triggers NO gen1/gen2 collection and only incidental gen0, i.e. the data plane is off the GC budget. VERIFICATION: full suite 17/17 GREEN via the repo binary (S:/subsystem-project/subsystem-main/ss.exe), inventoried in tests/README.md. RESIDUAL: the derived ss benchmark verb (this CRQ original scope) is still open; device-bound proofs (RIFE-on-NPU) and GPU-interactive DirectPort examples remain out of the host suite by nature. NET: the claims are now receipts; the hedging is retired."
+      },
+      {
+        "Request": 114,
+        "Noted": 1782175335,
+        "Disposition": "no-gc-proof-corrected-to-a-measurement",
+        "Body": "CORRECTION (followup). The earlier fix to no-gc probe B relaxed a strict zero-collections assertion to a collection-count threshold - a judgment call, not a measurement. Replaced it with the rigorous form: measure the VOM allocators OWN managed footprint via GC.GetAllocatedBytesForCurrentThread() before/after 200x Vom.Alloc(1MB). RESULT: 200MB of native data adds only ~0.39MB managed (the per-handle bookkeeping) - if the data were on the managed heap the delta would be ~200MB, so this directly proves the data plane is off the GC (invariant 7), isolated from background GC noise. Kept gen2==0 as the no-full-collection check. VERIFICATION: full tests/ suite re-run 17/17 GREEN via the repo binary. The proof is now a number, not a threshold."
+      },
+      {
+        "Request": 114,
+        "Noted": 1782178976,
+        "Disposition": "benchmark-surface-seeded-bench-prefix",
+        "Body": "SYMPTOM: tests/ proved GREEN/correctness but recorded no performance - the CRQ114 residual (a derived ss benchmark verb) had no on-ramp. RESOLUTION: seeded the benchmark surface with the bench.<component>.<what>.ps1 sibling convention (documented in tests/README) and a first benchmark, bench.vom.throughput.ps1 - measures the VOM data plane: alloc, per-handle free-on-zero, bulk DropPrefix reclaim (GB/s), plus Open/Close and fence op rates. VERIFICATION (this workstation, via the repo binary): alloc 13.91 GB/s, free-on-zero 32.44 GB/s, bulk-reclaim 75.2 GB/s (exceeds the QNN-LOG figures of ~4.34 alloc / ~57 bulk - faster box; the shape holds: bulk >> per-handle). HONEST CAVEAT recorded in the file + README: the per-op M-ops rates (handle 0.12, fence 0.54) are PowerShell-interop-bound (each reflected $V::call ~8us), NOT the kernel rate - the true rate needs an in-binary C# bench. RESIDUAL: build the ss benchmark verb (in-binary, no PS-interop tax) and add bench.directport.* (region bandwidth / fence round-trip) once a host-safe harness exists."
+      }
+    ],
+    "Ref": "CRQ000000000114"
+  },
+  {
+    "Id": 116,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "FOUNDATION - coordination mesh. Fold agent coordination into the shared RequestHive/EOS as a blackboard - claim, status, handoff via EosLog - so parallel Claude and Antigravity sessions coordinate through the system, not through Scott as a human switchboard. The append-only EosLog table is the substrate.",
+    "RelatedFiles": [],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 116,
+        "Noted": 1782121452,
+        "Disposition": "claim-mechanism-recovered",
+        "Body": "Claim mechanism recovered from transcript 70964be6 - already designed. In RequestHive.cs - enforce SQLite WAL mode plus busy_timeout, add an Assignee column, and use an atomic claim query WHERE Assignee IS NULL so a parallel session claims a Request atomically with no double-claim. That concurrency substrate is what lets Claude and Antigravity sessions self-coordinate through the hive instead of through Scott. Pair with claim/release/status verbs over the append-only EosLog."
+      }
+    ],
+    "Ref": "CRQ000000000116"
+  },
+  {
+    "Id": 117,
+    "Kind": "Change",
+    "Category": "Vom",
+    "Summary": "Consolidate the canonical DirectPort reference - directport-project, NT shared handle plus timeline fence, D3D12 and Vulkan/Android port DirectPortVk.cs, the 5-phase adapter lifecycle DISCOVER OPEN SYNC PRESENT RELEASE, and the Manifold broker - into subsystem as the one transport spine. Producers/consumers mount as VOM Broadcast handles. Everything rides this.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 117,
+        "Noted": 1782173387,
+        "Disposition": "directport-ai-assets-staged-with-realistic-percent-complete",
+        "Body": "SYMPTOM: the proven DirectPort/VOM/AI-transport work was scattered across S:/directport-project, S:/virtuacam-project, S:/qnn-project, S:/onnxsurgeon-project, S:/reference - no single home, so a cold session or an outsourced agent could neither find it nor judge its maturity. ROOT CAUSE: each capability grew in its own project tree; never consolidated. RESOLUTION: staged the authored source + the one binary proof into S:/subsystem-project/staging/ (94 files, 14.4 MB: directport, virtuacam, onnx-surgeon, onnxnet, qnn; SDKs/build/caches deliberately left at their homes) with staging/MANIFEST.md carrying a realistic percent-complete per asset and the one-primitive through-line. VERIFICATION: tests/test.staging.ai-transport-assets.ps1 GREEN via the repo binary - 5/5 subtrees staged; onnx-surgeon.exe runs (inspect/stft-decompose/dump); Onnx.dll loads (69 types, ModelProto+NodeProto); rife_v73.bin parses as a valid QNN HTP context binary (host utility). PERCENT-COMPLETE: DirectPort SDK 90, VirtuaCam 85, Onnx.dll 80, onnx-surgeon 75, QNN->RIFE-on-V73 70 (deployed+executing on the Hexagon NPU per QNN-LOG, ~81 ms/frame allclose ~8e-3), QNN .bin format crack 60 (Scott: close), native_hlsl 40 (source-only, unbuilt), ggml cross-die courier 30 (parked, never reliably worked), C++ VOM 15. THROUGH-LINE: every asset is one primitive - a 256-aligned shared region + a timeline fence + free-on-zero, pushed across a boundary (process / die / GPU-NPU / language). RESIDUAL: GPU-interactive DirectPort examples + VirtuaCam not headless-smoked (need producer/consumer pair + display + device); RIFE-on-NPU is device-bound (OnePlus); next integration step is the C-ABI parity contract vom.h pulling from this staging into src/native, with test.vom.parity as the wall. Deferred (when we return to llama): C:/scripts vulkan-disable + start-gemma.ps1, disable the P2000, target the V340L."
+      },
+      {
+        "Request": 117,
+        "Noted": 1782181170,
+        "Disposition": "directport-staging-pruned-to-canonical-d3d12-patterns",
+        "Body": "FOLLOWUP to the staging consolidation. Now that the C VOM compiles (CRQ130), the DirectPort example rogues-gallery has served its reference purpose. Pruned staging/directport/Examples from 18 files to 4: kept ONLY the canonical D3D12 patterns that inform the VOM/compute-fabric forward path - Producer (push), Consumer (consume), Multiplexer (WaitAny fan-in), ShaderFilter (the op-delegate / Mario-hybrid). CUT (~370 KB): every D3D11 duplicate (D3D11 is the compat layer; D3D12 is primary per directport.h), the BufferToTexture/TextureToBuffer format demos, Camera (47.7KB), Capture, Numpy (83.9KB), and ShaderProducer (redundant with Producer+ShaderFilter). REVERSIBLE/SAFE: staging is a curated copy; the full example set remains at S:/directport-project/DirectPort/Examples. SIDE BENEFIT: trims the LLM-context-extractor token load (Scott AI-Studio once-over pain). MANIFEST updated. The C VOM core itself stays src/native/vom (vom.h/vom.c, green)."
+      },
+      {
+        "Request": 117,
+        "Noted": 1782184685,
+        "Disposition": "Design",
+        "Body": "Session 2026-06-22 design (Scott+Opus) - VirtuaCam intraprocess rehab + DirectPort junction model. COM (researched): the Win11 virtual-camera Media Source is loaded out-of-process by the Frame Server svchost services (HKLM COM registration, admin). OS-mandated seam - the camera cannot be intraprocess with ss.exe in any language; VirtuaCam stays the desktop-leaf reference. Decision: intraprocess everything up to the DirectPort region (broker, discovery, compositing, capture) in C# in ss.exe; the one forced leaf = the Frame Server media source, authored in C# via .NET 8+ source-generated COM (GeneratedComInterface/ComWrappers), AOT-safe, no C++, no legacy COM runtime, fed over DirectPort. Reference impl: smourier VCamNetSample (.NET 9 AOT) - same author as the current attributions. Reflection-emit the DLL rejected - the Frame Server needs an on-disk registrable COM server, not an in-memory assembly. Junction model: separate DEVICE (D3D12, Vulkan, AHardwareBuffer, NativeMemory) from DIRECTION/role (producer, consumer) - fused today in the example names; Handle.cs:19 already makes backends swappable behind a layout-only Format so device-interchange is half-built, lift it to first-class. Default junction = peer multiplexer N-to-N (CRQ132 no-privilege applied to dataflow); direction is opt-in via a Mounted Valve capability (passive, non-locking, structural - the Tesla valve), not a baked pipe property. The valve model makes graph-inversion (APK producer plus a thin Windows consumer over stdio/USB, then ss.exe peer-to-peer ss.apk; CRQ113/118) a valve placement, not a transport rewrite. Sequence: 1 intraprocess broker+discovery as VOM Broadcast handles, device-orthogonal-to-direction, valve-ready, camera need not be functional; 2 C# source-gen COM media source over DirectPort; 3 graph inversion."
+      }
+    ],
+    "Ref": "CRQ000000000117"
+  },
+  {
+    "Id": 118,
+    "Kind": "Change",
+    "Category": "Device",
+    "Summary": "Build the wireless transport - DirectPort media over wifi plus mDNS discovery - as the peer to the wired ADB-stdio blast pipe, both behind one transport contract. The wireless wire.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000118"
+  },
+  {
+    "Id": 119,
+    "Kind": "Change",
+    "Category": "shell",
+    "Summary": "Build out live home and lockscreen widgets. Give SubsystemWidgetProvider the stateless RemoteViews re-render loop - tap to PendingIntent broadcast to apply to rebuild - each tile a verb against the VOM/Cm namespace with labels read at render, plus a DirectPort-texture-fed live widget surface. Presence as an ambient layer.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000119"
+  },
+  {
+    "Id": 120,
+    "Kind": "Change",
+    "Category": "agent",
+    "Summary": "Mount agent-browser/askgoogle into subsystem as ss browse plus the Rd.Consult phone-a-friend escape hatch - bundled WebView2 host, headless --ask one-shot for frontier consult with no API key, and the warm browse agent. S:/agent-browser-project.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 120,
+        "Noted": 1782417205,
+        "Disposition": "mapped: MCP-child seam, Rd.Consult stub -> driver wiring is the integration; live test needs desktop",
+        "Body": "Mapped 2026-06-25 against the binary. agent-browser is a mature WebView2 browse agent at S:/agent-browser-project - ONE persistent warm WebView2 session driven over MCP JSON-RPC on stdin/stdout (browse_goto/click/type/back/hud/do/chunk/end); the consult/phone-a-friend is the browse_do \"ask\" scoped intent (per-site config), not a --ask flag anymore. Source closure is TINY - a single 55 KB Program.cs + agent-browser.csproj + agent-browser.config.ini + fetch-runtime.ps1 + README + LICENSE. Self-sufficient ~100 MB exe bundles .NET (self-contained single-file) + the WebView2 Fixed Version engine as an embedded webview2-fixed.zip (~90-110 MB, re-fetchable via fetch-runtime.ps1, gitignore it). A thin built agent-browser.exe (55 KB, system-Evergreen fallback, zip not embedded) exists at dist/. It HAS its own .git (so not a no-git sovereignty wound like dp-onnx was). SUBSYSTEM SEAM EXISTS BUT IS A STUB - Invoke-RdConsult (RdCmdlets.cs) returns status=driver-pending note \"the Rd browse driver is not running on this host yet\". INTEGRATION PLAN - (P0) vendor the ~55 KB source into the repo (one-repo), gitignore the webview2 zip + bin/dist/obj. (P1) wire it as an MCP-child driven by a new ss browse verb + replace the Rd.Consult stub to drive the warm session (browse_do \"ask\" for consult) - the VirtuaCam/dp-onnx separate-process-leaf pattern, but a PERSISTENT MCP stdio child not a one-shot. (TEST) the live receipt (ss browse drives a real page / Rd.Consult returns an answer) needs a desktop + network session - cannot be verified headlessly, so it is the final Scott-run or a desktop-session step. Scott 2026-06-25 wants it integrated (stressed twice)."
+      }
+    ],
+    "Ref": "CRQ000000000120"
+  },
+  {
+    "Id": 121,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "Mount the working python-free .NET Kokoro TTS over ORT as ss tts into the speech seam - feed the dynamic model.onnx, not the static fold. S:/qnn-project/workspace/kokoro.",
+    "RelatedFiles": [],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782119649,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 121,
+        "Noted": 1782119758,
+        "Disposition": "already-working-on-dp-onnx",
+        "Body": "Re-scope from Scott. Kokoro already works fairly well in Scotts bespoke ONNX runtime, which is itself built on DirectPort - dp-onnx. So this is NOT an ORT mount - kokoro is the working PROOF model of the DirectPort-based GraphRuntime. Integration = park dp-onnx plus kokoro into subsystem as the GraphRuntime behind Rb, see CRQ109. Feed the dynamic model.onnx."
+      },
+      {
+        "Request": 121,
+        "Noted": 1782268818,
+        "Disposition": "Backend decided: dp-onnx",
+        "Body": "BACKEND DECISION 2026-06-24 (Scott): ss tts runs on dp-onnx (the home-rolled ORT-free interpreter, S:\\qnn-project\\workspace\\onnx-interp). ORT is NOT brought into subsystem-main at all ΓÇö it stays entirely outside the project as the offline validation oracle only. Reconciles CRQ121 \"over ORT\": ORT was the bootstrap; dp-onnx has replaced it (ear-validated, #68 closed). Floor honored: home-roll, don't import. Plan: ss tts seam ΓÇö rung1 IPA-in (works now), rung2 espeak-ng G2P (P/Invoke, ORT-free) for arbitrary text; engine = dp-onnx on dynamic model.onnx (NOT the static fold). Speed-gated 0.27x realtime (non-streaming OK; GPU-conv = roadmap). Quote: \"i think its dp-onnx for the win and ort exists outside the project entirely for validation.\""
+      },
+      {
+        "Request": 121,
+        "Noted": 1782270593,
+        "Disposition": "Rung-1 shipped: ss tts on dp-onnx",
+        "Body": "RUNG-1 DONE 2026-06-24 (verified). `ss tts` is a first-class CLI verb (src/runspace/windows/Tts.cs + Program.cs dispatch + Shim refusal-gate) driving the home-rolled ORT-free dp-onnx LEAF, plays the WAV via winmm PlaySound (no SoundPlayer/desktop pack). ADDITIVE: WebView ORT-web kokoro lane + LiteRT-LM untouched.\n - ss tts --phonemes \"<IPA>\"  -> dp-onnx stream (vocab/tokenize/style internal) -> WAV -> play (rung-1 user path)\n - ss tts --inputs <dir>      -> dp-onnx run (pre-tokenized) -> WAV\n - paths SS_TTS_ENGINE / SS_TTS_MODEL env -> drive-derived (Build.cs convention, SS021-clean); dp-onnx owns vocab/voices.\nVERIFIED on the fresh ss.exe: ss tts --phonemes \"h╔Öl╦êo╩è w╦ê╔£╦Éld\" -> 1 chunk, 39000 samp (1.62s @24k), rms 0.0536, 0 NaN, click-free, exit 0 = identical audio to the --inputs fixture; rmse vs ORT oracle 2.504e-2 (the known inaudible atan2 low-mag phase residual, matches standalone bench = no wiring drift). 0.3x realtime (non-streaming OK; GPU-conv = speed lever).\nLADDER (invariant 9): rung-1 drive the leaf = DONE. rung-2 = text->IPA G2P as an ONNX grapheme->phoneme model on dp-onnx (NO espeak/GPL, Scott \"i dont use that\"). rung-3 = absorb the dp-onnx ENGINE intraprocess (the Borg; shared foundation with the Gemma LLM rung, INTEGRATION-PROMPT.md). Pending: register the \\Capability\\Speech\\Kokoro native rung + an agent-tool for LLM-driven tts.\nDeploy: build self-replace was lock-blocked (running MCP); fresh binary hand-swapped into repo ss.exe (old -> ss.exe.old-20260623230905). MCP server stays on the old image until restart."
+      },
+      {
+        "Request": 121,
+        "Noted": 1782271881,
+        "Disposition": "Pruned the superseded ORT-web kokoro lane",
+        "Body": "PRUNE 2026-06-24 (WHITEPAPER ┬º5 prune-when-served): dp-onnx `ss tts` replaces the WebView ort-web Kokoro TTS lane, so the lane was removed (Scott: \"remove the kokoro slot for ort webview ... but webview onnx inferencing we need absolutely\"). REMOVED: src/shell/lib/speech.js; src/shell/vendor/kokoro/ (kokoro.js 2MB + README); the \\Capability\\Speech\\Kokoro seed in Registrar.cs; the kokoro entry in models.json; the <script src=\"/lib/speech.js\"> include in agent.obp. KEPT: src/shell/vendor/ort/ (onnxruntime-web + wasm) = general WebView ONNX inferencing. agent.obp window.Speech.say/stop call sites left guarded (no-op, the re-wire hook for dp-onnx-driven spoken replies). Rebuilt GREEN, ss tts verified intact, redeployed to repo ss.exe."
+      }
+    ],
+    "Ref": "CRQ000000000121"
+  },
+  {
+    "Id": 122,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "UNVERIFIED agent-drafted pending Scott - Provenance breadcrumb + cite-or-refuse so no agent (small E2B or frontier Opus) mistakes a churned-agent note for authority. Every hive/onboarder node stamps author and authority-level: AUTHORITY (Scott or binary at file:line) vs UNVERIFIED (agent-drafted, dated); a superseded-by pointer rendered AT READ TIME so struck nodes never read as live; agent-authored cmdlet output PRINTS the UNVERIFIED disclaimer (the rep follows the script). The script: walk the breadcrumb to the primary source, ground and cite, refuse if no source, never cite a subordinate node to argue with Scott plus the binary. Generalizes CRQ108 living-onboarder and WORKORDER L4/L5 from recon agents to every agent every turn. Eval proving it load-bearing: the GC session where prior-Claude EOS entries on CRQ115 read as authority and Opus 4.8 deferred to them and argued with Scott.",
+    "RelatedFiles": [],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782127509,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000122"
+  },
+  {
+    "Id": 127,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "CLI redesign - make ss flag-style and chatty like llama and scrcpy. ss --build is an interactive wizard. ss --build ss builds the windows head. ss --build ss --type apk --path X builds with type and path flags. Bare ss prints the full GNU long-plus-short flag help, a long llama-style arg list, and when args are insufficient it tells you exactly what to provide. Guiding principle - the more informative and chatty the CLI the better. Supersedes the current subcommand style like ss build self and ss build apk. Scott 2026-06-22.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782156602,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000127"
+  },
+  {
+    "Id": 128,
+    "Kind": "Change",
+    "Category": "Vom",
+    "Summary": "Intraprocess hardware isolation at the VOM Owner boundary - the spike that EARNS the microkernel claim. Today owners isolate only cooperatively (cancellation token + ADVISORY quota Vom.cs:98) in ONE address space with raw nint Resource - any owner can scribble anothers native memory, so the category is microkernel-SHAPED not microkernel. Add a degradation ladder behind the Owner/Enter-Leave seam: rung1 Intel MPK/PKU (x86 PKRU, no syscall) + ARM POE; rung2 ARM MTE+PAC; rung3 SFI/WASM for foreign/untrusted slots (the HLE PE-loader case); rung0 today cooperative. Receipt test.vom.isolation.pku: two owners tagged distinct keys, cross-owner read FAULTS. Verify Windows PKU support first. Hardening the one Owner boundary propagates to every child by construction.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782158972,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 128,
+        "Noted": 1782170141,
+        "Disposition": "handles-do-not-cross-the-boundary",
+        "Body": "Scott refinement: HW isolation means a handle (its raw nint Resource) must NOT cross the owner boundary. Already half-structural - handle tables are per-owner, HandleAllocator lives on Owner with no global table, so an id from A does not resolve in B. HW keys PKU/POE make the pointer undereferenceable across the boundary too. Legitimate cross-owner data then moves ONLY via DirectPort with an explicit grant = capability transfer, the microkernel IPC model, no shared memory by default."
+      },
+      {
+        "Request": 128,
+        "Noted": 1782170587,
+        "Disposition": "CORRECTION-capabilities-cross-the-raw-pointer-does-not",
+        "Body": "Scott correction - my prior note was imprecise. A handle AS A CAPABILITY (the generational id / path / grant token) CAN and SHOULD cross the boundary - that is capability-passing IPC (the DirectPort grant, the seL4 model). What must NOT cross is the raw backing POINTER (Handle.Resource nint, the dereferenceable address); HW keys PKU/POE make a foreign owners pages undereferenceable. So capabilities transfer over DirectPort with an explicit grant; memory is never shared by default; the raw pointer stays owner-local. The microkernel definition is still being refined by Scott - do NOT treat the criteria as settled."
+      },
+      {
+        "Request": 128,
+        "Noted": 1782171497,
+        "Disposition": "SS026-software-default-deny-shipped-and-tested",
+        "Body": "Built the analyzer Scott asked for: SS026 (src/analyzers/SS026RawPointerBoundaryAnalyzer.cs) - a non-extern public/internal method OUTSIDE Subsystem.Vom returning a raw pointer (nint/IntPtr/void*) is denied (Error); the capability/handle crosses, the pointer never does. Generalizes SS008 (cmdlets) to the whole non-kernel surface; exempts the FFI edge (extern/[DllImport]/[LibraryImport]) and the kernel. This is the SOFTWARE rung of the no-shared-pointer discipline (default-deny the mechanism we never use) - the cooperative isolation, now binary-enforceable, ahead of any HW rung. Compiles (dotnet build exit 0); fire-test GREEN tests/test.gate.ss026-raw-pointer.ps1 (violation=1, kernel/handle/ffi=0). REMAINING to go live in the shipped gate: rebuild the check tool/ss.exe with the new analyzer assembly, then ss check --gate --write-baseline once to onboard existing legacy nint-returning public methods (then it ratchets, denying new ones)."
+      },
+      {
+        "Request": 128,
+        "Noted": 1782179144,
+        "Disposition": "isolation-reshaped-by-recon-portable-rung-is-WASM-not-PKU",
+        "Body": "RECON (web, 2026-06-22) reshapes the isolation plan. FINDINGS: (1) Intel PKU/PKRU is NOT exposed to Windows userspace - it is a Linux capability (pkey_mprotect); Windows isolates via hypervisor VBS/HVCI instead. (2) ARM POE is the analog on the Android head but its permission register is PRIVILEGED (kernel-mediated), unlike x86 userspace WRPKRU. (3) => the hardware rung is NOT portable across the heads. The portable confinement rung is SOFTWARE: WASM (Wasmtime) - linear memory disjoint from the host, bounds-checked, no raw syscalls, in-process. CONSEQUENCE: first-party code is already confined enough by SS026 + the no-shared-pointer discipline; enforced isolation is only needed for UNTRUSTED in-proc code (the HLE foreign-PE / untrusted-slot case). So the microkernel-earner should LEAD with WASM-confine-untrusted (portable, both heads), and treat PKU (x86) / POE (ARMv9) as opportunistic HW accelerators where present - NOT the foundation. Full note + sources: S:/subsystem-project/staging/NEXT-SESSION-RECON.md. NEXT: reframe this request to the WASM rung; the keystone build remains the C++ VOM vom.h parity seam."
+      }
+    ],
+    "Ref": "CRQ000000000128"
+  },
+  {
+    "Id": 129,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "README honest + regenerative - derive truth from the registry/binary, not hand-held aspirational prose (Scott). Name: self-hosting object machine (WHITEPAPER.md:2) nested with the precise category (in-process NT-Object-Manager-shaped no-GC CoreCLR + pwsh 7.7, Contextualize.cs:46). HONESTY FIX: README:30 says in-process microkernel - an overclaim until HW isolation lands; downgrade to microkernel-shaped / capability object-kernel (single protection domain). Make rot-prone sections (verified-on-hardware, components, verbs) PROJECT from Cm + the binary self-description so the README cannot drift aspirational - invariant 3/4 applied to the README.",
+    "RelatedFiles": [],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782158972,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000129"
+  },
+  {
+    "Id": 130,
+    "Kind": "Change",
+    "Category": "Vom",
+    "Summary": "C++ VOM - the pure-C kernel + the vom.h C-ABI parity seam: the dual-language shared-heap foundation, distilled from the DirectPort region model to the CPU VOM core.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782181030,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 130,
+        "Noted": 1782181030,
+        "Disposition": "c-vom-kernel-built-and-green-parity-seam-exists",
+        "Body": "SYMPTOM: the C++/C# dual-language VOM (the shared-heap thesis - C/C#/Rust/AOT over one heap) had no C side; it was a plan, not a binary. RESOLUTION: wrote src/native/vom/ - vom.h (a flat extern-C ABI, the parity seam) + vom.c (a pure-C kernel mirroring src/runspace/Vom/Vom.cs behaviour-for-behaviour: 256-aligned _aligned_malloc regions, a generational handle table [16-bit gen|16-bit index] with free-list slot reuse, refcount Open/Close, deterministic free-on-zero with a generation bump on free) + vom_test.c (a native receipt). Drive-portable build.ps1 discovers a complete MSVC (full VS18 install at C:/Program Files/...; the W:/bin toolchain Kit lacks the um libs, so its vcvars cannot link - documented). VERIFICATION: compiled with cl (MSVC 19.51) and ran GREEN - 17/17 checks: 256-aligned + writable regions, byte accounting, refcount free-on-zero (Close at 2->1 no free, at 1->0 frees), generational stale-id rejection O(1), ABA-proof slot reuse. Wrapped as tests/test.vom.c-kernel.ps1 (skips clean without VS), GREEN through the repo binary. NET: Scott bet C and C# can share one heap; the C kernel now exists and honours the same contract - the parity seam is real. RESIDUAL: (1) the C#<->C parity cross-check over ONE shared arena (test.vom.parity - both kernels operating the same base pointer); (2) port the timeline Fence to C; (3) owners-tree + cascade + DirectPort NT-handle backend for the IPC rung. The keystone foundation is laid."
+      }
+    ],
+    "Ref": "CRQ000000000130"
+  },
+  {
+    "Id": 131,
+    "Kind": "Incident",
+    "Category": "agent",
+    "Summary": "ss onboard via the MCP seam degrades every disk-doc section - WHY LAWS SETTLED CONVENTIONS STATE NEXT - to empty pointers, while the binary-projected CONTRACT still renders. Root cause - the MCP server launches the floor copy S:/ss.exe so AppContext.BaseDirectory is S:/ which fails IsRepo, and cwd is C:/Windows/system32, so ResolveRepo Onboard.cs:80 falls back to S:/ and finds no README.md, CLAUDE.md, or ledgers. Two gaps - ResolveRepo beside-check is dir/subsystem only, not the real subsystem-project/subsystem-main layout, and the MCP ss_onboard tool exposes no --path arg so the CLI override is unreachable. Immediate fix - point the MCP server at the repo exe subsystem-main/ss.exe with cwd subsystem-main so BaseDirectory resolves the repo. Residual - ResolveRepo stays brittle for the drive-root floor exe run from outside the repo. Live evidence - Base S:/, Exe S:/ss.exe, Cwd C:/Windows/system32, BaseHasReadme False, BaseHasSrc False.",
+    "RelatedFiles": [
+      "src/runspace/windows/Onboard.cs",
+      "src/runspace/windows/Mcp.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782182519,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "INC000000000131"
+  },
+  {
+    "Id": 132,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "Canonize no-privilege no-reservations as contract canon. Authority is the handle, never a privileged role or a reserved entry. Every door is a peer and the entry point is a slot like any other - the anti-win32k rule made general. Invariants 2 4 and 5 already imply it - name it explicit in docs/CONTRACT.md. Receipt - the Android FEDERATION - every door activity-alias targets one MainActivity with exactly one launcher entry and the body becomes the door. Agent drafts the clause, Scott ratifies. Scott 2026-06-22.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782184076,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000132"
+  },
+  {
+    "Id": 133,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "Spike - project process environment variables through Cm as addressable namespace handles rather than ambient process globals. An env var today is ambient authority plus a parallel store of truth - the exact anti-pattern invariants 2 3 and 6 fight. Demote it to a projection - resolved live by path and curated as policy like the intentionally-naive PATH, not accreted ambient state. Scott 2026-06-22 - wonder how well env vars take to subsystem.",
+    "RelatedFiles": [],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782184078,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000133"
+  },
+  {
+    "Id": 134,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "Decompose the Microsoft.PowerShell.SDK meta-package to its load-bearing core - drop the love handles found by live AppDomain interrogation of running ss. Confirmed loaded and unused: Microsoft.ApplicationInsights (Azure telemetry - nuke first, sovereignty), Microsoft.WSMan.Management and Microsoft.WSMan.Runtime (remoting), Microsoft.Management.Infrastructure and System.Management (CIM/WMI), Microsoft.PowerShell.Commands.Diagnostics, System.DirectoryServices, System.Net.Mail, System.Diagnostics.PerformanceCounter, System.Runtime.Serialization.Formatters (BinaryFormatter), Newtonsoft.Json, Microsoft.PowerShell.MarkdownRender. Surgical path - drop the SDK meta-package, reference System.Management.Automation plus only the Commands modules actually used; pwsh expects module manifests at runtime so verify per module. Owned by the pwsh-decomp side-channel session. Scott 2026-06-23.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782187306,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000134"
+  },
+  {
+    "Id": 135,
+    "Kind": "Change",
+    "Category": "Vom",
+    "Summary": "Bleach the collector from the C# VOM runspace WITHOUT forking dotnet-runtime - invariant 7 execution. DECISION - the fork path from the AI-mode dump (modify JIT write barriers, redefine object.h, strip safepoints, gut gcinterface.cpp) is the win32k trap, REJECTED. Use the standalone GC plugin seam (Local GC, .NET Core 2.0+, works with the existing JIT and EE, no fork - standalone-gc-loading.md). The GC is two things - the mandatory allocator (becomes the VOM arena) and the collector (the concept deleted). Hostile parts are not ripped, they go vestigial - no-op write barrier via config not JIT edit, idle finalizer thread, safepoints never suspend. PLAN. P0 no fork, plugin only. P1 starve litter - SS0xx analyzer bans GC.* plus implicit alloc in VOM core (boxing, closures, concat, LINQ hot paths), move Slot.cs code-slots off collectible ALC, MEASURE managed alloc rate under load. P2 build Zero GC - fork GCSample (under 250 LOC) not the runtime, IGCHeap with real bump-pointer Alloc into a VOM native arena and ~70 dummy stubs, never collect, plug via DOTNET_GCName (empty GCName slot confirmed live). P3 deterministic reclaim - arena-per-scope (pwsh pipeline / DirectPort frame) reset O(1), escape-promotion for survivors - the hard PL part. P4 verify - collection counts flatline, C VOM as independent oracle, analyzer locks no-GC-in-source. HARD PARTS - never-collect OOMs without P3 arena reset so P3 is mandatory not optional, the Zero GC joins the trust base so small+C+verifiable, pwsh churns litter so arena reset cadence must match its pipeline lifecycle. PRIOR ART - GCSample (mattwarren), UpsilonGC (kokosa), Writing a .NET GC in C# (minidump.net), Zero GC (tooslowexception), standalone-gc-loading.md. Scott 2026-06-23.",
+    "RelatedFiles": [
+      "src/runspace/Vom/Slot.cs",
+      "src/runspace/windows/DirectPortBench.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782197010,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000135"
+  },
+  {
+    "Id": 136,
+    "Kind": "Change",
+    "Category": "agent",
+    "Summary": "Onboarding must state the core methodology as a first-class principle: working ON Subsystem strengthens Subsystem-as-a-framework - the ouroboros, dogfood ss, every friction becomes a hardening Request never a workaround. A cold agent this session 2026-06-23 missed this stance and framed device/present work as feature-building rather than framework-strengthening, deriving the methodology only by reading CLAUDE.md directly. This is the CONTENT companion to the MECHANICAL onboard-projection defects already open INC131 and CRQ125 part A: even once ss onboard resolves the repo and projects canon, its telos/laws output does not NAME the framework-strengthening stance, so the ouroboros stays derivable-but-not-stated. Fix: emit an explicit STANCE line at the top of ss onboard Onboard.cs and seed it in canon docs/CONTRACT.md and WHITEPAPER.md so framework-strengthening is the first thing a cold agent reads.",
+    "RelatedFiles": [
+      "src/runspace/windows/Onboard.cs",
+      "docs/CONTRACT.md",
+      "WHITEPAPER.md"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782258724,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000136"
+  },
+  {
+    "Id": 137,
+    "Kind": "Incident",
+    "Category": "Pwsh",
+    "Summary": "The vom: provider is advertised but does not exist anywhere in source - thesis-central drift on invariant 3 the registry projects the namespace. The ss_run MCP tool Mcp.cs:84 and its header Mcp.cs:22 advertise the vom: provider for navigating the live VOM namespace; CLAUDE.md/onboarding imply the projection. SEVERE TEST audit 2026-06-23: a grep across all of src for CmdletProviderAttribute, NavigationCmdletProvider, DriveCmdletProvider, ItemCmdletProvider, SessionStateProviderEntry returns ONLY the generic scan loop MainActivity.cs:125-126, which finds no vom: type to register. Zero provider classes exist. The sole VOM inspection path is Vom.Snapshot JSON via ss diag WinDg.cs:89. So Get-ChildItem vom: fails everywhere, not just over MCP - an agent told to dogfood the live namespace hits a dead drive, the exact friction that fails the no-text-scan floor. TWO LAYERS. Layer 1 the provider was never built, so the most tangible agent-facing affordance of the fractal-namespace thesis has no shell embodiment. Layer 2 even once built, Mcp.OpenRunspace Mcp.cs:188 calls only Shim.LoadProjectCmdlets which adds cmdlets via SessionStateCmdletEntry only - it never registers providers like MainActivity.cs:126 nor the ss-refs/ss-check functions from SubsystemAliases, so the MCP runspace under-provisions vs the console and Android hosts. FIX. Build a vom: DriveCmdletProvider that projects Vom.Snapshot as a navigable Sessions/Capability/Device namespace, register it in BOTH the console host and Mcp.OpenRunspace, and either wire the functions into the MCP runspace or stop advertising ss-refs/ss-check there. Doctrine: the binary wins, so until built, the tool description is the lie to fix. Companion to INC131 same MCP seam. Found by the take-the-wheel audit session.",
+    "RelatedFiles": [
+      "src/runspace/windows/Mcp.cs",
+      "src/runspace/MainActivity.cs",
+      "src/runspace/windows/Shim.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782259369,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 137,
+        "Noted": 1782260525,
+        "Disposition": "Provider BUILT and proven 2026-06-23 - layers 1 and 2 resolved in the new build; remaining: promote to the floor exe + restart MCP, and wire the ss-refs/ss-check functions",
+        "Body": "Built Pwsh/VomDrive.cs: a NavigationCmdletProvider [CmdletProvider Vom] projecting Vom.GetOwners plus handle paths as a navigable read-only namespace, descriptor metadata only, never the raw Resource pointer. Pulled into the Windows compile via a single-file SelfBuild root. Layer 2 fixed: Shim.LoadProjectCmdlets now also registers CmdletProvider types as SessionStateProviderEntry, so BOTH the console host and Mcp.OpenRunspace mount the drive. PROOF on the freshly built exe S:/tmp/ss-v2/ss.exe: seeded the kernel with Vom.CreateOwner for Sessions/probe, Device/cam0, Capability/tts, then Get-PSProvider Vom and Get-PSDrive vom resolve, Get-ChildItem vom: lists Capability Device Sessions, and gci vom:\\Sessions shows probe with Kind owner. Gate held at baseline 286 new 11 - zero new findings from the provider. Mcp tool description corrected to advertise the real surface. REMAINING to fully close: promote the new build to the floor S:/ss.exe and restart the MCP server so the live ss_run sees the drive (INC131); and wire the ss-refs/ss-check functions into the MCP runspace or drop the claim."
+      },
+      {
+        "Request": 137,
+        "Noted": 1782268555,
+        "Disposition": "Grounded ΓÇö pending rebuild",
+        "Body": "DRIVE-IT FINDING 2026-06-24: this ticket is now PARTLY STALE. Source DOES contain the provider now ΓÇö src/runspace/Pwsh/VomDrive.cs (\"vom: ΓÇö a READ-ONLY PowerShell drive that projects the live VOM\"), added by a78ae81 (authored 2026-06-23 21:30 -0400). So \"does not exist anywhere in source\" no longer holds.\n\nRUNTIME STILL UNVERIFIED (keep OPEN): vom: is NOT mounted in either the MCP runspace or the real ss.exe CLI (Get-PSProvider Vom -> \"Cannot find a provider\"; Get-ChildItem vom:\\ -> drive not found). This is EXPECTED STALENESS, not proven drift: the on-disk ss.exe was built 2026-06-23 18:58 (2.5h BEFORE the a78ae81 commit), and grep of ss.exe for the VomDrive marker string returns 0 ΓÇö not compiled in. Severe test deferred (held CRQ140 tree): ss build self, then re-run the two probes. Until then, \"vom: provider is live\" is unproven against the binary."
+      },
+      {
+        "Request": 137,
+        "Noted": 1782270658,
+        "Disposition": "Root-caused -> CRQ138 (Pwsh surface not in Windows head)",
+        "Body": "ROOT CAUSE 2026-06-24 (rebuilt Windows head from current source, then probed). The vom: provider EXISTS (src/runspace/Pwsh/VomDrive.cs, a78ae81) and the loader is correct (Shim.LoadProjectCmdlets reflects CmdletProviderAttribute). vom: STILL does not mount after rebuild: Get-PSProvider Vom -> not found; gci vom:\\ -> no drive. NOT stale binary.\nREASON: SubsystemWin.csproj compiles only specific linked shares (..\\Vom, ..\\Cm, ..\\Device\\VomInterop, ..\\Adb, ..\\..\\shell\\cell) and does NOT include ..\\Pwsh\\*.cs -> VomDrive.cs is absent from the Windows assembly -> reflection finds no provider. The \\Device\\Pwsh VOM OWNER mount DOES work (log: \"[vom] OWNER + \\Device\\Pwsh\") because it lives in Shim.cs (Windows head). So this is a FACET of CRQ138 (compile the shared Pwsh surface into the Windows head, heads-as-peers), not independent drift. Same cause hits the MCP runspace (shared loader). Android head (Subsystem.csproj compiles Pwsh/) likely already has vom: (untested here).\nFIX: link VomDrive.cs alone into SubsystemWin.csproj if Android-clean (quick Windows vom:), else do CRQ138 properly. Track under CRQ138."
+      }
+    ],
+    "Ref": "INC000000000137"
+  },
+  {
+    "Id": 138,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "Make the shared Pwsh surface compile into the Windows head - it should be built-in, heads are peers. Today SelfBuild.cs roots exclude src/runspace/Pwsh entirely; the Windows head uses the full PowerShell SDK and loads project cmdlets only from windows/ plus the CodeContext assembly. MEASURED 2026-06-23 by adding all of Pwsh/ to the Windows compile: 155 errors in a tight root cluster. 1 WrapperCmdlet - the cmdlet base class - lives in an Android-SDK-bound file, so every clean cmdlet that inherits it breaks. 2 ReplEngine references TerminalSession and AndroidSubsystemHost, both Android host types. 3 several cmdlets reference Subsystem.Device which is itself not in the Windows compile set. This is the CRQ112 peer-heads seam: split WrapperCmdlet base from its Android binding, decouple ReplEngine from the Android host, bring Device/ into the Windows compile. PARTIAL done this session: the vom: provider was pulled in as a single file Pwsh/VomDrive.cs since it depends only on Vom plus the SMA SDK. Receipt for done: ss build self GREEN with src/runspace/Pwsh/ in roots and no Pwsh excludes.",
+    "RelatedFiles": [
+      "src/runspace/windows/SelfBuild.cs",
+      "src/runspace/Pwsh/ReplEngine.cs",
+      "src/runspace/Pwsh/Cmdlets/WrapperCmdlets.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782260525,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000138"
+  },
+  {
+    "Id": 139,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "Demote pwsh from host to a mounted VOM peer - the unified-cs-runspace inversion. Scott 2026-06-23. Today ss BOOTS pwsh as the host runspace (Shim.cs RunspaceFactory.CreateRunspace; the csproj says ss becomes a pwsh superset), so pwsh is privileged. The thesis: the substrate is CoreCLR + the VOM (the unified C# object world) and pwsh is ONE mounted surface, no different than a runtime or a device - droppable and swappable. pwsh is a MANAGED assembly (Microsoft.PowerShell.SDK 7.7), so it already lives inside the C# world; the only special thing is that we boot it as host instead of mounting it as a guest. RUNGS. Rung 1 DONE 2026-06-23: the pwsh runspace is now a VOM handle mounted at \\Device\\Pwsh in Shim.Run - owned, refcounted, enumerable via gci vom:\\Device, reclaimed by the Terminate cascade not a using/GC. PROVEN: gci vom:\\Device shows Pwsh (owner) with a Runspace handle of Type PwshRuntime, and TERMINATE reclaims it; hot path 1+1/Get-Date/Get-Command intact; gate held 286 plus 11. Rung 2: lift the mount behind the RuntimeBroker Runtime contract so pwsh is a Runtime instance, not a special case (CRQ109) - and mount Mcp.OpenRunspace the same way. Rung 3: boot the host on VOM plus CoreCLR and MOUNT pwsh rather than pwsh hosting - the real inversion. Rung 4: decompose the SDK (CRQ134) so pwsh is swappable/droppable. Related: CRQ132 no-privilege, CRQ134, CRQ109.",
+    "RelatedFiles": [
+      "src/runspace/windows/Shim.cs",
+      "src/runspace/Pwsh/VomDrive.cs",
+      "src/runspace/RuntimeBroker/Runtime.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782261432,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 139,
+        "Noted": 1782262919,
+        "Disposition": "DE-CONFLICTION 2026-06-23: my Shim mount duplicates the canonical ManagedSession gc-seam - reconcile, do not fork",
+        "Body": "Checked the two inflight sessions per Scott. FINDINGS. 1) CRQ002 (live, in-proc pwsh->cells, CoreUi/CellShell) already shipped the gc-seam: Pwsh/Sessions.cs ManagedSession registers the runspace as a VOM handle at \\Sessions\\{name} via Register(owner, Runspace, rs, onReclaim Close+Dispose), torn down by Terminate(owner) - the canonical runspace-as-VOM-handle. 2) CRQ115 (closed -> CRQ135) already reasoned the deep version: pwsh needs the IGCHeap CONTRACT not the king; the VOM takes ownership of every pwsh object at birth via the standalone-GC seam; the fiefdom is the runspace, region-freed on drop. COLLISION: my rung-1 Shim.cs change hand-rolled the SAME runspace-as-VOM-handle at \\Device\\Pwsh - a duplicate impl at the wrong path (a runspace is a SESSION \\Sessions\\{name}, not a device leaf). COMPLEMENT (keep): the vom: provider I built is net-new and VISUALIZES the gc-seam - gci vom:\\Sessions shows live ManagedSession runspaces. RECONCILIATION (rung 2, coordinate with CRQ002/CRQ135): do NOT fork; either revert the Shim \\Device\\Pwsh hand-roll or route Shim.Run + Mcp.OpenRunspace through SessionManager/ManagedSession so ALL runspace creation uses the one canonical mount. Design call for Scott: pwsh-the-ENGINE as a device (\\Device\\Pwsh, one) vs each RUNSPACE as a session (\\Sessions\\{name}, many) - the two-level model. This CR is the same demotion as CRQ002 gc-seam + CRQ115/CRQ135 IGCHeap - link them, describe once."
+      }
+    ],
+    "Ref": "CRQ000000000139"
+  },
+  {
+    "Id": 140,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "Kill the retired term session project-wide - the SS025 hunter is LIVE 2026-06-23, now drain the footprint. SS025RetiredTermAnalyzer flags the term in the names WE declare + interpolated strings (foreign SDK + C-ABI extern bindings are the exempt seam); SS024 was armed by adding session to banned.stringLiterals for plain string literals. Footprint ~130: SS025 64 + SS024 66, across ~18 files. Hotspots SessionCmdlets.cs 15, Rs.cs 11, MainActivity.cs 7, plus Pwsh/Sessions.cs ManagedSession/SessionManager, AgentSessionTable, AudioStreamSession, ScreenStreamSession, PsrpSession, TerminalSession, and ~12 *SessionCmdlet classes. RENAME MAP: session -> the VOM Owner (container + lifetime) / a handle (the thing) / a Device (the mount); foreign InitialSessionState/SessionState* and litert_lm_session_config_* stay (the seam). GATING DECISION for Scott: the VOM namespace ROOT \\Sessions is ITSELF the retired term - Vom.cs SelfTest builds $\"\\\\Sessions\\\\...\" and Sessions is in catalog paths.roots - so killing session requires renaming the root (Device? Owner?), which cascades to every \\Sessions\\ path and the gc-seam owners. Decide the root FIRST; it gates the campaign. BORDERLINE: LiteRtLmSessionConfigHandle mirrors the LiteRT C ABI - rename or treat as seam. CROSS-SESSION: reds land in the CRQ002/Antigravity files (MainActivity, ReplEngine, ScreenStream) - correct, session is banned for all, but coordinate. NOT baselined - reds kept visible per not-blessing-the-reds. Scott 2026-06-23.",
+    "RelatedFiles": [
+      "src/analyzers/SS025RetiredTermAnalyzer.cs",
+      "src/runspace/Pwsh/Sessions.cs",
+      "src/analyzers/SystemCatalog.json"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782264208,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 140,
+        "Noted": 1782275343,
+        "Disposition": "SS025 committed + pushed (rename still pending)",
+        "Body": "2026-06-24: SS025RetiredTermAnalyzer.cs + the SystemCatalog `session` string-literal ban committed (1aff50a) and pushed to public main as its OWN commit, separable from the home-roll/clean-house work (1121574). The RENAME (session -> Owner/handle/Device; root \\Sessions -> \\Device) is STILL NOT DONE, so ss check / ss build apk stay RED until it lands. Campaign now public + tracked. Next: do the rename, drain the ~141 reds, then the gate goes green."
+      }
+    ],
+    "Ref": "CRQ000000000140"
+  },
+  {
+    "Id": 143,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "UNVERIFIED agent-drafted pending Scott 2026-06-25 - Integrate the dp-onnx engine SOURCE into subsystem and mount it as a VOM GraphRuntime - the rung-3 Borg absorption, plus close the sovereignty wound. STATE derived from the binary this session - dp-onnx is a bespoke native .NET ONNX interpreter over Onnx.dll protobuf with NO onnxruntime, home-rolled kernels decomposed from ggml. It lives ENTIRELY outside the repo at S:/qnn-project/workspace/onnx-interp - Program.cs 110 KB plus io/kokoro_compiled.cs 1.79 MB, 10 cs files 1.9 MB total, modes selftest probe run specdiff stream fold emit run-compiled gpu-test gpu-bench. It has NO git anywhere and no GitHub twin, and it is load-bearing for TWO consumers - ss tts CRQ121 and the gemma LLM rung CRQ135 - so losing the workstation loses the engine with no way back. Today subsystem treats it as an EXTERNAL exe leaf - Tts.cs Process.Start drives dp-onnx.exe over a CLI/file contract, rung 1 of the speech ladder. The thesis wants rung 3 - absorb the engine intraprocess as ONE more mounted Runtime, nothing privileged. PLAN. P0 sovereignty - bring the source into the repo under version control, gitignore the 310 MB model.onnx and the 165 MB of build DLLs as re-derivable data, PII-check, so the engine can never be lost. P1 mount under the CRQ109 Runtime contract as a GraphRuntime instance so Rb brokers dp-onnx behind the same contract as LiteRT - dp-onnx becomes a VOM handle not a special case, coherence-test clean. P2 absorb intraprocess - replace the Tts.cs Process.Start leaf with an in-proc call so ss tts and the gemma rung share ONE engine in the runspace, no child process, must still compile under in-proc Roslyn for ss build self GREEN. Relation - this is the missing source-integration work that CRQ109 contract, CRQ121 tts leaf done, and CRQ135 gemma rung all assume but none names. Also flag - onnxsurgeon-project is a separate no-git onnx effort whose surgery verbs addoutput nodeinfo appear already absorbed into dp-onnx Program.cs, candidate to retire as a duplicate.",
+    "RelatedFiles": [
+      "src/runspace/windows/Tts.cs",
+      "src/runspace/RuntimeBroker/Runtime.cs",
+      "S:/qnn-project/workspace/onnx-interp/Program.cs"
+    ],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782415869,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 143,
+        "Noted": 1782416568,
+        "Disposition": "P0 DONE (verified, pushed) - P1/P2 OPEN",
+        "Body": "P0 (sovereignty) DONE and VERIFIED 2026-06-25. The dp-onnx engine source is now vendored into the repo under src/native/dp-onnx and pushed to the GitHub twin - the no-git wound is closed.\n\nWHAT LANDED (commits 91c4739 then f7be5ee on main, both pushed to origin https://github.com/MansfieldPlumbing/Subsystem.git):\n- src/native/dp-onnx/onnxnet/{onnx.proto, Onnx.csproj} - ONNX-as-protobuf, Grpc.Tools protoc compiles to Onnx.dll.\n- src/native/dp-onnx/onnx-interp/{Program.cs, Onnx.Interp.csproj} - the interpreter, AssemblyName dp-onnx.\n- build.ps1 (S:-rooted dotnet, one command) + README.md (provenance + known edges).\n- .gitignore: added *.onnx guard (the ~310 MB Kokoro-82M model is re-derivable data, can never be committed) and a !src/native/dp-onnx/README.md negation past the *.md gate.\n\nPLACEMENT PROOF: lands under src/native, OUTSIDE every C# compile glob (SubsystemWin.csproj globs src/runspace/windows, Subsystem.csproj globs src/runspace, SelfBuild uses explicit roots), so ss build self is unaffected - zero compiled bytes of ss.exe changed.\n\nBUILD FIX: the repo Directory.Build.props redirects output to a build/ sibling, so the original fixed HintPath ..\\onnxnet\\bin\\Release\\netstandard2.0\\Onnx.dll could not resolve (CS0246 on every NodeProto). Switched to a ProjectReference on onnxnet so MSBuild resolves through the project graph. RECEIPT: clean-slate build green, dp-onnx.exe 145 KB produced under build/Onnx.Interp/bin/Release/net11.0, selftest PASS max|diff|=0.\n\nNO SECRETS published - scanned Program.cs, the only token hits are NLP-token prose, no keys/urls.\n\nSTILL OPEN (this CRQ): P1 - mount dp-onnx under the CRQ109 Runtime contract as a GraphRuntime so Rb brokers it like LiteRT (a VOM handle, nothing privileged). P2 - absorb intraprocess, replace the Tts.cs Process.Start leaf so ss tts and the gemma rung share ONE in-proc engine, must stay ss build self GREEN under in-proc Roslyn. NOTE the originals at S:/qnn-project/workspace/{onnx-interp,onnxnet} REMAIN the live exe Tts.cs drives until P2 rewires it - do not delete them yet. P1 cleanup: 4 hardcoded S:\\ paths in Program.cs (3 _gpu/gemm.dxil GPU-bench scratch + the Kokoro data dir, overridable via --config/--voices) are SS021 smells to fix when lifted under the contract. Also: onnxsurgeon-project (separate, no-git) appears superseded by dp-onnx surgery verbs - retire-as-duplicate candidate."
+      },
+      {
+        "Request": 143,
+        "Noted": 1782417205,
+        "Disposition": "P0 done; build-repro fixed; gap#1 landed; reconcile spawn-fusion streaming (P1.5)",
+        "Body": "Progress 2026-06-25 (commits f7be5ee then 2e62628, pushed). dp-onnx integration advanced + gemma gap #1 landed. (1) Build reproducibility FIXED - the vendored Onnx.Interp.csproj used a fixed bin\\ HintPath that broke under the repo Directory.Build.props output redirection - switched to a ProjectReference on onnxnet, clean-slate build GREEN, dp-onnx.exe 145 KB, selftest PASS max|diff|=0. (2) Gemma-4 E2B gap #1 done - FromProto now loads bf16 (dtype 16) + fp16 (dtype 10); see CRQ144 for the gemma track. CANONICAL-COPY HAZARD to resolve - I vendored from S:/qnn-project/workspace/onnx-interp/Program.cs (112,822 B, 6-23 7:44 PM) but S:/spawn-fusion/onnx-interp/Program.cs is NEWER (126,492 B, 6-23 9:48 PM); the +13.7 KB is kokoro STREAMING/drop/latency work (0 gemma matches, no bf16) - so the repo copy is equivalent for the gemma track but MISSING the streaming work. P1.5 = reconcile the spawn-fusion streaming delta into the repo copy (a careful diff/merge, do not blind-overwrite) then retire both parallel copies so subsystem is the one source. Still OPEN - P1 mount under the CRQ109 Runtime contract as a GraphRuntime; P2 absorb intraprocess (drop the Tts.cs Process.Start leaf). The originals at S:/qnn-project + S:/spawn-fusion remain the live exe Tts.cs drives until P2."
+      }
+    ],
+    "Ref": "CRQ000000000143"
+  },
+  {
+    "Id": 144,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "UNVERIFIED agent-drafted pending Scott 2026-06-25 - Gemma-4 E2B as a GraphRuntime LLM rung on the dp-onnx push-based inferencer. The marquee LLM-on-our-own-engine track. GROUNDED RECEIPTS this session against the binary - dp-onnx is vendored into subsystem (src/native/dp-onnx, CRQ143) builds GREEN selftest PASS. The real decomposed E2B graph W:/gemma4/onnx/e2b_step.onnx 10164 nodes probes implemented op-types 34/34 MISSING none - every op is dp-onnx-native, REPRODUCED not claimed. Weights all present on W: - the 4.48 GB PLE embed_tokens_per_layer.weight, 768 MB tied embed, MatMul sidecars. Engine gap #1 bf16 dtype 16 plus fp16 dtype 10 initializer load is now DONE in Program.cs FromProto committed 2e62628 - the dtype-16 throw is gone, half-precision weights load. REMAINING to first logits, this is NOT 2 lines, the loop is the build - (1) gap #2 the 4.48 GB PLE exceeds float[]/2 GB cap, needs lazy native-region row-gather, or the per-layer-split duct-tape 35 initializers ~128 MB each for a faster proof. (2) input plumbing - the graph input is literally named onnx::Gather_1 and :: is invalid in a Windows filename so the file-based --inputs feed cannot load it, plus input_ids shape inference resolved wrong [] float. (3) the host decode loop in Rb turn-contract - prefill, per-token step past_kv to present_kv, KV-cache as VOM handles, sampler, tokenizer/detokenizer, needs a re-export with use_cache=True. MILESTONE = dp-onnx run e2b_step.onnx logits diff vs the llama.cpp E2B oracle rmse <= 1e-3 = bench.rb.graphruntime-gemma4-e2b-step-parity twin of the kokoro parity bench. ARCH grounded from gemma4.cpp - dense+PLE 35L hidden 1536 MQA kv1 head_dim 256 sw512 4:1 local:global tied embed softcap 30 GeGLU sandwich-RMSNorm built-in MTP draft head. Full plan and rungs in S:/spawn-gemma4/INTEGRATION-PROMPT.md, PHASE1-STATE.md, SYNTHESIS.md. NOTE export needs python one-time only HF-gated, already done, weights on W:. Relation - rides CRQ143 dp-onnx, the GraphRuntime contract CRQ109, the swarm substrate CRQ128/Fence.WaitN/Slot.cs. Scott 2026-06-25 - the work with gemma4 using my push based inferencer.",
+    "RelatedFiles": [
+      "src/native/dp-onnx/onnx-interp/Program.cs",
+      "src/runspace/RuntimeBroker/Runtime.cs",
+      "S:/spawn-gemma4/INTEGRATION-PROMPT.md"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782417177,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000144"
+  },
+  {
+    "Id": 145,
+    "Kind": "Change",
+    "Category": "Vom",
+    "Summary": "GPU PE-factory / pure-C# D3D12 spine - the keystone. wip/vom-gpu-compiler assembles a native PE32+ on the GPU via an HLSL compute shader, driven by pure-C# D3D12 (raw COM-vtable dispatch, only OS exports P/Invoked, NO home-built DLLs - directport.dll/dpgpu.dll are drift), the VOM brokering every D3D12 resource as a cascade-reclaimed handle. VERIFIED 2026-06-25 emits a structurally-valid OS-loadable PE (Start-Process accepts it, PEReader PE32+/WindowsCui, .text holds GPU-emitted x64) after fixing 3 bugs CBV-to-RootConstants, Machine/Sections swap, optional-header offset map. This is the spine - one pure-C# D3D12 region+fence+handle layer that DirectPort present, dpgpu compute, and GPU inference all ride. NEXT lift from wip into src, mount DirectPort + the dp-onnx GPU off-ramp on it. Frontier functional PE (epilogue + IAT into data directory). Scott 2026-06-25.",
+    "RelatedFiles": [
+      "wip/vom-gpu-compiler/compile.ps1"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782423662,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000145"
+  },
+  {
+    "Id": 146,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "Canonize the boundary taxonomy DpBoundary / VomBoundary. A foreign engine the system cannot mesh is owned at the near side by ONE primitive - VomBoundary held by a VOM handle (control, request/response, ordered) - DpBoundary streamed through a DirectPort port (data, push/fenced/latest-wins). An engine = one VomBoundary plus N DpBoundaries = the control/data-plane split from the drop test. Gradient VOM-in-proc then DpBoundary then VomBoundary then unmanaged=drift. Closed pair by design (2 primitives) - mechanism words process/runspace/machine-boundary stay plain English, orthogonal. Add to docs/CONTRACT.md, add the or-a-declared-boundary branch to the coherence test, file an SSxxx analyzer requiring every foreign interop (P/Invoke, COM, child process, embedded blob) to be a declared boundary - undeclared foreign = drift. Scott 2026-06-25 ratified DpBoundary/VomBoundary.",
+    "RelatedFiles": [
+      "docs/CONTRACT.md"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782423662,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000146"
+  },
+  {
+    "Id": 147,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "Build profiles - FULL (CoreCLR + Roslyn + pwsh, self-hosting via ss build self, bigger) vs MINIMAL (CoreCLR + VOM core only, small, rebuilt by the dotnet SDK, no pwsh no Roslyn). Roslyn is droppable from the product - it powers ss build self (the zero-dotnet ouroboros) and ss refs only - dropping it loses self-build + ss refs but the core still runs and ss build via SDK still compiles. pwsh already mounts at Device/Pwsh CRQ139 rung 1 - rungs 2-3 make it a fully droppable guest. KEY none of this needs NativeAOT - stays full CoreCLR JIT+reflection, shrink is by subtracting deps not AOT trimming, consistent with CONTRACT NOT-AOT. Add a csproj define profile switch. Scott 2026-06-25 - i can ditch roslyn, make powershell optional, none requires nativeaot.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782423662,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000147"
+  },
+  {
+    "Id": 148,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "Clone-and-rebuild sovereignty - vendor ALL remaining scattered S:/ projects into wip/ (source only, heavy data gitignored) so a git clone plus re-derivable data rebuilds the whole system. DONE 2026-06-25 commit e3de3bb - wip vom-gpu-compiler, agent-browser, gemma4, d3d12-kernels + wip/README catalog. REMAINING to vendor - directport-project, onnxsurgeon-project (retire-as-dup vs dp-onnx), coreclr-hle-project, mansfield.dev-project, terminal-project, android-terminal-project, razrcover-project, flickpaint star. Each source-vendored to wip then folded into src. Scott 2026-06-25 - i just need all my code in subsystem so i can git clone everything and rebuild.",
+    "RelatedFiles": [
+      "wip/README.md"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782423662,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000148"
+  },
+  {
+    "Id": 149,
+    "Kind": "Incident",
+    "Category": "gate",
+    "Summary": "The commit gate (PII + markdown allowlist) lives in .git/hooks/pre-commit which git does NOT clone - on a fresh clone the gate is absent and the discipline is lost, breaking clone-and-rebuild sovereignty for the gate itself. Move the hook into a tracked dir e.g. .githooks/ and set core.hooksPath, or install it from ss on first run, so the gate survives clone. Found 2026-06-25 when the md gate blocked the wip commit - fixed locally by allowing wip md, that fix is also local-only.",
+    "RelatedFiles": [
+      ".git/hooks/pre-commit"
+    ],
+    "Severity": 3,
+    "Status": "Open",
+    "Created": 1782423662,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "INC000000000149"
   }
 ]
