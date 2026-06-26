@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace Subsystem.Windows;
 
@@ -18,14 +19,9 @@ internal static class Onboard
         string explicitPath = ReadArg(args, "--path") ?? ReadArg(args, "-p") ?? "";
         string repo = ResolveRepo(explicitPath);
 
-        // In Memoriam — the solemn advisory that opens every onboarding. A locked invariant (SS023); the one
-        // source of truth is Subsystem.Cm.Dedication.InMemoriam, so it can never drift or be abridged out.
         Console.WriteLine();
-        Console.WriteLine(Subsystem.Cm.Dedication.InMemoriam);
-        Console.WriteLine();
-
         Console.WriteLine("ss onboard — the complete alignment package, projected from the canonical sources.");
-        Console.WriteLine("Run this first on a cold session; then `ss contextualize --map` and `ss check --list` for depth.");
+        Console.WriteLine("Run this first on a cold start; then `ss contextualize --map` and `ss check --list` for depth.");
         Console.WriteLine(new string('=', 78));
         Console.WriteLine();
 
@@ -34,24 +30,33 @@ internal static class Onboard
             ReadSection(Path.Combine(repo, "README.md"), "## The telos"),
             "README.md `## The telos` not found beside the binary — run from the repo or pass --path.");
 
+        // ORIENTATION — the one idea (COLD-START canon; embedded so a cold clone still gets the thesis).
+        WriteSection("ORIENTATION — THE ONE IDEA",
+            ReadCanon(repo, "COLD-START.md", "## The one idea"),
+            "COLD-START.md not found on disk or embedded.");
+
         string claudePath = ResolveClaudePath(repo);
 
-        // LAWS — the invariants (the un-analyzed ones); the analyzed ones live in the gate.
+        // LAWS — the invariants. The umbrella CLAUDE.md when present; else the embedded CONTRACT canon, so a
+        // clone (where the out-of-repo CLAUDE.md is absent) still gets the laws. The analyzed ones live in the gate.
         WriteSection("LAWS — THE INVARIANTS",
-            ReadSection(claudePath, "**The invariants", "## The locked invariants"),
-            "CLAUDE.md invariants not found — run from the repo or pass --path.");
+            ReadSection(claudePath, "**The invariants", "## The locked invariants")
+                ?? ReadCanon(repo, "CONTRACT.md", "## The 10 invariants"),
+            "CLAUDE.md / CONTRACT.md invariants not found.");
         Console.WriteLine("  Analyzer-enforced laws: `ss check --list` (the gate; fail-closed on any new violation).");
         Console.WriteLine();
 
-        // SETTLED — locked decisions, so the session does not re-litigate.
+        // SETTLED — locked decisions, so the session does not re-litigate. CLAUDE.md, else the CONTRACT standing rules.
         WriteSection("SETTLED — DO NOT RE-LITIGATE",
-            ReadSection(claudePath, "**Already-decided", "## How we work now"),
-            "CLAUDE.md locked decisions not found — run from the repo or pass --path.");
+            ReadSection(claudePath, "**Already-decided", "## How we work now")
+                ?? ReadCanon(repo, "CONTRACT.md", "## Standing rules"),
+            "CLAUDE.md / CONTRACT.md locked decisions not found.");
 
-        // CONVENTIONS — how work is done here.
+        // CONVENTIONS — how work is done here. CLAUDE.md, else the COLD-START how-to-work (canon).
         WriteSection("CONVENTIONS",
-            ReadSection(claudePath, "## How you work here", "## Conventions"),
-            "CLAUDE.md conventions not found — run from the repo or pass --path.");
+            ReadSection(claudePath, "## How you work here", "## Conventions")
+                ?? ReadCanon(repo, "COLD-START.md", "## Who you're working with"),
+            "CLAUDE.md / COLD-START.md conventions not found.");
 
         // STATE / DIRECTION — the ledgers (written BY the binary; the live where-we-are and what's-next).
         WriteSection("STATE — THE GATE",
@@ -64,7 +69,52 @@ internal static class Onboard
         // CONTRACT — delegate to contextualize (one truth; no duplicated description).
         Console.WriteLine("CONTRACT — components · DAG · verbs (live, from the binary):");
         Console.WriteLine(new string('-', 78));
-        return Contextualize.Run(Array.Empty<string>());
+        int rc = Contextualize.Run(Array.Empty<string>());
+
+        // In Memoriam — the solemn advisory, moved to the FOOT at Scott's direction so it closes the brief.
+        // A locked invariant (SS023); the one source of truth is Subsystem.Cm.Dedication.InMemoriam, so it can
+        // never drift or be abridged out — repositioned only, never shortened.
+        Console.WriteLine();
+        Console.WriteLine(Subsystem.Cm.Dedication.InMemoriam);
+        Console.WriteLine();
+        return rc;
+    }
+
+    // A canon section (CONTRACT.md / COLD-START.md): the live copy in docs/ wins; else the copy embedded in the
+    // binary, so onboard projects doctrine even on a clone where docs/ is gitignored and absent (the INC131 gap).
+    private static string? ReadCanon(string repo, string file, string header)
+    {
+        var disk = ReadSection(Path.Combine(repo, "docs", file), header);
+        if (!string.IsNullOrWhiteSpace(disk)) return disk;
+        return SectionOf(EmbeddedDoc(file), header);
+    }
+
+    private static string? EmbeddedDoc(string file)
+    {
+        var asm = typeof(Onboard).Assembly;
+        var res = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(file, StringComparison.OrdinalIgnoreCase));
+        if (res == null) return null;
+        using var s = asm.GetManifestResourceStream(res);
+        if (s == null) return null;
+        using var r = new StreamReader(s);
+        return r.ReadToEnd();
+    }
+
+    // ReadSection over an in-memory string (the embedded copy) — mirrors the on-disk ReadSection.
+    private static string? SectionOf(string? text, string header)
+    {
+        if (string.IsNullOrEmpty(text)) return null;
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        int start = Array.FindIndex(lines, l => l.TrimStart().StartsWith(header, StringComparison.OrdinalIgnoreCase) ||
+                                                l.Contains(header, StringComparison.OrdinalIgnoreCase));
+        if (start < 0) return null;
+        var body = new System.Text.StringBuilder();
+        for (int i = start; i < lines.Length; i++)
+        {
+            if (i > start && (lines[i].StartsWith("## ") || lines[i].StartsWith("# "))) break;
+            body.AppendLine(lines[i]);
+        }
+        return body.ToString();
     }
 
     private static void WriteSection(string title, string? body, string missing)

@@ -130,6 +130,10 @@
     <EmbeddedResource Include="app.ico" Condition="Exists('app.ico')"><LogicalName>app.ico</LogicalName></EmbeddedResource>
     <!-- Embed the git-versioned request backlog -->
     <EmbeddedResource Include="..\Cm\requests.json" Condition="Exists('..\Cm\requests.json')"><LogicalName>requests.json</LogicalName></EmbeddedResource>
+    <!-- Embed the PII-clean canon (CONTRACT + COLD-START) so `ss onboard` projects doctrine even on a clone
+         where docs/ is gitignored and absent. NOT loose markdown in the repo — the binary carries it. -->
+    <EmbeddedResource Include="..\..\..\docs\CONTRACT.md" Condition="Exists('..\..\..\docs\CONTRACT.md')"><LogicalName>CONTRACT.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\docs\COLD-START.md" Condition="Exists('..\..\..\docs\COLD-START.md')"><LogicalName>COLD-START.md</LogicalName></EmbeddedResource>
     <!-- Embed public reference memories and the sacrosanct dedication (no user/feedback/project PII) -->
     <EmbeddedResource Include="..\..\..\Registry\Reference\**\*.md" Condition="Exists('..\..\..\Registry\Reference')">
       <LogicalName>Registry/Reference/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>

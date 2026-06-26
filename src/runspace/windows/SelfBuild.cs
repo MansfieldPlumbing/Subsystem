@@ -267,7 +267,7 @@ internal static class SelfBuild
         // The three manifest resources the original carries (LogicalName == the name). Pull them from THIS
         // running assembly so they are always present and exact — no dependency on a dump file being on disk.
         var resources = new List<ResourceDescription>();
-        foreach (var name in new[] { "SystemCatalog.json", "ss-source.dump", "app.ico", "requests.json" })
+        foreach (var name in new[] { "SystemCatalog.json", "ss-source.dump", "app.ico", "requests.json", "CONTRACT.md", "COLD-START.md" })
         {
             // ss-source.dump is REGENERATED from the tree we are compiling — never copied from our own
             // resource or read off disk (the on-disk dump is stale by construction). This is the byte that
@@ -280,6 +280,10 @@ internal static class SelfBuild
                 name.Equals("ss-source.dump",     StringComparison.OrdinalIgnoreCase) ? GenerateSourceDump(sourceRoot) :
                 name.Equals("SystemCatalog.json", StringComparison.OrdinalIgnoreCase) ? (DiskResource(sourceRoot, name) ?? SelfResource(name)) :
                 name.Equals("requests.json",      StringComparison.OrdinalIgnoreCase) ? (DiskResource(sourceRoot, name) ?? SelfResource(name)) :
+                // The canon docs track the live doctrine in docs/ (disk wins); SelfResource carries them forward
+                // across a clone rebuild where docs/ is gitignored and absent.
+                name.Equals("CONTRACT.md",        StringComparison.OrdinalIgnoreCase) ? (DiskResource(sourceRoot, name) ?? SelfResource(name)) :
+                name.Equals("COLD-START.md",      StringComparison.OrdinalIgnoreCase) ? (DiskResource(sourceRoot, name) ?? SelfResource(name)) :
                 (SelfResource(name) ?? DiskResource(sourceRoot, name));
             if (data != null)
             {
