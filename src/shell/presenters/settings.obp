@@ -134,11 +134,6 @@ icon=Info
 target=Settings.About
 parent=Settings.Root
 
-[Settings.About.Memorial]
-type=Surface
-title=This project is devoted to the loving memory of Billie Dean Mansfield — 1945–2026.
-parent=Settings.About
-
 [Settings.Personalization]
 type=View
 title=Personalization
@@ -352,6 +347,13 @@ label=WebNN probe
 caption=Probe the WebView's WebNN / NPU surface
 icon=Cpu
 open=webnn
+parent=Settings.About
+
+; In Memoriam — enshrined at the FOOT of About (Scott's direction): declared last so it is the last child
+; of Settings.About and renders at the bottom. Sacrosanct; the wording mirrors Subsystem.Cm.Dedication.InMemoriam.
+[Settings.About.Memorial]
+type=Surface
+title=This project is devoted to the loving memory of Billie Dean Mansfield — 1945–2026.
 parent=Settings.About
 `;
 
