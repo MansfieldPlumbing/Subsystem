@@ -95,7 +95,7 @@ static class Runner
             new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(
-            new SS020ModelPromptHardcodeAnalyzer(), new SS021StreisandAnalyzer());
+            new SS020ModelPromptHardcodeAnalyzer(), new SS021AmbientHostPathAnalyzer());
         var diags = await comp.WithAnalyzers(analyzers).GetAnalyzerDiagnosticsAsync();
         return diags.Where(d => d.Id.StartsWith("SS")).ToList();
     }

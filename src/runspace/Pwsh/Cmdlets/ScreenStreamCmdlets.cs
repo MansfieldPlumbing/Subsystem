@@ -6,6 +6,9 @@ using System.Management.Automation;
 using Android.Hardware.Display;
 using Android.Media;
 using Android.Views;
+// 'Stream' is ambiguous between System.IO.Stream and Android.Media.Stream once Android.Media is imported.
+// Every Stream in this file is a System.IO pipe stream (ADB stdin/stdout) — alias to disambiguate the file.
+using Stream = System.IO.Stream;
 
 namespace Subsystem.Pwsh.Cmdlets;
 

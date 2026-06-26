@@ -61,12 +61,13 @@
     <!-- FORCE the compiler to use your safe dummy libraries (now at $(SsLibs), outside src) -->
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libpsl-native.so" />
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libpsl-android.so" />
-    <!-- TEMPORARILY bundled: the monolithic LiteRT-LM C-API prebuilt (Apache-2.0, flutter_gemma) for the
-         C-API LiteRtRuntime proof of life (~38MB). The dynamic-fetch path replaces this bundling later. -->
+    <!-- CUT 2026-06-24: off the official LiteRT-LM/flutter_gemma package entirely. On-device inference
+         moves to the home-rolled, ORT-free managed OnnxRuntime leaf (dp-onnx / Rb GraphRuntime) — zero
+         native deps. The LiteRtNative.cs binding still compiles; it just has no .so to load, and the
+         LLM path faults gracefully via RbFault until the managed leaf lands. Restore these two lines if
+         the LiteRT C-API path ever returns.
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libLiteRtLm.so" />
-    <!-- libLiteRtLm.so's only non-system DT_NEEDED (the rest are on-device system libs; GPU/QNN are
-         dlopen'd, soft). Bundle this for the CPU path; accelerators come later for the GPU/NPU spike. -->
-    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libGemmaModelConstraintProvider.so" />
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libGemmaModelConstraintProvider.so" /> -->
   </ItemGroup>
   <ItemGroup Condition="'$(SsX64)' == 'true'">
     <!-- x86_64 libpsl stubs for Cuttlefish / x86_64 emulator (ABI inferred from the path). -->
