@@ -339,8 +339,48 @@ static int SelfTest()
     return max < 1e-5 ? 0 : 1;
 }
 
+// LITERTLM container probe: list the sections, then for each TFLiteModel section enumerate the tflite
+// operator set and map it onto dp-onnx kernels (the coverage receipt the .onnx `probe` prints for ONNX).
+static int ProbeLiteRtLm(string path)
+{
+    var secs = LiteRtLm.ReadSections(path);
+    Console.WriteLine(path);
+    Console.WriteLine($"LITERTLM container: {secs.Count} sections");
+    for (int i = 0; i < secs.Count; i++)
+    {
+        var s = secs[i];
+        Console.WriteLine($"  [{i,2}] {LiteRtLm.TypeName(s.DataType),-18} {(s.End - s.Begin) / 1e6,9:F1} MB   [{s.Begin}..{s.End})");
+    }
+    for (int i = 0; i < secs.Count; i++)
+    {
+        var s = secs[i];
+        if (s.DataType != 3) continue;   // TFLiteModel
+        Console.WriteLine($"\n-- [{i}] TFLiteModel --");
+        try { ProbeTfliteBytes(LiteRtLm.ReadSectionBytes(path, s), $"[{i}]"); }
+        catch (Exception ex) { Console.WriteLine($"  parse failed: {ex.GetType().Name} {ex.Message}"); }
+    }
+    return 0;
+}
+
+static void ProbeTfliteBytes(byte[] tfl, string label)
+{
+    var (hist, subgraphs, tensors, ops) = Tflite.OpHistogram(tfl);
+    int distinct = hist.Count;
+    int impl = hist.Keys.Count(k => { var o = Tflite.MapToOnnx(k); return o != null && Interp.Implemented.Contains(o); });
+    Console.WriteLine($"  {label}  {tfl.Length / 1e6:F1} MB  subgraphs={subgraphs} tensors={tensors} ops={ops} distinct={distinct}  mapped-types={impl}/{distinct}");
+    foreach (var kv in hist.OrderByDescending(k => k.Value))
+    {
+        var o = Tflite.MapToOnnx(kv.Key);
+        bool ok = o != null && Interp.Implemented.Contains(o);
+        Console.WriteLine($"    {kv.Value,5}  {kv.Key,-24} {(o == null ? "—" : "-> " + o),-18} {(ok ? "" : "MISSING")}");
+    }
+}
+
 static int Probe(string path, bool stopOnMissing = true)
 {
+    var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+    if (ext == ".litertlm") return ProbeLiteRtLm(path);
+    if (ext == ".tflite") { ProbeTfliteBytes(System.IO.File.ReadAllBytes(path), System.IO.Path.GetFileName(path)); return 0; }
     var model = ModelProto.Parser.ParseFrom(File.ReadAllBytes(path));
     var g = model.Graph;
     // op histogram
