@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Onnx: the ONNX schema as hand-rolled .NET POCOs + a minimal protobuf reader/writer
-       (OnnxWire.cs). No Google.Protobuf, no Grpc.Tools, no codegen — so dp-onnx folds into the
+       (OnnxProto.cs). No Google.Protobuf, no Grpc.Tools, no codegen — so dp-onnx folds into the
        in-proc Roslyn build (ss build self) with no NuGet dep (CRQ143). net11 = its only consumer
        (the dp-onnx interpreter). onnx.proto kept as the schema reference, not compiled. -->
   <PropertyGroup>

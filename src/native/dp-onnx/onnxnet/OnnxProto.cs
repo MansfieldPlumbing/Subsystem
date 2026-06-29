@@ -1,4 +1,4 @@
-// OnnxWire.cs — home-rolled ONNX protobuf (read + write) for the dp-onnx subset.
+// OnnxProto.cs — home-rolled ONNX protobuf (read + write) for the dp-onnx subset.
 //
 // Replaces Google.Protobuf + Grpc.Tools so dp-onnx folds into the in-proc Roslyn build
 // (`ss build self`) with no codegen step and no NuGet dependency — own the artifact (CRQ143).
@@ -150,7 +150,7 @@ internal sealed class ProtoWriter
 }
 
 // Helpers for reading a packed-OR-unpacked repeated scalar field.
-internal static class WireRepeat
+internal static class ProtoRepeat
 {
     public static void ReadPackedOrSingleVarint(ref ProtoReader r, int wire, List<long> dst)
     {
@@ -327,8 +327,8 @@ public sealed class AttributeProto
                 case 4:  a.S = new ByteString(r.ReadBytes()); break;
                 case 5:  a.T = TensorProto.ParseSpan(r.ReadLenDelimited()); break;
                 case 6:  a.G = GraphProto.ParseSpan(r.ReadLenDelimited()); break;
-                case 7:  WireRepeat.ReadPackedOrSingleFloat(ref r, w, a.Floats); break;
-                case 8:  WireRepeat.ReadPackedOrSingleVarint(ref r, w, a.Ints); break;
+                case 7:  ProtoRepeat.ReadPackedOrSingleFloat(ref r, w, a.Floats); break;
+                case 8:  ProtoRepeat.ReadPackedOrSingleVarint(ref r, w, a.Ints); break;
                 case 9:  a.Strings.Add(new ByteString(r.ReadBytes())); break;
                 case 10: a.Tensors.Add(TensorProto.ParseSpan(r.ReadLenDelimited())); break;
                 case 20: a.Type = (Types.AttributeType)(int)r.ReadVarint(); break;
@@ -376,15 +376,15 @@ public sealed class TensorProto
         {
             switch (f)
             {
-                case 1:  WireRepeat.ReadPackedOrSingleVarint(ref r, w, t.Dims); break;
+                case 1:  ProtoRepeat.ReadPackedOrSingleVarint(ref r, w, t.Dims); break;
                 case 2:  t.DataType = (int)r.ReadVarint(); break;
-                case 4:  WireRepeat.ReadPackedOrSingleFloat(ref r, w, t.FloatData); break;
-                case 5:  WireRepeat.ReadPackedOrSingleVarintInt(ref r, w, t.Int32Data); break;
+                case 4:  ProtoRepeat.ReadPackedOrSingleFloat(ref r, w, t.FloatData); break;
+                case 5:  ProtoRepeat.ReadPackedOrSingleVarintInt(ref r, w, t.Int32Data); break;
                 case 6:  t.StringData.Add(new ByteString(r.ReadBytes())); break;
-                case 7:  WireRepeat.ReadPackedOrSingleVarint(ref r, w, t.Int64Data); break;
+                case 7:  ProtoRepeat.ReadPackedOrSingleVarint(ref r, w, t.Int64Data); break;
                 case 8:  t.Name = r.ReadString(); break;
                 case 9:  t.RawData = new ByteString(r.ReadBytes()); break;
-                case 10: WireRepeat.ReadPackedOrSingleDouble(ref r, w, t.DoubleData); break;
+                case 10: ProtoRepeat.ReadPackedOrSingleDouble(ref r, w, t.DoubleData); break;
                 case 13: t.ExternalData.Add(StringStringEntryProto.ParseSpan(r.ReadLenDelimited())); break;
                 case 14: t.DataLocation = (int)r.ReadVarint(); break;
                 default: r.Skip(w); break;
