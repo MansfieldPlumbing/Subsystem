@@ -13,8 +13,9 @@ namespace Subsystem.Analyzers
     /// mechanism to share a pointer — the thing the system never has (CONTRACT invariant 2; the isolation
     /// discipline that lets owners be protection domains). Default-deny: we don't do it, so we forbid the
     /// mechanism. Generalizes SS008 (cmdlets) to the whole non-kernel surface. Two exemptions only: the
-    /// FFI edge (extern / [DllImport] / [LibraryImport]) is the one sanctioned raw-pointer surface, and
-    /// the kernel (Subsystem.Vom) owns native memory.
+    /// FFI edge — caller (extern / [DllImport] / [LibraryImport]) AND callee ([UnmanagedCallersOnly], a
+    /// native callback that must return the C-ABI value, e.g. a Win32 HANDLE) — is the one sanctioned
+    /// raw-pointer surface, and the kernel (Subsystem.Vom) owns native memory.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class SS026RawPointerBoundaryAnalyzer : DiagnosticAnalyzer
@@ -45,7 +46,9 @@ namespace Subsystem.Analyzers
             if (sym.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
                 return;
 
-            // The FFI edge is the one sanctioned raw-pointer surface.
+            // The FFI edge is the one sanctioned raw-pointer surface — caller (extern / [DllImport] /
+            // [LibraryImport]) and callee ([UnmanagedCallersOnly]: a native callback bound to a
+            // delegate* unmanaged, which must return the C-ABI value such as a Win32 HANDLE).
             if (sym.IsExtern || HasInteropAttribute(sym)) return;
 
             // The kernel owns native memory — exempt.
@@ -68,6 +71,6 @@ namespace Subsystem.Analyzers
         }
 
         private static bool HasInteropAttribute(IMethodSymbol sym) =>
-            sym.GetAttributes().Any(a => a.AttributeClass?.Name is "DllImportAttribute" or "LibraryImportAttribute");
+            sym.GetAttributes().Any(a => a.AttributeClass?.Name is "DllImportAttribute" or "LibraryImportAttribute" or "UnmanagedCallersOnlyAttribute");
     }
 }

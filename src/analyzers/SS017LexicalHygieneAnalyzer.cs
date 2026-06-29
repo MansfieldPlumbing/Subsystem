@@ -4,17 +4,19 @@ using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Subsystem.Analyzers
 {
     /// <summary>
     /// SS017 — lexical hygiene (the anti-slop dictionary), SCOPED so it is not a string scraper:
-    ///   (a) banned.alwaysFlag — anthropomorphic / metaphor words refused in IDENTIFIERS (a type/member
-    ///       named Brain/Soul/Ouroboros is an ontology error: name the mechanism, never the metaphor —
-    ///       CONTRACT.md §3). Read from the symbol-name tokens, NOT from comments or string literals: a
-    ///       comment may legitimately name the very concept it is telling you not to encode, and prose is
-    ///       not API surface. Scope to names.
+    ///   (a) banned.alwaysFlag — anthropomorphic / metaphor words refused in IDENTIFIERS WE DECLARE (a
+    ///       type/member named Brain/Soul/Ouroboros is an ontology error: name the mechanism, never the
+    ///       metaphor — CONTRACT.md §3). Read from the DECLARATION-name tokens, NOT from comments, string
+    ///       literals, or REFERENCES: a comment may legitimately name the concept it tells you not to
+    ///       encode, and a reference to a foreign BCL/SDK type (BadImageFormatException) is the seam, not
+    ///       our naming (mirrors SS025). Scope to the names we author.
     ///   (b) banned.commentPatterns — casual / inflammatory comment tells (lol, hacky, blazingly, …). These
     ///       ARE a comment smell, so they stay scoped to comments.
     /// Census-pending ratchet: existing hits ride SS-BASELINE.txt; NEW slop bleeds red at the gate.
@@ -82,6 +84,9 @@ namespace Subsystem.Analyzers
                 foreach (var token in root.DescendantTokens())
                 {
                     if (!token.IsKind(SyntaxKind.IdentifierToken)) continue;
+                    // Only the names WE declare — never a reference to a foreign type (e.g. a catch of
+                    // System.BadImageFormatException is the seam, not our naming). Mirrors SS025's symbol scope.
+                    if (!IsDeclarationName(token)) continue;
                     foreach (var part in SystemCatalogFile.Tokens(token.Text))
                         if (cat.AlwaysFlag.Contains(part))
                         {
@@ -92,5 +97,24 @@ namespace Subsystem.Analyzers
                 }
             }
         }
+
+        // The token is the NAME being declared (type/member/parameter/variable/type-param/foreach/local-fn) —
+        // not a reference. A reference to a foreign type is the seam (the SS025 discipline), never our naming.
+        private static bool IsDeclarationName(SyntaxToken token) => token.Parent switch
+        {
+            BaseTypeDeclarationSyntax t        => t.Identifier == token,   // class/struct/interface/enum/record
+            DelegateDeclarationSyntax d        => d.Identifier == token,
+            MethodDeclarationSyntax m          => m.Identifier == token,
+            PropertyDeclarationSyntax p        => p.Identifier == token,
+            EventDeclarationSyntax e           => e.Identifier == token,
+            EnumMemberDeclarationSyntax em     => em.Identifier == token,
+            VariableDeclaratorSyntax v         => v.Identifier == token,   // fields / locals / consts
+            ParameterSyntax pa                 => pa.Identifier == token,
+            TypeParameterSyntax tp             => tp.Identifier == token,
+            ForEachStatementSyntax fe          => fe.Identifier == token,
+            SingleVariableDesignationSyntax sv => sv.Identifier == token,
+            LocalFunctionStatementSyntax lf    => lf.Identifier == token,
+            _                                  => false,
+        };
     }
 }
