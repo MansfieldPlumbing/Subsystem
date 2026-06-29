@@ -63,6 +63,14 @@
          floor), GlyphAtlas (MSDF rasterizer), CellShell (multi-session pwsh), Tui (namespace view), Repl
          (the flip). One module compiled into BOTH heads; only the presenter branches per head. -->
     <Compile Include="..\..\shell\cell\*.cs" LinkBase="shell\cell" />
+    <!-- The dp-onnx inference engine, folded in-proc (CRQ143 P2): the home-rolled ONNX reader (OnnxProto),
+         the interpreter (Interp), and the D3D12/Vulkan GPU seams — all DpOnnx namespace, library code.
+         The CLI entry (onnx-interp/Program.cs) is NOT linked (its top-level Main would collide, CS0017).
+         Lets ss run inference resident — no dp-onnx.exe child process. Same set as the SelfBuild roots. -->
+    <Compile Include="..\..\native\dp-onnx\onnxnet\OnnxProto.cs" LinkBase="dp-onnx" />
+    <Compile Include="..\..\native\dp-onnx\onnx-interp\Interp.cs" LinkBase="dp-onnx" />
+    <Compile Include="..\..\native\dp-onnx\onnx-interp\GpuD3D12.cs" LinkBase="dp-onnx" />
+    <Compile Include="..\..\native\dp-onnx\onnx-interp\GpuVulkan.cs" LinkBase="dp-onnx" />
   </ItemGroup>
 
   <!-- The vendored DirectPort D3D12 binding (src/native/directport, built by its build.ps1). Copied

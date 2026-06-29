@@ -231,7 +231,12 @@ internal static class SelfBuild
                             // the portable ADB core wired onto the Windows head (#75) — the IAdbTransport seam +
                             // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
                             // lives in windows/ (already covered by the windows/ root above).
-                            "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs" };
+                            "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs",
+                            // dp-onnx engine folded in-proc (CRQ143 P2): the ONNX reader + interpreter + GPU seams as
+                            // library code. The CLI entry (onnx-interp/Program.cs) is EXCLUDED — its top-level Main would
+                            // collide with the head (CS0017), like launcher/. The .db/Tts callers come in F3.
+                            "src/native/dp-onnx/onnxnet/OnnxProto.cs", "src/native/dp-onnx/onnx-interp/Interp.cs",
+                            "src/native/dp-onnx/onnx-interp/GpuD3D12.cs", "src/native/dp-onnx/onnx-interp/GpuVulkan.cs" };
         // launcher/ is a SEPARATE exe with its own Main — folding it into this ConsoleApplication
         // compile collides with windows/Program.cs (CS0017). Exclude it; it is superseded by the
         // VOM slot-loader.
