@@ -64,6 +64,28 @@ internal static class Shim
                 ps.AddCommand(args[fileIdx + 1], useLocalScope: false);
                 for (int i = fileIdx + 2; i < args.Length; i++) ps.AddArgument(args[i]);
             }
+            else if (args.Length > 0 && ProseVerbs.Contains(args[0]) && !HasPwshOperator(args))
+            {
+                // INC105: bind the request-filing cmdlets STRUCTURALLY (no string round-trip), so a prose
+                // Summary/Disposition/Body with spaces, '(' or ';' survives. Each argv element binds as-is:
+                // a -Flag is a named parameter consuming its following value(s); a bare token is positional.
+                ps.AddCommand(args[0]);
+                for (int i = 1; i < args.Length; )
+                {
+                    var a = args[i];
+                    if (a.Length > 0 && a[0] == '-')
+                    {
+                        var name = a.Substring(1);
+                        var vals = new System.Collections.Generic.List<string>();
+                        i++;
+                        while (i < args.Length && !(args[i].Length > 0 && args[i][0] == '-')) { vals.Add(args[i]); i++; }
+                        if (vals.Count == 0)      ps.AddParameter(name);
+                        else if (vals.Count == 1) ps.AddParameter(name, vals[0]);
+                        else                      ps.AddParameter(name, vals.ToArray());
+                    }
+                    else { ps.AddArgument(a); i++; }
+                }
+            }
             else
             {
                 var script = ResolveScript(args);
@@ -160,6 +182,23 @@ internal static class Shim
                 return File.ReadAllText(args[i + 1]);
         }
         return string.Join(' ', args);
+    }
+
+    // The request-filing cmdlets whose value args are prose; INC105 binds these STRUCTURALLY in Run
+    // (AddCommand + per-arg AddParameter/AddArgument) so a Summary/Body with spaces, '(' or ';' survives
+    // intact - no string join, no re-parse, no quoting bug. These cmdlets are never piped.
+    static readonly System.Collections.Generic.HashSet<string> ProseVerbs =
+        new(StringComparer.OrdinalIgnoreCase)
+        { "Remedy-IncidentRequest", "Remedy-ChangeRequest", "Add-EosLog" };
+
+    // True if any arg is a STANDALONE pwsh operator token (a pipe/separator/redirect the shell passed as its
+    // own argv element) - structural binding can't represent that, so fall back to AddScript. A ';' INSIDE a
+    // prose token (e.g. "foo; bar") is not standalone, so prose is unaffected.
+    static bool HasPwshOperator(string[] args)
+    {
+        for (int i = 1; i < args.Length; i++)
+            switch (args[i]) { case "|": case ";": case "&": case "&&": case "||": case ">": case ">>": case "<": return true; }
+        return false;
     }
 
     // ---- the opinionated-shell refusal gate ----
