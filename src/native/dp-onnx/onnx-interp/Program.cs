@@ -30,6 +30,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "gpu-test" ? GpuTest(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
      : args[0] == "db" ? ToDb(args)
+     : args[0] == "db-stats" ? DbStats(args)
      : Usage();
 
 // surgery: expose EVERY node output as a graph output (no type -> ORT infers) for a full divergence map
@@ -151,6 +152,24 @@ static string ShapeStr(ValueInfoProto vi)
     var dim = vi.Type?.TensorType?.Shape?.Dim;
     if (dim == null) return "";
     return string.Join(",", dim.Select(d => !string.IsNullOrEmpty(d.DimParam) ? d.DimParam : d.DimValue.ToString()));
+}
+
+// db-stats: op triage straight off the .db — the op histogram + the backend-unfriendly ops, as queries.
+// (analyze_onnx.py / trace_node.py collapse to SELECTs once the model is rows; per-op routing is node.backend.)
+static int DbStats(string[] args)
+{
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx db-stats <model.db>"); return 1; }
+    using var c = new SqliteConnection($"Data Source={args[1]}");
+    c.Open();
+    long Scalar(string sql) { using var cmd = c.CreateCommand(); cmd.CommandText = sql; return Convert.ToInt64(cmd.ExecuteScalar() ?? (object)0L); }
+    void Each(string sql, Action<string, long> row) { using var cmd = c.CreateCommand(); cmd.CommandText = sql; using var r = cmd.ExecuteReader(); while (r.Read()) row(r.GetString(0), r.GetInt64(1)); }
+    Console.WriteLine($"nodes={Scalar("SELECT COUNT(*) FROM node")}  distinct ops={Scalar("SELECT COUNT(DISTINCT op_type) FROM node")}  tensors={Scalar("SELECT COUNT(*) FROM tensor")}");
+    Console.WriteLine("-- op histogram --");
+    Each("SELECT op_type, COUNT(*) c FROM node GROUP BY op_type ORDER BY c DESC", (op, n) => Console.WriteLine($"  {op,-24} {n}"));
+    const string Risky = "'STFT','DFT','RFFT','IRFFT','FFT','Mel','MelWeightMatrix','ScatterND','GridSample','NonZero','Loop','If','Scan','Pow'";
+    Console.WriteLine($"-- backend-risky (HTP can't delegate / VTCM): {Scalar($"SELECT COUNT(*) FROM node WHERE op_type IN ({Risky})")} node(s) --");
+    Each($"SELECT op_type, COUNT(*) c FROM node WHERE op_type IN ({Risky}) GROUP BY op_type ORDER BY c DESC", (op, n) => Console.WriteLine($"  RISKY {op,-18} {n}"));
+    return 0;
 }
 
 static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx> | run <model.onnx> [--inputs <dir>] [--out <wav>] | db <model.onnx> <out.db> | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
