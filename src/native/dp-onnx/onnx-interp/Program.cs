@@ -241,6 +241,7 @@ static int SelfTest()
 static int Probe(string path, bool stopOnMissing = true)
 {
     var model = ModelProto.Parser.ParseFrom(File.ReadAllBytes(path));
+    Interp.ExternalDataDir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";   // resolve external_data sidecars
     var g = model.Graph;
     // op histogram
     var hist = new Dictionary<string, int>();
@@ -298,6 +299,7 @@ static int Run(string[] args)
     if (inputsDir == null) return Probe(path, stopOnMissing: false);   // legacy zero-feed
 
     var model = ModelProto.Parser.ParseFrom(File.ReadAllBytes(path));
+    Interp.ExternalDataDir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";   // resolve external_data sidecars
     var g = model.Graph;
     var feed = new Dictionary<string, Tensor>();
     foreach (var vi in g.Input)
@@ -761,12 +763,26 @@ public class Tensor
     public int[] Shape;
     public float[] Fp;     // float payload (null if int)
     public long[] Ip;      // int64 payload (null if float)
+    public ExtData Ext;    // file-backed weight too big to hold (gemma-4's 4.48 GB PLE); Gather reads rows on demand
     public bool IsInt => Ip != null;
+    public bool IsLazy => Ext != null;
     public long Count { get { long n = 1; foreach (var d in Shape) n *= d; return n; } }
     public static Tensor F(float[] d, params int[] s) => new() { Fp = d, Shape = s };
     public static Tensor I(long[] d, params int[] s) => new() { Ip = d, Shape = s };
-    public float[] AsF() => Fp ?? Array.ConvertAll(Ip, x => (float)x);
+    public float[] AsF() => Fp ?? (Ip != null ? Array.ConvertAll(Ip, x => (float)x)
+        : throw new InvalidOperationException("lazy external tensor exceeds the 2 GB float[] cap — gather its rows, never materialize"));
     public long[] AsI() => Ip ?? Array.ConvertAll(Fp, x => (long)x);
+}
+
+// A weight whose bytes live in an external sidecar file and are too large to materialize — gemma-4's
+// per-layer-embeddings table is 2.35 B elements (> int.MaxValue, > 2 GB). The VOM thesis applied to a
+// weight: authority is the HANDLE (path + offset + dtype); the table never fully crosses — Gather reads
+// the requested rows from disk on demand, upcasting per row. The un-holdable weight forces the pattern.
+public sealed class ExtData
+{
+    public string Path;    // the external_data sidecar file
+    public long Offset;    // byte offset of this tensor's data within the file
+    public int DataType;   // onnx dtype: 1=fp32, 10=fp16, 16=bf16
 }
 
 public class Interp
@@ -1154,6 +1170,7 @@ public class Interp
     static Tensor Gather(Tensor data, Tensor indices, int axis)
     {
         int r = data.Shape.Length; if (axis < 0) axis += r;
+        if (data.Ext != null) return GatherExternal(data, indices, axis);   // the un-holdable PLE: read rows from disk
         long outer = 1; for (int k = 0; k < axis; k++) outer *= data.Shape[k];
         long axisLen = data.Shape[axis];
         long inner = 1; for (int k = axis + 1; k < r; k++) inner *= data.Shape[k];
@@ -1170,6 +1187,41 @@ public class Interp
             { long ix = ix0 < 0 ? ix0 + axisLen : ix0; long baseI = (o * axisLen + ix) * inner;
               if (fInt) Array.Copy(dl, baseI, ol, w, inner); else Array.Copy(df, baseI, of, w, inner); w += inner; }
         return fInt ? Tensor.I(ol, outShape.ToArray()) : Tensor.F(of, outShape.ToArray());
+    }
+
+    // Gather rows of a lazy file-backed weight (the gemma-4 PLE) WITHOUT materializing it: for each index,
+    // seek to its row in the sidecar and upcast that row (bf16/fp16/fp32 -> fp32). The table never crosses;
+    // only the gathered rows do — the VOM gather-by-handle, at the granularity of a weight.
+    static Tensor GatherExternal(Tensor data, Tensor indices, int axis)
+    {
+        int r = data.Shape.Length;
+        long outer = 1; for (int k = 0; k < axis; k++) outer *= data.Shape[k];
+        long axisLen = data.Shape[axis];
+        long inner = 1; for (int k = axis + 1; k < r; k++) inner *= data.Shape[k];
+        int innerI = checked((int)inner);
+        var idx = indices.AsI();
+        var outShape = new List<int>(); for (int k = 0; k < axis; k++) outShape.Add(data.Shape[k]);
+        foreach (var di in indices.Shape) outShape.Add(di);
+        for (int k = axis + 1; k < r; k++) outShape.Add(data.Shape[k]);
+        long total = outer * idx.Length * inner;
+        if (total > int.MaxValue) throw new InvalidOperationException($"external Gather output too large ({total} elements)");
+        var of = new float[total];
+        int dt = data.Ext.DataType; int elem = dt == 1 ? 4 : 2; int rowBytes = innerI * elem;
+        var row = new byte[rowBytes];
+        using var fs = new FileStream(data.Ext.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        long w = 0;
+        for (long o = 0; o < outer; o++)
+            foreach (var ix0 in idx)
+            {
+                long ix = ix0 < 0 ? ix0 + axisLen : ix0;
+                fs.Seek(data.Ext.Offset + (o * axisLen + ix) * rowBytes, SeekOrigin.Begin);
+                int got = 0; while (got < rowBytes) { int rd = fs.Read(row, got, rowBytes - got); if (rd == 0) break; got += rd; }
+                for (int j = 0; j < innerI; j++)
+                    of[w++] = dt == 1  ? BitConverter.ToSingle(row, j * 4)
+                            : dt == 16 ? Bf16ToF32(row[j * 2], row[j * 2 + 1])
+                            :            Fp16ToF32(row[j * 2], row[j * 2 + 1]);
+            }
+        return Tensor.F(of, outShape.ToArray());
     }
 
     static Tensor UnI(Tensor a, Func<long, long> f)
@@ -1848,25 +1900,82 @@ public class Interp
     static float F(NodeProto n, string name, float def) { foreach (var a in n.Attribute) if (a.Name == name) return a.F; return def; }
     static int[] Ints(NodeProto n, string name) { foreach (var a in n.Attribute) if (a.Name == name) return a.Ints.Select(v => (int)v).ToArray(); return Array.Empty<int>(); }
 
+    // Dir of the loaded .onnx — resolves external_data 'location' (relative sidecar paths). Set by the
+    // model-load entry (Probe/Run) before the first FromProto.
+    public static string ExternalDataDir = "";
+
     public static Tensor FromProto(TensorProto t)
     {
         var dims = t.Dims.Select(d => (int)d).ToArray();
         long n = 1; foreach (var d in dims) n *= d;
-        switch (t.DataType)
+
+        // External-data (ONNX external_data / data_location=EXTERNAL): the weight's bytes live in a sidecar
+        // file, not the proto. gemma-4's decomposed export stores EVERY weight this way. Resolve the sidecar
+        // and decode it exactly like RawData — EXCEPT a table that can't fit a float[] (the 4.48 GB PLE =
+        // 2.35 B elements), which becomes a lazy file-backed handle Gather reads by row (gap #2; gather-by-handle).
+        var ext = ExternalRef(t);
+        if (ext != null)
         {
-            case 1: { float[] f = t.FloatData.Count > 0 ? t.FloatData.ToArray() : Cast<float>(t.RawData.Span, (int)n); return Tensor.F(f, dims); }
-            case 11: { var raw = t.RawData.Span; var dd = Cast<double>(raw, (int)n); return Tensor.F(Array.ConvertAll(dd, x => (float)x), dims); }
-            case 7: { long[] l = t.Int64Data.Count > 0 ? t.Int64Data.ToArray() : Cast<long>(t.RawData.Span, (int)n); return Tensor.I(l, dims); }
-            case 6: { int[] i = t.Int32Data.Count > 0 ? t.Int32Data.ToArray() : Cast<int>(t.RawData.Span, (int)n); return Tensor.I(Array.ConvertAll(i, x => (long)x), dims); }
-            case 9: { var raw = t.RawData.Span; var l = new long[n]; for (int k = 0; k < n; k++) l[k] = raw[k]; return Tensor.I(l, dims); }
-            // Gemma-4 E2B gap #1 (CRQ135): half-precision initializer load. bf16 = top 16 bits of fp32;
-            // fp16 via Half. Unblocks the bf16 weights (768 MB tied embed + per-layer matrices). The
-            // 4.48 GB PLE still exceeds the float[] / 2 GB cap here — that's gap #2 (lazy region gather).
-            case 16: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = BitConverter.Int32BitsToSingle((int)((uint)(ushort)(raw[2 * k] | (raw[2 * k + 1] << 8)) << 16)); return Tensor.F(f, dims); } // BFLOAT16
-            case 10: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = (float)BitConverter.UInt16BitsToHalf((ushort)(raw[2 * k] | (raw[2 * k + 1] << 8))); return Tensor.F(f, dims); } // FLOAT16
-            default: throw new NotImplementedException($"initializer dtype {t.DataType} ({t.Name})");
+            var (path, offset, length) = ext.Value;
+            int elem = ElemSize(t.DataType, t.Name);
+            if (n > int.MaxValue || n * elem > 2_000_000_000L)
+                return new Tensor { Shape = dims, Ext = new ExtData { Path = path, Offset = offset, DataType = t.DataType } };
+            byte[] raw = ReadSlice(path, offset, length >= 0 ? length : n * elem);
+            return RawToTensor(t.DataType, raw, dims, (int)n, t.Name);
+        }
+
+        // In-proto: prefer the typed repeated fields, else the raw bytes.
+        if (t.DataType == 1 && t.FloatData.Count > 0) return Tensor.F(t.FloatData.ToArray(), dims);
+        if (t.DataType == 7 && t.Int64Data.Count > 0) return Tensor.I(t.Int64Data.ToArray(), dims);
+        if (t.DataType == 6 && t.Int32Data.Count > 0) return Tensor.I(Array.ConvertAll(t.Int32Data.ToArray(), x => (long)x), dims);
+        return RawToTensor(t.DataType, t.RawData.Span, dims, (int)n, t.Name);
+    }
+
+    // Decode a raw little-endian byte span of an ONNX dtype into a Tensor. bf16 (16) = top 16 bits of fp32;
+    // fp16 (10) via Half (gemma-4's half-precision weights, gap #1). Shared by the in-proto path and the
+    // materializable external path.
+    static Tensor RawToTensor(int dataType, ReadOnlySpan<byte> raw, int[] dims, int n, string name)
+    {
+        switch (dataType)
+        {
+            case 1:  return Tensor.F(Cast<float>(raw, n), dims);
+            case 11: { var dd = Cast<double>(raw, n); return Tensor.F(Array.ConvertAll(dd, x => (float)x), dims); }
+            case 7:  return Tensor.I(Cast<long>(raw, n), dims);
+            case 6:  { var i = Cast<int>(raw, n); return Tensor.I(Array.ConvertAll(i, x => (long)x), dims); }
+            case 9:  { var l = new long[n]; for (int k = 0; k < n; k++) l[k] = raw[k]; return Tensor.I(l, dims); }
+            case 16: { var f = new float[n]; for (int k = 0; k < n; k++) f[k] = Bf16ToF32(raw[2 * k], raw[2 * k + 1]); return Tensor.F(f, dims); } // BFLOAT16
+            case 10: { var f = new float[n]; for (int k = 0; k < n; k++) f[k] = Fp16ToF32(raw[2 * k], raw[2 * k + 1]); return Tensor.F(f, dims); } // FLOAT16
+            default: throw new NotImplementedException($"initializer dtype {dataType} ({name})");
         }
     }
+
+    static float Bf16ToF32(byte lo, byte hi) => BitConverter.Int32BitsToSingle((int)((uint)(ushort)(lo | (hi << 8)) << 16));
+    static float Fp16ToF32(byte lo, byte hi) => (float)BitConverter.UInt16BitsToHalf((ushort)(lo | (hi << 8)));
+    static int ElemSize(int dt, string name) => dt switch { 1 => 4, 11 => 8, 7 => 8, 6 => 4, 9 => 1, 16 => 2, 10 => 2, _ => throw new NotImplementedException($"dtype {dt} ({name})") };
+
+    // Resolve an external_data tensor to (sidecar path, byte offset, byte length). length<0 = to EOF.
+    static (string path, long offset, long length)? ExternalRef(TensorProto t)
+    {
+        if (t.DataLocation != TensorProto.Types.DataLocation.External) return null;
+        string loc = null; long off = 0, len = -1;
+        foreach (var e in t.ExternalData)
+            if (e.Key == "location") loc = e.Value;
+            else if (e.Key == "offset") off = long.Parse(e.Value);
+            else if (e.Key == "length") len = long.Parse(e.Value);
+        if (loc == null) return null;
+        return (Path.Combine(ExternalDataDir, loc.Replace('/', Path.DirectorySeparatorChar)), off, len);
+    }
+
+    static byte[] ReadSlice(string path, long offset, long length)
+    {
+        int len = checked((int)length);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(offset, SeekOrigin.Begin);
+        var buf = new byte[len];
+        int got = 0; while (got < len) { int r = fs.Read(buf, got, len - got); if (r == 0) break; got += r; }
+        return buf;
+    }
+
     static T[] Cast<T>(ReadOnlySpan<byte> b, int n) where T : struct
     { var o = new T[n]; MemoryMarshal.Cast<byte, T>(b).Slice(0, n).CopyTo(o); return o; }
 }
