@@ -35,6 +35,11 @@ internal static class Gateway
 {
     private const string OwnerPath = "\\Gateway";
 
+    // The tray hosts the broker IN-PROC (no separate process): the VOM-owned STA thread drives RenderFrame()
+    // from a WinForms timer — VirtuaCam's single-thread model, made disciplined. Null = not running.
+    private static BrokerHost? _broker;
+    private static System.Windows.Forms.Timer? _brokerTimer;
+
     public static int Run(string[] args)
     {
         var owner = Vom.Vom.CreateOwner(OwnerPath);
@@ -63,6 +68,7 @@ internal static class Gateway
         tray.DoubleClick += (_, _) => LaunchUi();   // double-click the icon = open the shell (windowless: no console)
 
         Application.Run(new ApplicationContext());
+        StopBroker();   // tray closing — reclaim the in-proc broker deterministically (Terminate -> ShutdownBroker)
     }
 
     // Rebuilt on every open so the window list (and any future live state) is fresh — VirtuaCam's pattern.
@@ -74,7 +80,9 @@ internal static class Gateway
 
         // Subsystem's own virtual camera (the DirectPortBroker, mounted in-proc by `ss camera`): start the
         // server in auto-discovery grid mode, then add sources — the grid composites whatever is live.
-        menu.Items.Add("Virtual camera — start server (grid)", null, (_, _) => Launch("camera --grant"));
+        // In-proc: start/stop the broker on the tray's own STA thread (no separate process) — see ToggleBroker.
+        menu.Items.Add(_broker == null ? "Virtual camera — start (in-proc grid)" : "Virtual camera — stop",
+            null, (_, _) => ToggleBroker());
 
         var sources = new ToolStripMenuItem("Add a camera source");
         var windowsItem = new ToolStripMenuItem("Capture a window");
@@ -129,6 +137,28 @@ internal static class Gateway
         }
         try { Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = true }); }
         catch (Exception ex) { Warn($"VirtuaCamProcess {args}", ex); }
+    }
+
+    // Start/stop the in-proc broker on THIS (the tray's STA) thread: the WinForms timer is the pump,
+    // RenderFrame the tick — the SAME BrokerHost `ss camera` runs, only the pump differs. Default-deny gated.
+    private static void ToggleBroker()
+    {
+        if (_broker != null) { StopBroker(); return; }
+        var host = BrokerHost.Start("VirtuaCam", grid: true, fps: 30, grant: true, out int code, out string? reason);
+        if (host == null) { Warn("virtual camera", new InvalidOperationException(reason ?? $"refused (code {code})")); return; }
+        _broker = host;
+        _brokerTimer = new System.Windows.Forms.Timer { Interval = host.PeriodMs };
+        _brokerTimer.Tick += (_, _) => _broker?.RenderFrame();   // discover -> composite -> signal, on the STA thread
+        _brokerTimer.Start();
+    }
+
+    private static void StopBroker()
+    {
+        _brokerTimer?.Stop();
+        _brokerTimer?.Dispose();
+        _brokerTimer = null;
+        _broker?.Stop();   // Terminate -> Reclaim -> ShutdownBroker
+        _broker = null;
     }
 
     private static void Warn(string what, Exception ex) =>

@@ -63,56 +63,42 @@ public static class Camera
         // --register / --unregister: drive regsvr32 on the MF client. HKLM write — needs Administrator.
         if (register || unregister) return RegisterClient(register);
 
-        string capPath = $"\\Capability\\virtualcamera\\{name}";
-        // THE GATE. Default-deny: seed-if-absent, optionally record the audited grant, then AccessCheck.
-        if (!CapabilityGate.Allow("virtualcamera", name, grant, out capPath))
-            return Denied;
-
-        // Fail fast with a clear reason if the broker DLL / its dependencies aren't present.
-        if (!VirtuaCamNative.Probe(out string probeDetail))
-        {
-            Console.Error.WriteLine("ss camera: " + probeDetail);
-            Console.Error.WriteLine("  the broker artifact lives at src/native/virtuacam/DirectPortBroker.dll and is copied beside ss.exe at build.");
-            return 1;
-        }
-
-        return Host(name, grid, fps, capPath);
+        // The gate + bring-up live in BrokerHost (shared with the gateway tray); Host just drives the pump.
+        return Host(name, grid, fps, grant);
     }
 
-    private static int Host(string name, bool grid, int fps, string capPath)
+    // ss camera's PUMP: drive the shared BrokerHost from a console while-loop (the gateway tray drives the
+    // SAME host from a WinForms timer — one broker, two pumps; the pump is the only thing that changes).
+    private static int Host(string name, bool grid, int fps, bool grant)
     {
-        Console.WriteLine($"ss camera: hosting broker '{name}'  (mode={(grid ? "auto-discovery grid" : "priority-list")}, {fps} fps)");
-        VirtuaCamNative.InitializeBroker();              // D3D11 + discovery + multiplexer + shared output
-        VirtuaCamNative.SetCompositingMode(grid);
-
-        // Register the broker as a possession-gated VOM leaf at \VirtualCamera\<name>. Reclaim is the
-        // deterministic shutdown run at refcount-zero / on Terminate — the let-it-crash kill path.
-        var owner = Vom.Vom.CreateOwner("\\VirtualCamera");
-        Vom.Vom.RegisterNative(owner, "VirtuaCamBroker", native: 0, reclaim: () =>
+        var host = BrokerHost.Start(name, grid, fps, grant, out int code, out string? reason);
+        if (host == null)
         {
-            try { VirtuaCamNative.ShutdownBroker(); }
-            catch (Exception ex) { Dg.Log("camera", "ShutdownBroker: " + ex.Message); }   // degrade + report (never vanish)
-        }, byteCount: 0, format: VomFormat.Bytes, subdir: "", name: name);
+            if (reason != null) Console.Error.WriteLine("ss camera: " + reason);
+            if (code == 1)
+                Console.Error.WriteLine("  the broker artifact lives at src/native/virtuacam/DirectPortBroker.dll and is copied beside ss.exe at build.");
+            return code;
+        }
+
+        Console.WriteLine($"ss camera: hosting broker '{name}'  (mode={(grid ? "auto-discovery grid" : "priority-list")}, {fps} fps)");
+        Console.WriteLine($"  VOM:      \\VirtualCamera\\{name}   (gated by {host.CapabilityPath})");
+        Console.WriteLine($"  MF client:{VirtuaCamNative.ClientDll}  (register once: ss camera --register, as Administrator)");
+        Console.WriteLine("  Feed it with `ss surface` (a DirectPort producer); then pick VirtuaCam in your camera app. Ctrl+C to stop.");
 
         var stop = new ManualResetEventSlim(false);
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Set(); };
 
-        Console.WriteLine($"  VOM:      \\VirtualCamera\\{name}   (gated by {capPath})");
-        Console.WriteLine($"  MF client:{VirtuaCamNative.ClientDll}  (register once: ss camera --register, as Administrator)");
-        Console.WriteLine("  Feed it with `ss surface` (a DirectPort producer); then pick VirtuaCam in your camera app. Ctrl+C to stop.");
-
-        int periodMs = Math.Max(1, 1000 / fps);
         var last = (VirtuaCamNative.BrokerState)(-1);
         while (!stop.IsSet)
         {
-            VirtuaCamNative.RenderBrokerFrame();          // discover -> composite -> signal the output fence
-            var state = VirtuaCamNative.GetBrokerState();
+            host.RenderFrame();                           // discover -> composite -> signal the output fence
+            var state = host.State;
             if (state != last) { Console.WriteLine($"  broker: {state}"); last = state; }
-            stop.Wait(periodMs);                          // wakes immediately on Ctrl+C
+            stop.Wait(host.PeriodMs);                     // wakes immediately on Ctrl+C
         }
 
         Console.WriteLine($"\nss camera: stopping — Terminate(\\VirtualCamera) reclaims the broker (ShutdownBroker)");
-        Vom.Vom.Terminate(owner);                         // cascades Reclaim -> ShutdownBroker deterministically
+        host.Stop();                                      // cascades Reclaim -> ShutdownBroker deterministically
         return 0;
     }
 

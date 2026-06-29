@@ -37,9 +37,6 @@ public static class Surface
         if (positional.Count > 2) int.TryParse(positional[2], out height);
         if (width <= 0 || height <= 0) { Console.Error.WriteLine("ss surface: width/height must be positive"); return 1; }
 
-        // Layout self-check — refuse rather than silently corrupt the broker's read if the struct ever drifts.
-        if (!VerifyManifestLayout(out string layoutErr)) { Console.Error.WriteLine("ss surface: " + layoutErr); return 1; }
-
         string capPath = "\\Capability\\Surface\\" + name;
         SeedCapabilityIfAbsent(capPath, name);
 
@@ -66,98 +63,29 @@ public static class Surface
 
     private static unsafe int Produce(string name, int width, int height, string capPath)
     {
-        if (!DirectPortNative.dp_init())
-        {
-            Console.Error.WriteLine("ss surface: dp_init failed (no D3D12 device / directport.dll not found)");
-            return 1;
-        }
-
-        long luidRaw = 0;
-        DirectPortNative.dp_get_adapter_luid(out luidRaw);
-
-        int pid = Environment.ProcessId;
-        string manifestName = $"DirectPort_Producer_Manifest_{pid}";        // session-local (no Global\)
-        string texName      = $"Global\\DirectPortTexture_{pid}";
-        string fenceName    = $"Global\\DirectPortFence_{pid}";
-
-        // CPU-mappable shared texture: BGRA, is_system_ram=true so we can write the pattern from the CPU
-        // AND the broker can OpenSharedHandleByName it (CUSTOM heap + SHARED_CROSS_ADAPTER).
-        IntPtr dp = DirectPortNative.dp_create_shared_resource(
-            (uint)width, (uint)height, (int)DirectPortNative.DpFormat.Video, false, texName, fenceName);
-        if (dp == IntPtr.Zero)
-        {
-            Console.Error.WriteLine($"ss surface: dp_create_shared_resource failed (HRESULT 0x{DirectPortNative.dp_last_hresult():X8}, adapter UMA={DirectPortNative.dp_is_uma()})");
-            DirectPortNative.dp_shutdown();
-            return 1;
-        }
-
-        // A discrete-GPU shared texture lives in VRAM and can't be CPU-mapped. Draw the pattern into a
-        // native scratch buffer and upload it each frame (dp_upload_bgra does the GPU copy + fence).
-        uint rowPitch = (uint)width * 4;
-        nuint scratchBytes = (nuint)rowPitch * (nuint)height;
-        IntPtr scratch = (IntPtr)System.Runtime.InteropServices.NativeMemory.AlignedAlloc(scratchBytes, 256);
-
-        // Publish the manifest with the SDDL PROJECTED from the capability's integrity (the cross-process
-        // form of the capability's reach — data-driven, not a literal scattered in code).
-        string sddl = SddlForIntegrity(Cm.Cm.Get(capPath)?.Integrity ?? "User");
-        var map = DirectPortNative.ManifestMap.Create(manifestName, sddl);
-        if (map == null)
-        {
-            Console.Error.WriteLine("ss surface: failed to publish manifest mapping");
-            DirectPortNative.dp_unmap_memory(dp);
-            DirectPortNative.dp_close(dp);
-            DirectPortNative.dp_shutdown();
-            return 1;
-        }
-
-        var m = map.Ptr;
-        m->FrameValue  = 0;
-        m->Width       = (uint)width;
-        m->Height      = (uint)height;
-        m->Format      = 87;                                  // DXGI_FORMAT_B8G8R8A8_UNORM
-        m->AdapterLuid = DirectPortNative.Luid.FromInt64(luidRaw);
-        DirectPortNative.WriteFixed(m->TextureName, 256, texName);
-        DirectPortNative.WriteFixed(m->FenceName, 256, fenceName);
-        m->Command     = 0;
-
-        // Register the texture as a possession-gated VOM leaf at \Surfaces\<name>. Reclaim is the
-        // deterministic close procedure run at refcount-zero / on Terminate — the let-it-crash kill.
-        var owner = Vom.Vom.CreateOwner("\\Surfaces");
-        DirectPortNative.ManifestMap mapRef = map; IntPtr dpRef = dp, scratchRef = scratch;
-        Vom.Vom.RegisterNative(owner, "DirectPortSurface", dp, reclaim: () =>
-        {
-            try { mapRef.Dispose(); } catch { }
-            try { DirectPortNative.dp_close(dpRef); } catch { }
-            try { DirectPortNative.dp_shutdown(); } catch { }
-            try { System.Runtime.InteropServices.NativeMemory.AlignedFree((void*)scratchRef); } catch { }
-        }, byteCount: (int)scratchBytes, format: VomFormat.Bytes, subdir: "", name: name);
+        var producer = DirectPortProducer.Create(name, width, height, capPath, out string? error);
+        if (producer == null) { Console.Error.WriteLine("ss surface: " + error); return 1; }
 
         // Cooperative stop on Ctrl+C (cancellable per the wedged-thread hard limit).
         var stop = new ManualResetEventSlim(false);
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Set(); };
 
-        Console.WriteLine($"ss surface: producing '{name}' {width}x{height} BGRA  (pitch {rowPitch}B, pid {pid})");
-        Console.WriteLine($"  texture: {texName}");
-        Console.WriteLine($"  fence:   {fenceName}");
-        Console.WriteLine($"  manifest:{manifestName}   adapterLuid=0x{luidRaw:X}");
+        Console.WriteLine($"ss surface: producing '{name}' {width}x{height} BGRA  (pitch {producer.RowPitch}B, pid {Environment.ProcessId})");
         Console.WriteLine($"  VOM:     \\Surfaces\\{name}   (gated by {capPath})");
         Console.WriteLine("  Open VirtuaCam -> Source -> this producer; then the Windows Camera app. Ctrl+C to stop.");
 
-        byte* p = (byte*)scratch;
+        // Draw the test pattern straight into the producer's 256-aligned scratch, then push it.
         ulong frame = 0;
-        long* fvp = (long*)&m->FrameValue;   // atomic publish target (matches the producers' InterlockedExchange64)
         while (!stop.IsSet)
         {
-            DrawTestPattern(p, rowPitch, width, height, frame);
+            DrawTestPattern((byte*)producer.Scratch, producer.RowPitch, width, height, frame);
             frame++;
-            if (!DirectPortNative.dp_upload_bgra(dp, scratch, rowPitch, (uint)width, (uint)height, frame))
-            { Console.Error.WriteLine("ss surface: dp_upload_bgra failed"); break; }   // GPU copy + shared-fence signal
-            Interlocked.Exchange(ref *fvp, (long)frame);           // release-publish the counter for dirty readers
+            if (!producer.Commit()) { Console.Error.WriteLine("ss surface: dp_upload_bgra failed"); break; }
             stop.Wait(16);                                          // ~60 fps; wakes immediately on Ctrl+C
         }
 
         Console.WriteLine($"\nss surface: stopping — Terminate(\\Surfaces) reclaims the texture/fence/manifest");
-        Vom.Vom.Terminate(owner);   // cascades Reclaim -> unmap/close/shutdown deterministically
+        producer.Stop();
         return 0;
     }
 
@@ -198,25 +126,4 @@ public static class Surface
         });
     }
 
-    // Project the capability's integrity tier to the NT security descriptor stamped on the manifest
-    // mapping (the cross-process reach). M0 baseline grants Authenticated Users so the VirtuaCam broker
-    // (same interactive user) discovers it; the seam to tighten consumers to the broker SID lives here.
-    private static string SddlForIntegrity(string integrity) => integrity switch
-    {
-        "System" => "D:P(A;;GA;;;SY)(A;;GR;;;BA)",   // SYSTEM full; Admins read
-        "Admin"  => "D:P(A;;GA;;;BA)(A;;GR;;;AU)",   // Admins full; Authenticated Users read
-        _        => "D:P(A;;GA;;;AU)",               // User/Untrusted: Authenticated Users (the SDK baseline)
-    };
-
-    private static unsafe bool VerifyManifestLayout(out string error)
-    {
-        error = "";
-        int size = sizeof(DirectPortNative.BroadcastManifest);
-        if (size != DirectPortNative.ManifestSize)
-        { error = $"BroadcastManifest size {size} != {DirectPortNative.ManifestSize} (layout drift)"; return false; }
-        long off(string f) => (long)System.Runtime.InteropServices.Marshal.OffsetOf<DirectPortNative.BroadcastManifest>(f);
-        if (off("AdapterLuid") != 20 || off("TextureName") != 28 || off("FenceName") != 540 || off("Command") != 1052)
-        { error = "BroadcastManifest field offsets drifted from the verified layout"; return false; }
-        return true;
-    }
 }

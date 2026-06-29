@@ -127,10 +127,6 @@ SS007|SubsystemApi.cs|Empty catch block — a failure must degrade AND report to
 SS007|SubsystemApi.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|SubsystemRecognitionService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|SubsystemService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surface.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surface.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surface.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surface.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
