@@ -113,7 +113,7 @@ internal static class InProcGate
         var trees = SourceTrees(Path.Combine(root, "src", "runspace"));
         var comp = CSharpCompilation.Create("subsystem-runspace-scan", trees, refs,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
-        var opts = new AnalyzerOptions(ImmutableArray.Create<AdditionalText>(CatalogText(root)));
+        var opts = new AnalyzerOptions(ImmutableArray.Create<AdditionalText>(CatalogText(root), CsprojText(root)));
         var diags = comp.WithAnalyzers(analyzers, opts).GetAnalyzerDiagnosticsAsync().GetAwaiter().GetResult();
 
         var ss = diags.Where(d => d.Id.StartsWith("SS", StringComparison.Ordinal)).ToList();
@@ -158,6 +158,16 @@ internal static class InProcGate
     static AdditionalText CatalogText(string root)
     {
         var path = Path.Combine(root, "src", "analyzers", "SystemCatalog.json");
+        var content = File.Exists(path) ? File.ReadAllText(path) : "";
+        return new InMemoryAdditionalText(path, content);
+    }
+
+    // The runspace csproj, handed in as the AdditionalFile SS027 reads — its API floor
+    // (SupportedOSPlatformVersion). MSBuildWorkspace drops a project-file AdditionalFile; in-proc we own the
+    // set, so it is exact. SS027 fails closed if this is ever absent.
+    static AdditionalText CsprojText(string root)
+    {
+        var path = Path.Combine(root, "src", "runspace", "Subsystem.csproj");
         var content = File.Exists(path) ? File.ReadAllText(path) : "";
         return new InMemoryAdditionalText(path, content);
     }

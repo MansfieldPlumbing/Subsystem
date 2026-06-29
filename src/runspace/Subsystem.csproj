@@ -4,7 +4,10 @@
     <RuntimeIdentifiers Condition="'$(SsX64)' == 'true'">android-arm64;android-x64</RuntimeIdentifiers>
     <RuntimeIdentifiers Condition="'$(RuntimeIdentifiers)' == ''">android-arm64</RuntimeIdentifiers>
     <TargetFramework>net11.0-android</TargetFramework>
-    <SupportedOSPlatformVersion>35.0</SupportedOSPlatformVersion>
+    <!-- API floor 36 (Android 16) — AppFunction integrations require it; do NOT lower the canonical.
+         An exceptional SDK-35 build (a newer moto-edge, not a 2022) opts in explicitly: -p:SsLegacyApi=true. -->
+    <SupportedOSPlatformVersion Condition="'$(SsLegacyApi)' == 'true'">35.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="'$(SupportedOSPlatformVersion)' == ''">36.0</SupportedOSPlatformVersion>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
@@ -103,6 +106,9 @@
          component DAG from this one file at compile time; the Registrar projects the SAME file into
          \System\Contract at boot. One seed, two consumers. Missing/unparsable => SS000 (fail-closed). -->
     <AdditionalFiles Include="..\analyzers\SystemCatalog.json" />
+    <!-- This csproj reads itself: SS027 enforces the Android API floor (36) from the
+         SupportedOSPlatformVersion declaration above. Missing => SS027 fail-closed. -->
+    <AdditionalFiles Include="Subsystem.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The shell is COMPILED, not shipped loose: every presenter/support file under src/shell
