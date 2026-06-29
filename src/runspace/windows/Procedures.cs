@@ -19,6 +19,16 @@ internal static class Procedures
     public static void QueryNoGarbageCollector() { }
 
     /// <summary>
+    /// No GC'd control plane of ours to concede — our control plane is VOM-managed; the GC belongs to a
+    /// guest we mount and can cascade-kill. pwsh is mounted as a handle (a VomBoundary) via
+    /// <see cref="Subsystem.Vom.Vom.Register"/> and revoked — with the guest's own collector — by
+    /// <see cref="Subsystem.Vom.Vom.Terminate"/>. "GC-free in the runspace" = our code allocates only through
+    /// <see cref="Subsystem.Vom.Vom.Alloc"/> (alloc-zero); the CLR collector stays vestigial behind the pwsh
+    /// boundary and reaches zero when the guest is dropped. Scott direct 2026-06-29.
+    /// </summary>
+    public static void QueryPwshIsTheGcBoundary() { }
+
+    /// <summary>
     /// Handle = authority — an object exists iff a handle roots it. A managed object becomes a handle via
     /// <see cref="Subsystem.Vom.Vom.Register"/>; it is resolved by path with
     /// <see cref="Subsystem.Vom.Vom.TryGetByPath"/> and released at refcount zero by
