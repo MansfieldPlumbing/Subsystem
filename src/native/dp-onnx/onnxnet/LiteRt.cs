@@ -195,6 +195,7 @@ public static class Tflite
         ["GREATER_EQUAL"] = "GreaterOrEqual", ["SELECT"] = "Where", ["SELECT_V2"] = "Where", ["COS"] = "Cos",
         ["TILE"] = "Tile", ["EQUAL"] = "Equal", ["SUM"] = "ReduceSum", ["LOGICAL_OR"] = "Or", ["SIGN"] = "Sign",
         ["LOGICAL_AND"] = "And", ["LOGICAL_NOT"] = "Not", ["FLOOR_MOD"] = "Mod",
+        ["RSQRT"] = "Rsqrt", ["NOT_EQUAL"] = "NotEqual", ["DEQUANTIZE"] = "DequantizeLinear", ["QUANTIZE"] = "QuantizeLinear",
     };
 
     public static string MapToOnnx(string tfliteName) => ToOnnx.TryGetValue(tfliteName, out var v) ? v : null;

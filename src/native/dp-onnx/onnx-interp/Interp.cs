@@ -31,12 +31,12 @@ public class Interp
     public static readonly HashSet<string> Implemented = new()
     {
         "Add","Sub","Mul","Div","Pow","MatMul","Gemm",
-        "Relu","LeakyRelu","Sigmoid","Tanh","Sqrt","Exp","Neg","Abs","Floor","Sin","Cos","Erf","Clip","Softplus","Reciprocal",
+        "Relu","LeakyRelu","Sigmoid","Tanh","Sqrt","Rsqrt","Exp","Neg","Abs","Floor","Sin","Cos","Erf","Clip","Softplus","Reciprocal",
         "Reshape","Transpose","Unsqueeze","Squeeze","Concat","Identity","Constant","Cast","Shape","Gather","Flatten",
-        "Equal","Greater","Less","GreaterOrEqual","LessOrEqual","And","Or","Not","Min","Max","Mod","Round","Atan","Sign",
+        "Equal","NotEqual","Greater","Less","GreaterOrEqual","LessOrEqual","And","Or","Not","Min","Max","Mod","Round","Atan","Sign",
         "Where","Expand","ConstantOfShape","Range","ReduceMean","ReduceSum","CumSum","Slice","Pad",
         "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND",
-        "Split","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd",
+        "Split","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd","DequantizeLinear","QuantizeLinear",
     };
 
     public static bool Profile = false;
@@ -88,6 +88,7 @@ public class Interp
             case "Sigmoid": return One(Un(x[0], a => 1f / (1f + MathF.Exp(-a))));
             case "Tanh": return One(Un(x[0], MathF.Tanh));
             case "Sqrt": return One(Un(x[0], MathF.Sqrt));
+            case "Rsqrt": return One(Un(x[0], a => 1f / MathF.Sqrt(a)));   // gemma RMSNorm reciprocal-sqrt (tflite RSQRT)
             case "Exp": return One(Un(x[0], MathF.Exp));
             case "Neg": return One(Un(x[0], a => -a));
             case "Abs": return One(Un(x[0], MathF.Abs));
@@ -105,6 +106,8 @@ public class Interp
             case "Identity": return One(x[0]);
             case "Constant": return One(FromProto(n.Attribute.First(a => a.Name == "value").T));
             case "Cast": return One(x[0]);   // payloads are already widened; layout-preserving
+            case "DequantizeLinear": return One(DequantizeLinear(x, n));
+            case "QuantizeLinear": return One(QuantizeLinear(x, n));
             case "Reshape": return One(Reshape(x[0], x[1]));
             case "Flatten": return One(Reshape(x[0], null, flattenAxis: (int)L(n, "axis", 1), src: x[0]));
             case "Squeeze": return One(Squeeze(x[0], x.Length > 1 ? x[1] : null, n));
@@ -114,6 +117,7 @@ public class Interp
             case "Shape": return One(Tensor.I(Array.ConvertAll(x[0].Shape, s => (long)s), x[0].Shape.Length));
             case "Gather": return One(Gather(x[0], x[1], (int)L(n, "axis", 0)));
             case "Equal": return One(Cmp(x[0], x[1], (a, b) => a == b));
+            case "NotEqual": return One(Cmp(x[0], x[1], (a, b) => a != b));
             case "Greater": return One(Cmp(x[0], x[1], (a, b) => a > b));
             case "Less": return One(Cmp(x[0], x[1], (a, b) => a < b));
             case "GreaterOrEqual": return One(Cmp(x[0], x[1], (a, b) => a >= b));
@@ -160,6 +164,50 @@ public class Interp
 
     static Tensor Un(Tensor a, Func<float, float> f)
     { var d = a.AsF(); var o = new float[d.Length]; for (int i = 0; i < d.Length; i++) o[i] = f(d[i]); return Tensor.F(o, a.Shape); }
+
+    // The coordinate along `axis` for linear index i, given shape sh (for per-axis quant scale/zero-point lookup).
+    static int AxisCoord(long i, int[] sh, int axis)
+    {
+        if (axis < 0) axis += sh.Length;
+        long inner = 1; for (int k = axis + 1; k < sh.Length; k++) inner *= sh[k];
+        return (int)((i / inner) % sh[axis]);
+    }
+
+    // DequantizeLinear (ONNX): y = (x - zero_point) * scale. Per-tensor when scale is scalar, else per-axis along
+    // `axis`. The tflite DEQUANTIZE that lifts gemma's int weights/activations back to float for the f32 interp.
+    static Tensor DequantizeLinear(Tensor[] x, NodeProto n)
+    {
+        var q = x[0].AsF(); var scale = x[1].AsF();
+        var zp = x.Length > 2 && x[2] != null ? x[2].AsF() : null;
+        bool perAxis = scale.Length > 1; int axis = (int)L(n, "axis", 1);
+        var o = new float[q.Length];
+        for (long i = 0; i < q.Length; i++)
+        {
+            int c = perAxis ? AxisCoord(i, x[0].Shape, axis) : 0;
+            o[i] = (q[i] - (zp != null ? zp[c] : 0f)) * scale[c];
+        }
+        return Tensor.F(o, x[0].Shape);
+    }
+
+    // QuantizeLinear (ONNX): y = clamp(round(x/scale) + zero_point). Per-tensor or per-axis along `axis`. The
+    // saturation range defaults to int8 [-128,127] (the common LLM activation width); per-quantized-dtype
+    // saturation is refined when the tflite translator wires the tensor's quantized type. The fake-quant the
+    // gemma graph round-trips activations through (a QUANTIZE/DEQUANTIZE pair around each int matmul).
+    static Tensor QuantizeLinear(Tensor[] x, NodeProto n)
+    {
+        var v = x[0].AsF(); var scale = x[1].AsF();
+        var zp = x.Length > 2 && x[2] != null ? x[2].AsF() : null;
+        bool perAxis = scale.Length > 1; int axis = (int)L(n, "axis", 1);
+        const long QMIN = -128, QMAX = 127;
+        var o = new long[v.Length];
+        for (long i = 0; i < v.Length; i++)
+        {
+            int c = perAxis ? AxisCoord(i, x[0].Shape, axis) : 0;
+            long q = (long)MathF.Round(v[i] / scale[c], MidpointRounding.ToEven) + (long)(zp != null ? zp[c] : 0f);
+            o[i] = Math.Clamp(q, QMIN, QMAX);
+        }
+        return Tensor.I(o, x[0].Shape);
+    }
 
     // SIMD one contiguous run: dst = a OP b, where a/b are each either a contiguous run or a broadcast scalar (1-elem span).
     static void VecBinRun(Span<float> dst, ReadOnlySpan<float> a, bool aScalar, ReadOnlySpan<float> b, bool bScalar, BinOp op)

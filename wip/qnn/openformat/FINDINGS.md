@@ -56,7 +56,7 @@ DMCA §1201(f). Route A doesn't even circumvent anything (uses the runtime as in
    emitted bin's container against a local-dream bin to confirm we produce the same shape.
 2. **Weight swizzle crack (needed for B, and for correctness on A):** triangulate a known conv weight ↔ its prepared
    bytes; reverse the HMX 1024-B tile. This is THE remaining hard kernel.
-3. `qnn-triangulate`/`qnn-dissect` already in the canonical dp-onnx engine — point them at the AnythingV5 bin + the
-   AnythingV5 safetensors to map blob↔weight, then study the byte transform.
+3. `dissect.py`/`grammar.py` (this dir — recon tools, NOT in the dp-onnx engine) — point them at the AnythingV5 bin
+   + the AnythingV5 safetensors to map blob↔weight, then study the byte transform. This is research, not production.
 
 _Artifacts: `dissect.py`, `grammar.py`, `vae_encoder_8gen1.bin`, `768/1024.patch.7d9838`, `SampleApp.patch` in this dir._

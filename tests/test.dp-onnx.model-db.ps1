@@ -36,5 +36,7 @@ Assert ($stats -match 'op histogram') "op histogram is a query (GROUP BY op_type
 Assert ($risky -ge 0)               "backend-risky triage is a query (WHERE op_type IN htp-risky); flagged $risky node(s)"
 
 Remove-Item $db -Force -EA SilentlyContinue
-if ($fails.Count -eq 0) { Write-Host "PASS  test.dp-onnx.model-db  (model is queryable rows; op triage = a SELECT)" -ForegroundColor Green }
-else { Write-Host "FAIL  test.dp-onnx.model-db  ($($fails.Count) failed)" -ForegroundColor Red; exit 1 }
+$pass = $fails.Count -eq 0
+Write-Host ""
+Write-Host ($(if($pass){"PASS - the model is queryable rows; op triage = a SELECT (models-as-.db)."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+[pscustomobject]@{ test='test.dp-onnx.model-db'; pass=$pass; verdict=$(if($pass){'ONNX compiled to a 6-table SQLite store; op histogram + HTP-risky triage are queries'}else{'see failures'}) }

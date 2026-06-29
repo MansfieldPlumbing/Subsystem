@@ -1,49 +1,44 @@
 # wip/ — the workshop (clone-and-rebuild sovereignty)
 
 Parked scattered projects so **the whole system lives in one repo**: a fresh `git clone` plus the
-re-derivable data (below) is enough to rebuild everything — no dependence on the workstation's loose
-`S:\` siblings. These are **not yet integrated** into the `ss` build; they're staged here until each is
-folded into `src/` proper (the dp-onnx pattern: vendor → mount as a Runtime/Device → absorb).
+re-derivable data is enough to rebuild everything. These are **not yet integrated** into the `ss` build;
+each is staged here until it is folded into `src/` (the dp-onnx pattern: vendor → mount → absorb) or, once
+its capability already lives in `src/`, retired. **Only source is vendored;** heavy re-derivable artifacts
+(models, runtimes, build outputs) are gitignored. Markdown is tracked **here** (the workshop) — never as
+`docs/` (the binary is the docs; `/docs/` is gitignored on purpose). Each item's status is its **graduation
+verdict**; `ss test <name>` is the receipt where one exists, and each blocker is logged to its CRQ.
 
-**Only source is vendored.** Heavy, re-derivable artifacts (models, runtimes, build outputs, the WebView2
-engine) are gitignored — see each entry for where to re-fetch them.
+## Graduated to `src/` (proven by a receipt)
 
-## Parked
+- **SentencePiece tokenizer** — lifted from `gemma-talking-layer` into `src/native/dp-onnx/onnxnet/SentencePiece.cs`
+  (the sovereign `.spm` reader + Unigram tokenizer, sibling of `OnnxProto.cs`). Receipt: `ss test sentencepiece`
+  (gemma-4 vocab 262144, `<bos>`=2, encode→detokenize bit-exact, no sentencepiece/protobuf lib).
 
-### `vom-gpu-compiler/` — the GPU PE-factory / pure-C# D3D12 spine (validated)
-A compute shader that **assembles a native Win64 PE32+ executable on the GPU**, driven by **pure-C# D3D12**
-(raw COM-vtable dispatch, only OS exports P/Invoked — no home-built DLLs), with the **VOM brokering every
-D3D12 resource as a handle** (cascade-reclaimed). `compile.ps1` is self-contained (`Add-Type` on Windows
-PowerShell 5.1). **State: produces a structurally-valid, OS-loadable PE** (verified: `Start-Process`
-accepts it, PEReader parses PE32+/WindowsCui, `.text` holds real GPU-emitted x64). **Frontier ("no
-further"):** a *functional* exe — the code body has a stack-imbalanced epilogue and the import table is
-built in `.rdata` but not wired into the data directory. This is the physical proof of the VOM=DirectPort
-spine and is **directly reusable as the GPU inference harness** (swap the PE shader for a GEMM/attention
-shader; weights become parked VOM handles). See the boundary taxonomy: `DpBoundary` / `VomBoundary`.
+## Retired from wip (capability already in `src/`)
 
-### `agent-browser/` — the warm WebView2 browse agent (`ss browse` / `Rd.Consult`)
-Source only (single `Program.cs` + csproj + config + `fetch-runtime.ps1`). An MCP-stdio-driven persistent
-WebView2 session (`browse_goto/click/type/hud/do`); the consult/"phone-a-friend" is the `browse_do "ask"`
-intent. **Not vendored:** the ~100 MB WebView2 Fixed-Version engine (`WebView2Runtime/webview2-fixed.zip`)
-— re-fetch with `fetch-runtime.ps1`; falls back to the system Evergreen runtime if absent. **Integration:**
-mount as an MCP-child driving the stub `Invoke-RdConsult` (`src/runspace/Pwsh/Cmdlets/RdCmdlets.cs`). CRQ120.
+- **gemma4 exporter** → `src/native/dp-onnx/tools/gemma4-export/export_gemma4_e2b_decomposed.py`. A build-time
+  re-export recipe ("no python at runtime"); the Gemma-4 read/op-mapping it fed already shipped via the LiteRt
+  path in `src/native/dp-onnx`. Kept in the tracked source tree so a clone can re-derive the gated graph.
 
-### `gemma4/` — Gemma-4 E2B on dp-onnx (the GraphRuntime LLM rung)
-The decisions + state docs (`INTEGRATION-PROMPT.md`, `PHASE1-STATE.md`, `SYNTHESIS.md`, `DEMUCS-BACKFILL.md`)
-and the one-time export `export_gemma4_e2b_decomposed.py` (python, export only — no python at runtime).
-**Not vendored:** the exported graph + weights (`W:\gemma4\onnx\e2b_step.onnx` + the 4.48 GB PLE etc.) —
-re-export from HF (gated Gemma-4) via the script. dp-onnx gap #1 (bf16 load) is already in
-`src/native/dp-onnx`. CRQ144.
+## Parked (proven/partial/recon, still blocked from `src/`)
 
-### `d3d12-kernels/` — the HLSL compute kernel library (the inferencing kernels)
-~55 D3D12 HLSL kernels (`mul_mat_split_k_reduce`, `flash_attn_split_k_reduce`, the `dequant_q*`,
-`geglu/swiglu/gelu`, `group_norm`, `im2col_3d`, …). These are the matmul/attention/quant kernels that plug
-into the `vom-gpu-compiler` D3D12 harness for the GPU off-ramp / GPU inference. Compiled `.dxil`/`.cso` are
-gitignored (re-derive from `.hlsl`). CRQ117/off-ramp.
-
-## Still scattered (to vendor — sweep CRQ)
-Remaining `S:\` siblings not yet parked here: `directport-project`, `onnxsurgeon-project` (retire-as-dup
-candidate vs dp-onnx), `coreclr-hle-project` (PE/SEH/DLL-resolution research), `mansfield.dev-project`,
-`terminal-project` / `android-terminal-project`, `razrcover-project`, `flickpaint*`, `virtuacam-project`
-(native artifacts already in `src/native/virtuacam`), `qnn-project` (dp-onnx already vendored from it).
-Each gets source-vendored here with heavy data gitignored, then folded into `src/`.
+- **`vom-gpu-compiler/`** — the GPU PE-factory experiment. Its pure-C# D3D12 spine **already graduated** to
+  `src/native/dp-onnx/onnx-interp/GpuD3D12.cs`; this stays as the experiment that proved it. Receipt:
+  `ss test gpu-pe-factory`. Frontier: a *functional* PE. CRQ145.
+- **`directport/`** — the full upstream DirectPort C++ SDK + examples. The **load-bearing core already
+  graduated**: `src/native/directport/{directport.h,directportd3d12.cpp}`, `Device/DirectPortVk.cs`,
+  `windows/DirectPort{Native,Producer,Bench}.cs`. Kept as the reference. CRQ117.
+- **`gemma-talking-layer/`** — a bit-exact gemma tokenizer (now graduated, above) + a C#-driven decode loop.
+  **Blocked:** the decode loop is wired to a **mock VOM + a stub engine** (fabricated logits); graduates after
+  rewiring to the real `DpOnnx.Interp` + real `Subsystem.Vom` behind the `Runtime` contract. CRQ159.
+- **`d3d12-kernels/`** — ~55 SPIRV-Cross HLSL compute kernels + the `DieWorker` ggml dispatcher. **Blocked:**
+  `DieWorker` is stubbed and bound to `C:/BUILD/llama.cpp`; several dequant kernels carry `???` placeholders
+  (won't compile). The src GPU seam (`GpuD3D12.cs` + `gemm.hlsl`) is the live driver. CRQ145/off-ramp.
+- **`qnn/`** — QNN/Hexagon-HTP research; `qnn/openformat/` is the open-format recon (`FINDINGS.md` + `dissect.py`
+  + `grammar.py`). **Blocked:** the sovereign `.bin` emitter is unbuilt and the HMX weight swizzle is unsolved;
+  the only working `.bin` path shells out to the **closed** Qualcomm generator. CRQ158.
+- **`dp-onnx-research/`** — the demucs TensorRT case study (external-repo recon). Out of doctrine for `src/`
+  (subsystem's dp-onnx is ORT- **and** TRT-free); kept as a tracked case study.
+- **`agent-browser/`** — a standalone Windows WebView2 MCP browse agent. **Blocked:** not vendored into the
+  build as buildable source, and `Rd.Consult` (`RdCmdlets.cs`) is still a stub. The Android `WebDrive`
+  (`src/runspace/Device/WebDrive.cs`) is the on-device sibling, not this host. CRQ120.

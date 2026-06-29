@@ -34,5 +34,7 @@ if ($model) {
     Write-Host "  (no real .onnx on this box; roundtrip-only receipt)" -ForegroundColor DarkGray
 }
 
-if ($fails.Count -eq 0) { Write-Host "PASS  test.dp-onnx.onnxproto  (Google.Protobuf + Grpc.Tools dropped; reader/writer verified)" -ForegroundColor Green }
-else { Write-Host "FAIL  test.dp-onnx.onnxproto  ($($fails.Count) failed)" -ForegroundColor Red; exit 1 }
+$pass = $fails.Count -eq 0
+Write-Host ""
+Write-Host ($(if($pass){"PASS - Google.Protobuf + Grpc.Tools dropped; the home-rolled OnnxProto reader/writer is bit-exact."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+[pscustomobject]@{ test='test.dp-onnx.onnxproto'; pass=$pass; verdict=$(if($pass){'home-rolled ONNX protobuf reader/writer; write->read->run roundtrip bit-exact'}else{'see failures'}) }

@@ -34,6 +34,9 @@ Assert ($sections -ge 10)             "LITERTLM container parsed: $sections sect
 Assert $hasSP                         "SP_Tokenizer section present (the sovereign tokenizer path)"
 Assert ($cov -and $cov.ops -gt 10000) "main LLM graph parsed: $(if($cov){$cov.ops}else{0}) ops across $(if($cov){$cov.distinct}else{0}) op-types"
 Assert ($cov -and $cov.mapped -ge 20) "op set maps onto dp-onnx kernels: $(if($cov){"$($cov.mapped)/$($cov.distinct)"}else{'0/0'})"
+# Slice 1 (the op gap): the quant/norm ops the transformer graph needs now map to real dp-onnx kernels.
+$nowMapped = @('DEQUANTIZE','QUANTIZE','RSQRT','NOT_EQUAL') | Where-Object { $pr -notmatch ($_ + '\s.*MISSING') }
+Assert ($nowMapped.Count -eq 4) "DEQUANTIZE/QUANTIZE/RSQRT/NOT_EQUAL map to dp-onnx kernels (mapped: $($nowMapped -join ','))"
 Write-Host "  gemma-4 E2B: $sections sections; main graph ops=$(if($cov){$cov.ops}) coverage=$(if($cov){"$($cov.mapped)/$($cov.distinct)"})"
 
 $pass = $fails.Count -eq 0

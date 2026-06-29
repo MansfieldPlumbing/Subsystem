@@ -13,6 +13,7 @@ public static class Program
         //   ss -EncodedCommand <b64>  base64 UTF-16LE command — quoting-proof, the agent's door
         //   ss -File <path>           run a script file
         //   ss selftest               VOM + Cm kernel self-tests (Layers 1-2), logged to smoketest-log.md
+        //   ss test [filter] [--request <id>]  run the tests/ receipts in-proc; --request logs them to a request's EOS
         //   ss diag                   the living diagnostic suite (kernel + toolchain + self-carry), logged to the ledger
         //   ss contextualize [--map|--json] (-c) self-describe the system (contract, components, cmdlets, source map)
         //   ss onboard                the one-shot alignment package — telos · laws · decisions · state · contract
@@ -32,6 +33,7 @@ public static class Program
         return mode switch
         {
             "selftest"                                                       => SelfTest.Run(args[1..]),
+            "test" or "-test" or "--test"                                    => Test.Run(args[1..]),
             "diag" or "-diag" or "--diag" or "selfcheck"                     => Diag.Run(args[1..]),
             "help" or "-help" or "--help" or "-h" or "/help" or "-?" or "/?"  => Help.Print(),
             "contextualize" or "-contextualize" or "--contextualize" or "-c" => Contextualize.Run(args[1..]),
