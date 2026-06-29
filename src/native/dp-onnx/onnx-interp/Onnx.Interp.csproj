@@ -16,6 +16,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="GpuD3D12.cs" />
+    <Compile Include="GpuVulkan.cs" />
+    <Content Include="gemm.spv" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\onnxnet\Onnx.csproj" />
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
   </ItemGroup>

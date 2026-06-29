@@ -1871,12 +1871,21 @@ public class Interp
     { var o = new T[n]; MemoryMarshal.Cast<byte, T>(b).Slice(0, n).CopyTo(o); return o; }
 }
 
-// the GPU MOUNT seam: dp-onnx (C#) -> dpgpu.dll (D3D12 compute) via P/Invoke
+// the GPU MOUNT seam: dp-onnx (C#) -> PURE-C# D3D12 (GpuD3D12.cs) or Vulkan (GpuVulkan.cs). NO dpgpu.dll/C++/MSVC.
+// DPGPU_BACKEND=vulkan flips to the cross-platform spine (vulkan-1.dll + gemm.spv) -> Android (Adreno/Mali);
+// default is D3D12 (reuses the caller's gemm DXIL). Both reproduce the CPU GEMM bit-for-bit.
 static class Gpu
 {
-    [System.Runtime.InteropServices.DllImport("dpgpu", CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
-    public static extern int dpgpu_gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, uint dxilLen);
-    [System.Runtime.InteropServices.DllImport("dpgpu", CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
-    public static extern IntPtr dpgpu_device_name();
-    public static string DeviceName() => System.Runtime.InteropServices.Marshal.PtrToStringUni(dpgpu_device_name());
+    static readonly bool s_vk = string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "vulkan", StringComparison.OrdinalIgnoreCase);
+    static byte[] s_spv;
+    public static int dpgpu_gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, uint dxilLen)
+    {
+        if (s_vk)
+        {
+            s_spv ??= System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "gemm.spv"));
+            return GpuVulkan.Gemm(A, B, C, M, N, K, s_spv);
+        }
+        return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen);
+    }
+    public static string DeviceName() { if (s_vk) { GpuVulkan.EnsureInit(); return GpuVulkan.Name; } GpuD3D12.EnsureInit(); return GpuD3D12.Name; }
 }

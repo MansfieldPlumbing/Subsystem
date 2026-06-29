@@ -1,0 +1,194 @@
+// GpuVulkan.cs — pure-C# Vulkan GEMM dispatch for dp-onnx. NO C++, NO MSVC. vulkan-1.dll (Windows) / libvulkan.so
+// (Android) via flat-C P/Invoke + precompiled SPIR-V. Same naive fp32 GEMM as the D3D12 path, so bit-parity holds.
+// Cross-platform spine: this exact code + gemm.spv run on the Adreno/Mali. Persistent instance/device/queue/
+// descriptor-layout/pipeline-layout/pipeline; per-call buffers/descriptors/command-buffer/fence destroyed.
+using System.Runtime.InteropServices;
+
+unsafe static class GpuVulkan
+{
+    const string VK = "vulkan-1.dll";
+    [DllImport(VK)] static extern int  vkCreateInstance(ref InstCI ci, IntPtr a, out IntPtr inst);
+    [DllImport(VK)] static extern int  vkEnumeratePhysicalDevices(IntPtr inst, ref uint c, [Out] IntPtr[] d);
+    [DllImport(VK)] static extern void vkGetPhysicalDeviceProperties(IntPtr pd, IntPtr props);
+    [DllImport(VK)] static extern void vkGetPhysicalDeviceQueueFamilyProperties(IntPtr pd, ref uint c, IntPtr props);
+    [DllImport(VK)] static extern void vkGetPhysicalDeviceMemoryProperties(IntPtr pd, IntPtr props);
+    [DllImport(VK)] static extern int  vkCreateDevice(IntPtr pd, ref DevCI ci, IntPtr a, out IntPtr dev);
+    [DllImport(VK)] static extern void vkGetDeviceQueue(IntPtr dev, uint qf, uint qi, out IntPtr q);
+    [DllImport(VK)] static extern int  vkCreateBuffer(IntPtr dev, ref BufCI ci, IntPtr a, out IntPtr buf);
+    [DllImport(VK)] static extern void vkGetBufferMemoryRequirements(IntPtr dev, IntPtr buf, out MemReq r);
+    [DllImport(VK)] static extern int  vkAllocateMemory(IntPtr dev, ref MemAI ci, IntPtr a, out IntPtr mem);
+    [DllImport(VK)] static extern int  vkBindBufferMemory(IntPtr dev, IntPtr buf, IntPtr mem, ulong off);
+    [DllImport(VK)] static extern int  vkMapMemory(IntPtr dev, IntPtr mem, ulong off, ulong sz, uint f, out IntPtr p);
+    [DllImport(VK)] static extern void vkUnmapMemory(IntPtr dev, IntPtr mem);
+    [DllImport(VK)] static extern int  vkCreateDescriptorSetLayout(IntPtr dev, ref DSLCI ci, IntPtr a, out IntPtr l);
+    [DllImport(VK)] static extern int  vkCreatePipelineLayout(IntPtr dev, ref PLCI ci, IntPtr a, out IntPtr l);
+    [DllImport(VK)] static extern int  vkCreateShaderModule(IntPtr dev, ref SMCI ci, IntPtr a, out IntPtr m);
+    [DllImport(VK)] static extern int  vkCreateComputePipelines(IntPtr dev, IntPtr cache, uint cnt, ref CPCI ci, IntPtr a, out IntPtr p);
+    [DllImport(VK)] static extern int  vkCreateDescriptorPool(IntPtr dev, ref DPCI ci, IntPtr a, out IntPtr p);
+    [DllImport(VK)] static extern int  vkAllocateDescriptorSets(IntPtr dev, ref DSAI ci, out IntPtr s);
+    [DllImport(VK)] static extern void vkUpdateDescriptorSets(IntPtr dev, uint wc, [In] WDS[] w, uint cc, IntPtr c);
+    [DllImport(VK)] static extern int  vkCreateCommandPool(IntPtr dev, ref CPoolCI ci, IntPtr a, out IntPtr p);
+    [DllImport(VK)] static extern int  vkAllocateCommandBuffers(IntPtr dev, ref CBAI ci, out IntPtr cb);
+    [DllImport(VK)] static extern int  vkBeginCommandBuffer(IntPtr cb, ref CBBI bi);
+    [DllImport(VK)] static extern void vkCmdBindPipeline(IntPtr cb, int bp, IntPtr p);
+    [DllImport(VK)] static extern void vkCmdBindDescriptorSets(IntPtr cb, int bp, IntPtr lay, uint fs, uint sc, ref IntPtr sets, uint dc, IntPtr dofs);
+    [DllImport(VK)] static extern void vkCmdPushConstants(IntPtr cb, IntPtr lay, uint sf, uint off, uint sz, uint[] vals);
+    [DllImport(VK)] static extern void vkCmdDispatch(IntPtr cb, uint x, uint y, uint z);
+    [DllImport(VK)] static extern int  vkEndCommandBuffer(IntPtr cb);
+    [DllImport(VK)] static extern int  vkCreateFence(IntPtr dev, ref FenceCI ci, IntPtr a, out IntPtr f);
+    [DllImport(VK)] static extern int  vkQueueSubmit(IntPtr q, uint c, ref SubmitI si, IntPtr fence);
+    [DllImport(VK)] static extern int  vkWaitForFences(IntPtr dev, uint c, ref IntPtr f, uint all, ulong timeout);
+    [DllImport(VK)] static extern void vkDestroyBuffer(IntPtr dev, IntPtr b, IntPtr a);
+    [DllImport(VK)] static extern void vkFreeMemory(IntPtr dev, IntPtr m, IntPtr a);
+    [DllImport(VK)] static extern void vkDestroyDescriptorPool(IntPtr dev, IntPtr p, IntPtr a);
+    [DllImport(VK)] static extern void vkDestroyCommandPool(IntPtr dev, IntPtr p, IntPtr a);
+    [DllImport(VK)] static extern void vkDestroyFence(IntPtr dev, IntPtr f, IntPtr a);
+
+    [StructLayout(LayoutKind.Sequential)] struct AppI   { public int sType; public IntPtr pNext; public IntPtr pAppName; public uint appVer; public IntPtr pEng; public uint engVer; public uint apiVer; }
+    [StructLayout(LayoutKind.Sequential)] struct InstCI { public int sType; public IntPtr pNext; public uint flags; public IntPtr pApp; public uint lc; public IntPtr ppL; public uint ec; public IntPtr ppE; }
+    [StructLayout(LayoutKind.Sequential)] struct QueueCI{ public int sType; public IntPtr pNext; public uint flags; public uint qfi; public uint qc; public IntPtr pPri; }
+    [StructLayout(LayoutKind.Sequential)] struct DevCI  { public int sType; public IntPtr pNext; public uint flags; public uint qcic; public IntPtr pQci; public uint lc; public IntPtr ppL; public uint ec; public IntPtr ppE; public IntPtr pFeat; }
+    [StructLayout(LayoutKind.Sequential)] struct BufCI  { public int sType; public IntPtr pNext; public uint flags; public ulong size; public uint usage; public uint sharing; public uint qfic; public IntPtr pQfi; }
+    [StructLayout(LayoutKind.Sequential)] struct MemReq { public ulong size; public ulong align; public uint typeBits; }
+    [StructLayout(LayoutKind.Sequential)] struct MemAI  { public int sType; public IntPtr pNext; public ulong size; public uint typeIdx; }
+    [StructLayout(LayoutKind.Sequential)] struct DSLB   { public uint binding; public uint type; public uint count; public uint stage; public IntPtr pImm; }
+    [StructLayout(LayoutKind.Sequential)] struct DSLCI  { public int sType; public IntPtr pNext; public uint flags; public uint bc; public IntPtr pB; }
+    [StructLayout(LayoutKind.Sequential)] struct PCR    { public uint stage; public uint off; public uint size; }
+    [StructLayout(LayoutKind.Sequential)] struct PLCI   { public int sType; public IntPtr pNext; public uint flags; public uint slc; public IntPtr pSL; public uint pcrc; public IntPtr pPCR; }
+    [StructLayout(LayoutKind.Sequential)] struct SMCI   { public int sType; public IntPtr pNext; public uint flags; public IntPtr codeSize; public IntPtr pCode; }
+    [StructLayout(LayoutKind.Sequential)] struct PSSCI  { public int sType; public IntPtr pNext; public uint flags; public uint stage; public IntPtr module; public IntPtr pName; public IntPtr pSpec; }
+    [StructLayout(LayoutKind.Sequential)] struct CPCI   { public int sType; public IntPtr pNext; public uint flags; public PSSCI stage; public IntPtr layout; public IntPtr baseH; public int baseI; }
+    [StructLayout(LayoutKind.Sequential)] struct DPS    { public uint type; public uint count; }
+    [StructLayout(LayoutKind.Sequential)] struct DPCI   { public int sType; public IntPtr pNext; public uint flags; public uint maxSets; public uint psc; public IntPtr pPS; }
+    [StructLayout(LayoutKind.Sequential)] struct DSAI   { public int sType; public IntPtr pNext; public IntPtr pool; public uint sc; public IntPtr pSL; }
+    [StructLayout(LayoutKind.Sequential)] struct DBI    { public IntPtr buffer; public ulong off; public ulong range; }
+    [StructLayout(LayoutKind.Sequential)] struct WDS    { public int sType; public IntPtr pNext; public IntPtr dstSet; public uint dstBind; public uint dstArr; public uint count; public uint type; public IntPtr pImg; public IntPtr pBuf; public IntPtr pTex; }
+    [StructLayout(LayoutKind.Sequential)] struct CPoolCI{ public int sType; public IntPtr pNext; public uint flags; public uint qfi; }
+    [StructLayout(LayoutKind.Sequential)] struct CBAI   { public int sType; public IntPtr pNext; public IntPtr pool; public uint level; public uint count; }
+    [StructLayout(LayoutKind.Sequential)] struct CBBI   { public int sType; public IntPtr pNext; public uint flags; public IntPtr pInh; }
+    [StructLayout(LayoutKind.Sequential)] struct SubmitI{ public int sType; public IntPtr pNext; public uint wsc; public IntPtr pWS; public IntPtr pWDSM; public uint cbc; public IntPtr pCB; public uint ssc; public IntPtr pSS; }
+    [StructLayout(LayoutKind.Sequential)] struct FenceCI{ public int sType; public IntPtr pNext; public uint flags; }
+
+    static IntPtr Pin<T>(T s){ IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T))); Marshal.StructureToPtr(s, p, false); return p; }
+    static IntPtr PinArr<T>(T[] a){ int sz = Marshal.SizeOf(typeof(T)); IntPtr p = Marshal.AllocHGlobal(sz*a.Length); for(int i=0;i<a.Length;i++) Marshal.StructureToPtr(a[i], (IntPtr)((byte*)p + i*sz), false); return p; }
+    static IntPtr PinH(IntPtr h){ IntPtr p = Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(p, h); return p; }
+
+    static IntPtr s_inst, s_pd, s_dev, s_queue, s_memProps, s_dsl, s_playout, s_pipe;
+    static uint s_qfi, s_memTypeCount; static int s_spvLen = -1; static string s_name = "(none)";
+    public static string Name => s_name;
+
+    public static void EnsureInit()
+    {
+        if (s_dev != IntPtr.Zero) return;
+        AppI ai = new AppI(); ai.sType = 0; ai.apiVer = 0x400000;
+        InstCI ici = new InstCI(); ici.sType = 1; ici.pApp = Pin(ai);
+        vkCreateInstance(ref ici, IntPtr.Zero, out s_inst);
+        uint dn = 0; vkEnumeratePhysicalDevices(s_inst, ref dn, null);
+        IntPtr[] pds = new IntPtr[dn]; vkEnumeratePhysicalDevices(s_inst, ref dn, pds); s_pd = pds[0];
+        IntPtr props = Marshal.AllocHGlobal(1024); vkGetPhysicalDeviceProperties(s_pd, props);
+        s_name = Marshal.PtrToStringAnsi((IntPtr)((byte*)props + 20));
+        s_memProps = Marshal.AllocHGlobal(1024); vkGetPhysicalDeviceMemoryProperties(s_pd, s_memProps);
+        s_memTypeCount = (uint)Marshal.ReadInt32(s_memProps, 0);
+        // first queue family with COMPUTE
+        uint qn = 0; vkGetPhysicalDeviceQueueFamilyProperties(s_pd, ref qn, IntPtr.Zero);
+        IntPtr qbuf = Marshal.AllocHGlobal((int)qn * 24); vkGetPhysicalDeviceQueueFamilyProperties(s_pd, ref qn, qbuf);
+        s_qfi = 0; for (uint i = 0; i < qn; i++) { uint fl = (uint)Marshal.ReadInt32(qbuf, (int)i * 24); if ((fl & 0x2) != 0) { s_qfi = i; break; } }
+        float[] pri = new float[] { 1.0f };
+        QueueCI qci = new QueueCI(); qci.sType = 2; qci.qfi = s_qfi; qci.qc = 1; qci.pPri = PinArr(pri);
+        DevCI dci = new DevCI(); dci.sType = 3; dci.qcic = 1; dci.pQci = Pin(qci);
+        vkCreateDevice(s_pd, ref dci, IntPtr.Zero, out s_dev);
+        vkGetDeviceQueue(s_dev, s_qfi, 0, out s_queue);
+        // descriptor set layout: 3 storage buffers (A,B,C), stage COMPUTE
+        DSLB[] binds = new DSLB[3];
+        for (uint i = 0; i < 3; i++) { binds[i].binding = i; binds[i].type = 7; binds[i].count = 1; binds[i].stage = 0x20; }
+        DSLCI dslci = new DSLCI(); dslci.sType = 32; dslci.bc = 3; dslci.pB = PinArr(binds);
+        vkCreateDescriptorSetLayout(s_dev, ref dslci, IntPtr.Zero, out s_dsl);
+        PCR pcr = new PCR(); pcr.stage = 0x20; pcr.off = 0; pcr.size = 12;   // push {M,N,K}
+        PLCI plci = new PLCI(); plci.sType = 30; plci.slc = 1; plci.pSL = PinH(s_dsl); plci.pcrc = 1; plci.pPCR = Pin(pcr);
+        vkCreatePipelineLayout(s_dev, ref plci, IntPtr.Zero, out s_playout);
+    }
+
+    static void EnsurePipeline(byte[] spv)
+    {
+        if (s_pipe != IntPtr.Zero && s_spvLen == spv.Length) return;
+        IntPtr spvPtr = Marshal.AllocHGlobal(spv.Length); Marshal.Copy(spv, 0, spvPtr, spv.Length);
+        SMCI smci = new SMCI(); smci.sType = 16; smci.codeSize = (IntPtr)spv.Length; smci.pCode = spvPtr;
+        IntPtr shader; vkCreateShaderModule(s_dev, ref smci, IntPtr.Zero, out shader);
+        CPCI cpci = new CPCI(); cpci.sType = 29;
+        cpci.stage = new PSSCI(); cpci.stage.sType = 18; cpci.stage.stage = 0x20; cpci.stage.module = shader; cpci.stage.pName = Marshal.StringToHGlobalAnsi("main");
+        cpci.layout = s_playout;
+        vkCreateComputePipelines(s_dev, IntPtr.Zero, 1, ref cpci, IntPtr.Zero, out s_pipe);
+        s_spvLen = spv.Length;
+    }
+
+    static int FindMem(uint typeBits)
+    {
+        for (int i = 0; i < s_memTypeCount; i++)
+        {
+            uint pf = (uint)Marshal.ReadInt32(s_memProps, 4 + i * 8);
+            if (((typeBits >> i) & 1) != 0 && (pf & 0x2) != 0 && (pf & 0x4) != 0) return i;   // HOST_VISIBLE|COHERENT
+        }
+        return -1;
+    }
+
+    static void MkBuf(ulong bytes, out IntPtr buf, out IntPtr mem)
+    {
+        BufCI bci = new BufCI(); bci.sType = 12; bci.size = bytes; bci.usage = 0x20; bci.sharing = 0;   // STORAGE_BUFFER
+        vkCreateBuffer(s_dev, ref bci, IntPtr.Zero, out buf);
+        MemReq req; vkGetBufferMemoryRequirements(s_dev, buf, out req);
+        MemAI mai = new MemAI(); mai.sType = 5; mai.size = req.size; mai.typeIdx = (uint)FindMem(req.typeBits);
+        vkAllocateMemory(s_dev, ref mai, IntPtr.Zero, out mem);
+        vkBindBufferMemory(s_dev, buf, mem, 0);
+    }
+
+    public static int Gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] spv)
+    {
+        EnsureInit();
+        EnsurePipeline(spv);
+        ulong aB = (ulong)M * K * 4, bB = (ulong)K * N * 4, cB = (ulong)M * N * 4;
+        IntPtr aBuf, aMem, bBuf, bMem, cBuf, cMem;
+        MkBuf(aB, out aBuf, out aMem); MkBuf(bB, out bBuf, out bMem); MkBuf(cB, out cBuf, out cMem);
+        IntPtr p;
+        vkMapMemory(s_dev, aMem, 0, aB, 0, out p); Marshal.Copy(A, 0, p, (int)(M * K)); vkUnmapMemory(s_dev, aMem);
+        vkMapMemory(s_dev, bMem, 0, bB, 0, out p); Marshal.Copy(B, 0, p, (int)(K * N)); vkUnmapMemory(s_dev, bMem);
+
+        DPS[] ps = new DPS[] { new DPS { type = 7, count = 3 } };
+        DPCI dpci = new DPCI(); dpci.sType = 33; dpci.maxSets = 1; dpci.psc = 1; dpci.pPS = PinArr(ps);
+        IntPtr pool; vkCreateDescriptorPool(s_dev, ref dpci, IntPtr.Zero, out pool);
+        DSAI dsai = new DSAI(); dsai.sType = 34; dsai.pool = pool; dsai.sc = 1; dsai.pSL = PinH(s_dsl);
+        IntPtr dset; vkAllocateDescriptorSets(s_dev, ref dsai, out dset);
+        DBI ia = new DBI { buffer = aBuf, off = 0, range = aB }, ib = new DBI { buffer = bBuf, off = 0, range = bB }, ic = new DBI { buffer = cBuf, off = 0, range = cB };
+        WDS[] w = new WDS[3];
+        w[0].sType = 35; w[0].dstSet = dset; w[0].dstBind = 0; w[0].count = 1; w[0].type = 7; w[0].pBuf = Pin(ia);
+        w[1].sType = 35; w[1].dstSet = dset; w[1].dstBind = 1; w[1].count = 1; w[1].type = 7; w[1].pBuf = Pin(ib);
+        w[2].sType = 35; w[2].dstSet = dset; w[2].dstBind = 2; w[2].count = 1; w[2].type = 7; w[2].pBuf = Pin(ic);
+        vkUpdateDescriptorSets(s_dev, 3, w, 0, IntPtr.Zero);
+
+        CPoolCI cpci2 = new CPoolCI(); cpci2.sType = 39; cpci2.qfi = s_qfi;
+        IntPtr cpool; vkCreateCommandPool(s_dev, ref cpci2, IntPtr.Zero, out cpool);
+        CBAI cbai = new CBAI(); cbai.sType = 40; cbai.pool = cpool; cbai.level = 0; cbai.count = 1;
+        IntPtr cb; vkAllocateCommandBuffers(s_dev, ref cbai, out cb);
+        CBBI bi = new CBBI(); bi.sType = 42; bi.flags = 1;
+        vkBeginCommandBuffer(cb, ref bi);
+        vkCmdBindPipeline(cb, 1, s_pipe);
+        IntPtr setH = dset; vkCmdBindDescriptorSets(cb, 1, s_playout, 0, 1, ref setH, 0, IntPtr.Zero);
+        vkCmdPushConstants(cb, s_playout, 0x20, 0, 12, new uint[] { M, N, K });
+        vkCmdDispatch(cb, (N + 15) / 16, (M + 15) / 16, 1);
+        vkEndCommandBuffer(cb);
+
+        FenceCI fci = new FenceCI(); fci.sType = 8; IntPtr fence; vkCreateFence(s_dev, ref fci, IntPtr.Zero, out fence);
+        SubmitI si = new SubmitI(); si.sType = 4; si.cbc = 1; si.pCB = PinH(cb);
+        vkQueueSubmit(s_queue, 1, ref si, fence);
+        vkWaitForFences(s_dev, 1, ref fence, 1, ulong.MaxValue);
+
+        vkMapMemory(s_dev, cMem, 0, cB, 0, out p); Marshal.Copy(p, C, 0, (int)(M * N)); vkUnmapMemory(s_dev, cMem);
+
+        vkDestroyFence(s_dev, fence, IntPtr.Zero);
+        vkDestroyCommandPool(s_dev, cpool, IntPtr.Zero);
+        vkDestroyDescriptorPool(s_dev, pool, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, aBuf, IntPtr.Zero); vkFreeMemory(s_dev, aMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, bBuf, IntPtr.Zero); vkFreeMemory(s_dev, bMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, cBuf, IntPtr.Zero); vkFreeMemory(s_dev, cMem, IntPtr.Zero);
+        return 0;
+    }
+}
