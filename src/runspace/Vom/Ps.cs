@@ -113,7 +113,7 @@ public static unsafe partial class Vom
     {
         int callerTid = Environment.CurrentManagedThreadId;
         bool callerIsPool = Thread.CurrentThread.IsThreadPoolThread;
-        string root = $"\\Sessions\\__gciso_{DateTime.Now:HHmmssfff}";
+        string root = $"\\System\\__gciso_{DateTime.Now:HHmmssfff}";
         var r = CreateOwner(root, maxBytes: (long)regions * regionBytes + (64L << 20), maxElements: regions + 1024);
 
         int spawnTid = 0; bool spawnIsPool = true, spawnIsBg = false;
@@ -132,7 +132,10 @@ public static unsafe partial class Vom
             gc0 = GC.CollectionCount(0) - b0; gc1 = GC.CollectionCount(1) - b1; gc2 = GC.CollectionCount(2) - b2;
             nativeBytes = Interlocked.Read(ref c.CurrentBytes);
             ready.Set();
-            try { c.Token.WaitHandle.WaitOne(); } catch { }   // park: keep the regions live until the cascade reclaim
+            // park: keep the regions live until the cascade reclaim cancels the token; an Interrupt during the
+            // park is expected (the cascade's kill escalation) — report it, never swallow it silently (SS007).
+            try { c.Token.WaitHandle.WaitOne(); }
+            catch (ThreadInterruptedException) { Dg.Log("vom", $"{c.Path}: gciso park interrupted (expected on cascade)"); }
         });
 
         ready.Wait(10000);
