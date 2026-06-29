@@ -20,5 +20,6 @@
     <Compile Include="GpuVulkan.cs" />
     <Content Include="gemm.spv" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\onnxnet\Onnx.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>
 </Project>

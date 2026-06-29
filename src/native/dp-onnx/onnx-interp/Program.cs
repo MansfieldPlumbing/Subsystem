@@ -12,6 +12,7 @@
 //
 using System.Runtime.InteropServices;
 using System.Numerics;
+using Microsoft.Data.Sqlite;
 using Onnx;
 
 return args.Length == 0 ? Usage()
@@ -28,6 +29,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "run-compiled" ? RunCompiled(args)
      : args[0] == "gpu-test" ? GpuTest(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
+     : args[0] == "db" ? ToDb(args)
      : Usage();
 
 // surgery: expose EVERY node output as a graph output (no type -> ORT infers) for a full divergence map
@@ -72,7 +74,86 @@ static int NodeInfo(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx> | run <model.onnx> [--inputs <dir>] [--out <wav>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
+// db: compile the ONNX graph into a queryable SQLite model store (the 6-table schema). The graph becomes
+// rows — op triage ("which ops can't run on a backend?") is a SELECT, and per-op backend routing is the
+// `backend` column. Weights are raw-byte BLOBs (dtype + dims carried). The model becomes a Cm-projectable
+// capability instead of an opaque protobuf blob (CRQ143).
+static int ToDb(string[] args)
+{
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx db <model.onnx> <out.db>"); return 1; }
+    var g = ModelProto.Parser.ParseFrom(File.ReadAllBytes(args[1])).Graph;
+    var dbPath = args[2];
+    if (File.Exists(dbPath)) File.Delete(dbPath);
+    using var c = new SqliteConnection($"Data Source={dbPath}");
+    c.Open();
+    using (var ddl = c.CreateCommand())
+    {
+        ddl.CommandText = @"
+CREATE TABLE graph_io(kind TEXT, name TEXT, elem_type INTEGER, shape TEXT);
+CREATE TABLE node(id INTEGER PRIMARY KEY, ord INTEGER, op_type TEXT, name TEXT, backend TEXT);
+CREATE TABLE node_io(node_id INTEGER, slot INTEGER, kind TEXT, value_name TEXT);
+CREATE TABLE node_attr(node_id INTEGER, name TEXT, type INTEGER, i INTEGER, f REAL, s TEXT, ints TEXT, floats TEXT, tensor_id INTEGER);
+CREATE TABLE tensor(id INTEGER PRIMARY KEY, name TEXT, dtype INTEGER, dims TEXT, data BLOB);";
+        ddl.ExecuteNonQuery();
+    }
+    using var tx = c.BeginTransaction();
+    SqliteCommand P(string sql, params (string, object?)[] ps)
+    {
+        var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = sql;
+        foreach (var (k, v) in ps) cmd.Parameters.AddWithValue(k, v ?? DBNull.Value);
+        return cmd;
+    }
+    int tid = 0;
+    int WriteTensor(TensorProto t)
+    {
+        int id = tid++;
+        byte[] data = t.RawData != null && t.RawData.Length > 0 ? t.RawData.ToByteArray() : TypedBytes(t);
+        using var cmd = P("INSERT INTO tensor(id,name,dtype,dims,data) VALUES($id,$n,$dt,$dm,$d)",
+            ("$id", id), ("$n", t.Name ?? ""), ("$dt", t.DataType), ("$dm", string.Join(",", t.Dims)), ("$d", data));
+        cmd.ExecuteNonQuery();
+        return id;
+    }
+    foreach (var t in g.Initializer) WriteTensor(t);
+    foreach (var vi in g.Input)  using (var cmd = P("INSERT INTO graph_io(kind,name,elem_type,shape) VALUES('in',$n,$e,$s)",  ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
+    foreach (var vi in g.Output) using (var cmd = P("INSERT INTO graph_io(kind,name,elem_type,shape) VALUES('out',$n,$e,$s)", ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
+    int nid = 0;
+    foreach (var nd in g.Node)
+    {
+        int id = nid++;
+        using (var cmd = P("INSERT INTO node(id,ord,op_type,name,backend) VALUES($id,$o,$op,$n,NULL)", ("$id", id), ("$o", id), ("$op", nd.OpType ?? ""), ("$n", nd.Name ?? ""))) cmd.ExecuteNonQuery();
+        for (int k = 0; k < nd.Input.Count; k++)  using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'in',$v)",  ("$id", id), ("$s", k), ("$v", nd.Input[k] ?? ""))) cmd.ExecuteNonQuery();
+        for (int k = 0; k < nd.Output.Count; k++) using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'out',$v)", ("$id", id), ("$s", k), ("$v", nd.Output[k] ?? ""))) cmd.ExecuteNonQuery();
+        foreach (var a in nd.Attribute)
+        {
+            object? aTid = a.T != null ? WriteTensor(a.T) : null;
+            using var cmd = P("INSERT INTO node_attr(node_id,name,type,i,f,s,ints,floats,tensor_id) VALUES($id,$n,$t,$i,$f,$s,$ii,$ff,$tt)",
+                ("$id", id), ("$n", a.Name ?? ""), ("$t", (int)a.Type), ("$i", a.I), ("$f", a.F),
+                ("$s", a.S != null ? a.S.ToStringUtf8() : null), ("$ii", string.Join(",", a.Ints)), ("$ff", string.Join(",", a.Floats)), ("$tt", aTid));
+            cmd.ExecuteNonQuery();
+        }
+    }
+    tx.Commit();
+    Console.WriteLine($"wrote {dbPath}  nodes={nid} tensors={tid} inputs={g.Input.Count} outputs={g.Output.Count}");
+    return 0;
+}
+
+static byte[] TypedBytes(TensorProto t)
+{
+    if (t.FloatData.Count > 0)  { var a = t.FloatData.ToArray();  var b = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
+    if (t.Int64Data.Count > 0)  { var a = t.Int64Data.ToArray();  var b = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
+    if (t.Int32Data.Count > 0)  { var a = t.Int32Data.ToArray();  var b = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
+    if (t.DoubleData.Count > 0) { var a = t.DoubleData.ToArray(); var b = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
+    return Array.Empty<byte>();
+}
+
+static string ShapeStr(ValueInfoProto vi)
+{
+    var dim = vi.Type?.TensorType?.Shape?.Dim;
+    if (dim == null) return "";
+    return string.Join(",", dim.Select(d => !string.IsNullOrEmpty(d.DimParam) ? d.DimParam : d.DimValue.ToString()));
+}
+
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx> | run <model.onnx> [--inputs <dir>] [--out <wav>] | db <model.onnx> <out.db> | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
@@ -781,7 +862,7 @@ public class Interp
         "Equal","Greater","Less","GreaterOrEqual","LessOrEqual","And","Or","Not","Min","Max","Mod","Round","Atan","Sign",
         "Where","Expand","ConstantOfShape","Range","ReduceMean","ReduceSum","CumSum","Slice","Pad",
         "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND",
-        "Split","Tile","GroupNormalization","Gelu",
+        "Split","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd",
     };
 
     public static bool Profile = false;
@@ -894,6 +975,8 @@ public class Interp
             case "NonZero": return One(NonZero(x[0]));
             case "ScatterND": return One(ScatterND(x, n));
             case "LSTM": return Lstm(x, n);
+            case "InstanceNormalization": return One(InstanceNorm(x, n));
+            case "ReduceProd": return One(ReduceProd(x, n));
             default: throw new NotImplementedException($"node #?: {n.OpType} (name={n.Name})");
         }
     }
@@ -1640,6 +1723,60 @@ public class Interp
                 for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; float sv = sf[c], bv = bf[c]; for (long h = 0; h < H; h++) o[b + h] = (float)((xf[b + h] - mean) * invStd * sv + bv); }
             }
         return Tensor.F(o, X.Shape);
+    }
+
+    // ONNX InstanceNormalization (input, scale, B; epsilon) — normalize each channel independently over its
+    // spatial dims (= GroupNormalization with num_groups = channels). scale/B are per-channel [C].
+    static Tensor InstanceNorm(Tensor[] x, NodeProto n)
+    {
+        var X = x[0]; var sf = x[1].AsF(); var bf = x[2].AsF(); var xf = X.AsF();
+        int r = X.Shape.Length, N = X.Shape[0], C = X.Shape[1];
+        long H = 1; for (int k = 2; k < r; k++) H *= X.Shape[k];
+        float eps = F(n, "epsilon", 1e-5f);
+        var o = new float[X.Count];
+        for (int nn = 0; nn < N; nn++)
+            for (int c = 0; c < C; c++)
+            {
+                long b = ((long)nn * C + c) * H;
+                double sum = 0; for (long h = 0; h < H; h++) sum += xf[b + h];
+                double mean = sum / H;
+                double sumSq = 0; for (long h = 0; h < H; h++) { double diff = xf[b + h] - mean; sumSq += diff * diff; }
+                double invStd = 1.0 / Math.Sqrt(sumSq / H + eps);
+                float sv = sf[c], bv = bf[c];
+                for (long h = 0; h < H; h++) o[b + h] = (float)((xf[b + h] - mean) * invStd * sv + bv);
+            }
+        return Tensor.F(o, X.Shape);
+    }
+
+    // ONNX ReduceProd — product reduction over axes (axes/keepdims like ReduceMean/Sum, multiplicative).
+    // Preserves int for the common shape-product case (feeds Reshape/Expand); float otherwise.
+    static Tensor ReduceProd(Tensor[] x, NodeProto n)
+    {
+        var a = x[0]; int r = a.Shape.Length;
+        bool keep = L(n, "keepdims", 1) != 0;
+        long[] axesL = (x.Length > 1 && x[1] != null && x[1].Count > 0) ? x[1].AsI() : Array.ConvertAll(Ints(n, "axes"), v => (long)v);
+        var axes = axesL.Length == 0 ? new HashSet<int>(Enumerable.Range(0, r)) : new HashSet<int>(axesL.Select(v => (int)(v < 0 ? v + r : v)));
+        var osh = new List<int>(); var outDimOfIn = new int[r];
+        for (int k = 0; k < r; k++)
+        {
+            if (axes.Contains(k)) { if (keep) { outDimOfIn[k] = osh.Count; osh.Add(1); } else outDimOfIn[k] = -1; }
+            else { outDimOfIn[k] = osh.Count; osh.Add(a.Shape[k]); }
+        }
+        int[] oshA = osh.Count == 0 ? new[] { 1 } : osh.ToArray(); var oStr = ContigStrides(oshA);
+        long outN = 1; foreach (var dd in oshA) outN *= dd;
+        var idx = new int[r];
+        long OutIndex() { long oi = 0; for (int k = 0; k < r; k++) { int od = outDimOfIn[k]; if (od >= 0) { int coord = axes.Contains(k) && keep ? 0 : idx[k]; oi += coord * oStr[od]; } } return oi; }
+        void Step() { for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; } }
+        if (a.IsInt)
+        {
+            var ip = a.Ip; var acc = new long[outN]; for (long i = 0; i < outN; i++) acc[i] = 1;
+            for (long lin = 0; lin < ip.Length; lin++) { acc[OutIndex()] *= ip[lin]; Step(); }
+            return Tensor.I(acc, oshA);
+        }
+        var d = a.AsF(); var accF = new double[outN]; for (long i = 0; i < outN; i++) accF[i] = 1.0;
+        for (long lin = 0; lin < d.Length; lin++) { accF[OutIndex()] *= d[lin]; Step(); }
+        var o = new float[outN]; for (long i = 0; i < outN; i++) o[i] = (float)accF[i];
+        return Tensor.F(o, oshA);
     }
 
     // ONNX Gelu (opset 20) — none=exact erf, tanh=approx. [drafted by Antigravity #3, reviewed]
