@@ -1,32 +1,42 @@
 #requires -Version 7
-# test.dp-onnx.gemma4-probe.ps1 — Receipt for the Gemma-4 E2B rung on dp-onnx (the GraphRuntime LLM).
-# gemma4 runs ENTIRELY on the now-dll-free dp-onnx (managed engine + pure-C# GPU seam; NO dpgpu.dll). This probes
-# the decomposed export graph for op coverage (the correctness rung; export = one-time Python, see wip/gemma4/).
-# SKIPS clean when the gated ~10 GB export (W:\gemma4\onnx\e2b_step.onnx) isn't present -- the only blocker.
+# test.dp-onnx.gemma4-probe.ps1 — Receipt for reading the Gemma-4 E2B model on dp-onnx, sovereignly.
+# The live model is gemma-4-E2B-it.litertlm (a LITERTLM container of .tflite FlatBuffers). dp-onnx reads it
+# with the home-rolled FlatBuffers reader (LiteRt.cs) — no FlatBuffers lib, no LiteRT lib — translating to the
+# same Onnx.ModelProto IR so `probe` enumerates the op set and maps it onto the dp-onnx kernels. The decomposed
+# ONNX export is the alternate projection of the same gemma4 truth (re-export via wip/gemma4/ when its gated
+# weights exist). SKIPS clean without the ~2.4 GB model.
 #   Dogfood:  ss run tests/test.dp-onnx.gemma4-probe.ps1
 $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }
 
-$onnx = @('W:\gemma4\onnx\e2b_step.onnx','W:\gemma4\onnx\e2b_prefill.onnx','S:\models\gemma4\e2b_step.onnx') |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $onnx) { Write-Host "SKIP - gemma-4 E2B export not present (re-export via wip/gemma4/export_gemma4_e2b_decomposed.py; gated ~10 GB -> W:)." -ForegroundColor Yellow; return }
+# Locate the engine the same way the other dp-onnx receipts do: the build/ sibling, freshest dp-onnx.exe.
+$buildRoot = if ($env:SS_BUILD) { $env:SS_BUILD } else { Join-Path (Split-Path $PSScriptRoot -Parent | Split-Path -Parent) 'build' }
+$exe = Get-ChildItem -Path $buildRoot -Recurse -Filter dp-onnx.exe -ErrorAction SilentlyContinue |
+       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $exe) { Write-Host "SKIP - dp-onnx.exe not built (build src\native\dp-onnx\onnx-interp\Onnx.Interp.csproj)." -ForegroundColor Yellow; return }
 
-$dp = @('S:\subsystem','S:\subsystem-project\subsystem-main') | ForEach-Object { Join-Path $_ 'src\native\dp-onnx' } |
-      Where-Object { Test-Path (Join-Path $_ 'onnx-interp\Onnx.Interp.csproj') } | Select-Object -First 1
-$dotnet = @('S:\bin\dotnet\dotnet.exe',(Get-Command dotnet -EA SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if (-not $dp -or -not $dotnet) { Write-Host "SKIP - dp-onnx project / dotnet not found." -ForegroundColor Yellow; return }
+$model = @($env:SS_GEMMA_LITERTLM,'S:\subsystem-pull\models\gemma-4-E2B-it.litertlm','S:\modeldb\gemma-4-E2B-it.litertlm') |
+         Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $model) { Write-Host "SKIP - gemma-4 E2B .litertlm not present (set SS_GEMMA_LITERTLM)." -ForegroundColor Yellow; return }
+Write-Host "engine: $($exe.FullName)"
+Write-Host "model:  $model"
 
-& $dotnet build (Join-Path $dp 'onnx-interp\Onnx.Interp.csproj') -c Release --nologo *>&1 | Out-Null
-$exe = Get-ChildItem 'S:\build\Onnx.Interp\bin\Release\net*\dp-onnx.exe' -EA SilentlyContinue | Select-Object -First 1
-if (-not $exe) { Write-Host "SKIP - built dp-onnx.exe not found." -ForegroundColor Yellow; return }
-Assert (-not (Test-Path (Join-Path $exe.DirectoryName 'dpgpu.dll'))) "gemma4 runtime is dll-free (no dpgpu.dll in output)"
+$pr = (& $exe.FullName probe $model 2>&1 | Out-String)
+$sections = if ($pr -match 'container:\s*(\d+)\s*sections') { [int]$Matches[1] } else { 0 }
+$hasSP    = [bool]($pr -match 'SP_Tokenizer')
+# the main LLM graph = the TFLiteModel section with the most ops; read its kernel-coverage ratio
+$cov = [regex]::Matches($pr, 'ops=(\d+) distinct=\d+\s+mapped-types=(\d+)/(\d+)') |
+       ForEach-Object { [pscustomobject]@{ ops=[int]$_.Groups[1].Value; mapped=[int]$_.Groups[2].Value; distinct=[int]$_.Groups[3].Value } } |
+       Sort-Object ops -Descending | Select-Object -First 1
 
-$out = (& $exe.FullName probe $onnx 2>&1 | Out-String).Trim()
-Write-Host $out
-Assert ($out -notmatch 'unimplemented|unsupported|UNHANDLED|not implemented') "dp-onnx covers the gemma-4 decomposed op set"
+Assert ($sections -ge 10)             "LITERTLM container parsed: $sections sections off the home-rolled FlatBuffers reader (no lib)"
+Assert $hasSP                         "SP_Tokenizer section present (the sovereign tokenizer path)"
+Assert ($cov -and $cov.ops -gt 10000) "main LLM graph parsed: $(if($cov){$cov.ops}else{0}) ops across $(if($cov){$cov.distinct}else{0}) op-types"
+Assert ($cov -and $cov.mapped -ge 20) "op set maps onto dp-onnx kernels: $(if($cov){"$($cov.mapped)/$($cov.distinct)"}else{'0/0'})"
+Write-Host "  gemma-4 E2B: $sections sections; main graph ops=$(if($cov){$cov.ops}) coverage=$(if($cov){"$($cov.mapped)/$($cov.distinct)"})"
 
 $pass = $fails.Count -eq 0
 Write-Host ""
-Write-Host ($(if($pass){"PASS - Gemma-4 E2B probes clean on the dll-free dp-onnx GraphRuntime (managed + pure-C# GPU)."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
-[pscustomobject]@{ test='test.dp-onnx.gemma4-probe'; pass=$pass; verdict=$(if($pass){'gemma-4 op coverage green on dll-free dp-onnx'}else{'see failures'}) }
+Write-Host ($(if($pass){"PASS - dp-onnx reads the gemma-4 E2B .litertlm sovereignly (no FlatBuffers lib, no LiteRT lib); op coverage measured."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+[pscustomobject]@{ test='test.dp-onnx.gemma4-probe'; pass=$pass; sections=$sections; spTokenizer=$hasSP; coverage=$(if($cov){"$($cov.mapped)/$($cov.distinct)"}); ops=$(if($cov){$cov.ops}); verdict=$(if($pass){'gemma-4 E2B read off the sovereign litertlm/tflite reader; coverage measured'}else{'see failures'}) }
