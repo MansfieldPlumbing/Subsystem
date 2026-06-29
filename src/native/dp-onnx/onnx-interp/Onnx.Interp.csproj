@@ -16,6 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="Interp.cs" />
     <Compile Include="GpuD3D12.cs" />
     <Compile Include="GpuVulkan.cs" />
     <Content Include="gemm.spv" CopyToOutputDirectory="PreserveNewest" />
