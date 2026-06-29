@@ -11,4 +11,19 @@
     <BaseIntermediateOutputPath>$(SsBuild)\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
     <BaseOutputPath>$(SsBuild)\$(MSBuildProjectName)\bin\</BaseOutputPath>
   </PropertyGroup>
+
+  <!-- Runtime right-sizing: fuse off CoreCLR cruft modules across BOTH heads (the toxic diagnostic
+       thread + EventSource/ETW + managed-debugger attach + HTTP activity tracing + hot-reload + the
+       obsolete BinaryFormatter). EventSourceSupport=false is proven safe — the Android head ships it
+       and the app runs. KEPT deliberately: StackTraceSupport (Dg needs traces), BuiltInComInteropSupport
+       (WebView2 + the PE-factory COM vtables), readable exception text. Measure-then-decide (risky/big):
+       InvariantGlobalization, PublishTrimmed (pwsh trims badly). -->
+  <PropertyGroup>
+    <EnableEventPipe>false</EnableEventPipe>
+    <EventSourceSupport>false</EventSourceSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+  </PropertyGroup>
 </Project>
