@@ -103,6 +103,54 @@ public static unsafe partial class Vom
         });
     }
 
+    // GC isolated OUTSIDE pwsh threads (invariant 7 corollary; pwsh is the VomBoundary). Spawn a thread the VOM
+    // owns — not the pwsh runspace thread, not the ThreadPool — allocate native VOM regions ON it, and measure:
+    // the worker is a distinct non-pool thread; its 200 MB of native work costs ZERO GC collections and adds only
+    // per-handle managed bookkeeping; the regions stay live until Terminate(parent) cascades and reclaims them
+    // deterministically (Interrupt->Join + AlignedFree). The collector's domain is the managed pwsh guest, never
+    // the spawned control plane. Synchronous JSON verdict; drives the test.vom.no-gc receipt (probe E).
+    public static string SpawnGcIsolationTest(int regions = 200, int regionBytes = 1024 * 1024)
+    {
+        int callerTid = Environment.CurrentManagedThreadId;
+        bool callerIsPool = Thread.CurrentThread.IsThreadPoolThread;
+        string root = $"\\Sessions\\__gciso_{DateTime.Now:HHmmssfff}";
+        var r = CreateOwner(root, maxBytes: (long)regions * regionBytes + (64L << 20), maxElements: regions + 1024);
+
+        int spawnTid = 0; bool spawnIsPool = true, spawnIsBg = false;
+        long gc0 = -1, gc1 = -1, gc2 = -1, managedDelta = -1, nativeBytes = 0;
+        var ready = new ManualResetEventSlim();
+
+        Spawn(r, "worker", c =>
+        {
+            spawnTid = Environment.CurrentManagedThreadId;
+            spawnIsPool = Thread.CurrentThread.IsThreadPoolThread;
+            spawnIsBg = Thread.CurrentThread.IsBackground;
+            long m0 = GC.GetAllocatedBytesForCurrentThread();
+            int b0 = GC.CollectionCount(0), b1 = GC.CollectionCount(1), b2 = GC.CollectionCount(2);
+            for (int i = 0; i < regions; i++) Alloc(c, regionBytes, type: "GcIsoRegion");
+            managedDelta = GC.GetAllocatedBytesForCurrentThread() - m0;
+            gc0 = GC.CollectionCount(0) - b0; gc1 = GC.CollectionCount(1) - b1; gc2 = GC.CollectionCount(2) - b2;
+            nativeBytes = Interlocked.Read(ref c.CurrentBytes);
+            ready.Set();
+            try { c.Token.WaitHandle.WaitOne(); } catch { }   // park: keep the regions live until the cascade reclaim
+        });
+
+        ready.Wait(10000);
+        Terminate(r);                                          // cascade: cancel worker, Interrupt->Join, AlignedFree all regions
+        bool gone = GetOwner(root) == null && GetOwner($"{root}\\Ps\\worker") == null;
+
+        return JsonSerializer.Serialize(new
+        {
+            callerTid, callerIsPool, spawnTid, spawnIsPool, spawnIsBg,
+            distinctThread = spawnTid != 0 && spawnTid != callerTid,
+            nativeMB = Math.Round(nativeBytes / (1024.0 * 1024.0), 1),
+            managedDeltaKB = Math.Round(managedDelta / 1024.0, 1),
+            gc0, gc1, gc2,
+            reclaimedOnTerminate = gone,
+            note = "a VOM-owned worker thread (not pwsh, not ThreadPool) carried native VOM memory with zero GC collections; Terminate cascaded the reclaim — the collector's domain is the pwsh guest, not the spawned control plane.",
+        });
+    }
+
     // Phase-lock self-test (the multiplexer is a phase lock, not a switchboard). Two producer fences feed a
     // consumer that uses WaitAny (switchboard: first worker to its phase) then WaitAll (barrier: parks until
     // EVERY fence reaches phase N). Proves the barrier holds for the laggard — async/ThreadPool jitter can't

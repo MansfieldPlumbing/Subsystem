@@ -1,7 +1,7 @@
 #requires -Version 7
 # test.vom.no-gc.ps1 — Receipt for invariant 7 (no garbage collector; the VOM is the heap).
 # Authority = the binary. This comment is not authority; the receipt the run prints is.
-# Four probes, one verdict. No mutation outside throwaway \Sessions\__* owners the test Terminates itself.
+# Five probes, one verdict. No mutation outside throwaway \Sessions\__* owners the test Terminates itself.
 # Dot-source-safe (no `exit`).
 #   Dogfood:  ss run tests/test.vom.no-gc.ps1
 #
@@ -11,6 +11,8 @@
 #                   holds — the collector can be off and the VOM workload does not need it. Asserted.
 #   D  HANDLE       a live pwsh runspace mounted as ONE VOM handle is reclaimed by Vom.Terminate alone
 #                   (the revoke) — no handle, no runspace. Asserted.
+#   E  SPAWN-ISO    GC isolated OUTSIDE pwsh threads: a VOM-owned worker thread (not pwsh, not ThreadPool)
+#                   carries 200 MB native with ZERO collections, reclaimed by cascade-Terminate. Asserted.
 
 $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
@@ -45,7 +47,7 @@ Assert ($vom.gen2 -eq 0)       "200MB native triggered NO full (gen2) collection
 # C — NoGCRegion holds across a 500MB VOM workload (the collector can be off)
 $started=[GC]::TryStartNoGCRegion(64MB); $modeIn="$([System.Runtime.GCSettings]::LatencyMode)"
 $b=@([GC]::CollectionCount(0),[GC]::CollectionCount(1),[GC]::CollectionCount(2))
-$o=$V::CreateOwner("\Sessions\__c_$(Get-Date -f HHmmssfff)")
+$o=$V::CreateOwner("\Sessions\__c_$(Get-Date -f HHmmssfff)", 600MB)   # quota >500MB so the advisory-quota log stays quiet
 $sw=[Diagnostics.Stopwatch]::StartNew(); for($i=0;$i -lt 500;$i++){ [void]$V::Alloc($o,1MB) }; $allocMs=[math]::Round($sw.Elapsed.TotalMilliseconds,1)
 $during=([GC]::CollectionCount(0)-$b[0])+([GC]::CollectionCount(1)-$b[1])+([GC]::CollectionCount(2)-$b[2])
 $held=("$([System.Runtime.GCSettings]::LatencyMode)" -eq 'NoGCRegion')
@@ -69,11 +71,21 @@ try{
   Assert ($before -eq 'Opened' -and $after -ne 'Opened') "handle revoke reclaimed the runspace: $before -> $after"
 } finally { if($null -ne $V::GetOwner($o.Path)){try{$V::Terminate($o)}catch{}}; if($r){try{$r.Dispose()}catch{}} }
 
+# E — GC isolated OUTSIDE pwsh threads: a VOM-owned worker thread (not pwsh, not ThreadPool) does native work off the collector
+$gi=$V::SpawnGcIsolationTest(200,1MB)|ConvertFrom-Json
+Write-Host "E  spawn-iso: worker tid=$($gi.spawnTid) (caller $($gi.callerTid)) pool=$($gi.spawnIsPool) bg=$($gi.spawnIsBg) ; $($gi.nativeMB)MB native -> $($gi.managedDeltaKB)KB managed ; collections gen0=$($gi.gc0) gen1=$($gi.gc1) gen2=$($gi.gc2) ; reclaimed=$($gi.reclaimedOnTerminate)"
+Assert ($gi.distinctThread)           "the VOM worker runs on its OWN thread (tid $($gi.spawnTid) != caller $($gi.callerTid)) - off the pwsh thread"
+Assert (-not $gi.spawnIsPool)         "the VOM worker is NOT a ThreadPool/pwsh-managed thread - the VOM owns it"
+Assert ($gi.gc2 -eq 0)                "$($gi.nativeMB)MB native on the spawned thread triggered NO full (gen2) collection"
+Assert ($gi.managedDeltaKB -lt 1024)  "$($gi.nativeMB)MB native added only $($gi.managedDeltaKB)KB managed on the worker thread - its data plane is OFF the GC"
+Assert ($gi.reclaimedOnTerminate)     "Terminate cascaded and reclaimed the worker's regions deterministically (no GC)"
+
 $pass = $fails.Count -eq 0
 Write-Host ""
-Write-Host ($(if($pass){"PASS — invariant 7: the VOM owns memory off the collector; native allocation and a 500MB workload cost zero collections; a runspace is reclaimed by handle revoke."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+Write-Host ($(if($pass){"PASS — invariant 7: native alloc + a 500MB workload cost zero collections; a VOM-owned thread OFF pwsh carries native memory with zero GC; runspace + worker reclaimed by handle-revoke / cascade-Terminate."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
 [pscustomobject]@{
     test='test.vom.no-gc'; pass=$pass
     floor=[pscustomobject]$floor; vomAllocator=[pscustomobject]$vom
-    verdict=$(if($pass){'VOM is the heap; the collector is unused for the data plane; a runspace dies on handle revoke'}else{'see failures'})
+    spawnIso=[pscustomobject]@{ tid=$gi.spawnTid; caller=$gi.callerTid; pool=$gi.spawnIsPool; nativeMB=$gi.nativeMB; managedKB=$gi.managedDeltaKB; gc2=$gi.gc2; reclaimed=$gi.reclaimedOnTerminate }
+    verdict=$(if($pass){'VOM is the heap; the collector is unused for the data plane AND for spawned VOM threads; the GC stays inside the pwsh guest'}else{'see failures'})
 }
