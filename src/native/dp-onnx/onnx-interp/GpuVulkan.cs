@@ -4,6 +4,8 @@
 // descriptor-layout/pipeline-layout/pipeline; per-call buffers/descriptors/command-buffer/fence destroyed.
 using System.Runtime.InteropServices;
 
+namespace DpOnnx;
+
 unsafe static class GpuVulkan
 {
     const string VK = "vulkan-1.dll";

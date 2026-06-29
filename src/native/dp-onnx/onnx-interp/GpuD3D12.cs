@@ -6,6 +6,8 @@
 // (V340 over P2000) with DPGPU_ADAPTER override, parity with dpgpu.cpp.
 using System.Runtime.InteropServices;
 
+namespace DpOnnx;
+
 unsafe static class GpuD3D12
 {
     [DllImport("d3d12.dll", CallingConvention = CallingConvention.StdCall)] static extern int D3D12CreateDevice(IntPtr a, uint fl, byte[] riid, out IntPtr dev);

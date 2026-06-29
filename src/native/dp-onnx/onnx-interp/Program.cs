@@ -14,6 +14,7 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Data.Sqlite;
 using Onnx;
+using DpOnnx;
 
 return args.Length == 0 ? Usage()
      : args[0] == "selftest" ? SelfTest()
@@ -193,6 +194,7 @@ static int Emit(string[] args)
     sb.AppendLine("using System;");
     sb.AppendLine("using System.Collections.Generic;");
     sb.AppendLine("using Onnx;");
+    sb.AppendLine("using DpOnnx;");
     sb.AppendLine("namespace DpOnnx.Compiled {");
     sb.AppendLine("  public static class ModelInstance {");
     sb.AppendLine("    static Dictionary<string,Tensor> W = new();");

@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Onnx;
 
+namespace DpOnnx;
+
 public class Tensor
 {
     public int[] Shape;
