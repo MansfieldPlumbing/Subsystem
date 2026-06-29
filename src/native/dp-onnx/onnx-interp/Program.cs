@@ -12,7 +12,6 @@
 //
 using System.Runtime.InteropServices;
 using System.Numerics;
-using Google.Protobuf;
 using Onnx;
 
 return args.Length == 0 ? Usage()

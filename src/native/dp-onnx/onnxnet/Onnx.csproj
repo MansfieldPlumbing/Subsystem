@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Generates Onnx.dll: the ONNX protobuf schema as .NET objects, so PowerShell
-       (and ss.exe) can build/edit ModelProto graphs natively. No python. -->
+  <!-- Onnx: the ONNX schema as hand-rolled .NET POCOs + a minimal protobuf reader/writer
+       (OnnxWire.cs). No Google.Protobuf, no Grpc.Tools, no codegen — so dp-onnx folds into the
+       in-proc Roslyn build (ss build self) with no NuGet dep (CRQ143). net11 = its only consumer
+       (the dp-onnx interpreter). onnx.proto kept as the schema reference, not compiled. -->
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <AssemblyName>Onnx</AssemblyName>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -10,10 +12,6 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
-    <PackageReference Include="Grpc.Tools" Version="2.68.1" PrivateAssets="All" />
-  </ItemGroup>
-  <ItemGroup>
-    <Protobuf Include="onnx.proto" GrpcServices="None" ProtoRoot="." />
+    <None Include="onnx.proto" />
   </ItemGroup>
 </Project>
