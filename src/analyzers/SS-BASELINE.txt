@@ -13,7 +13,6 @@ SS003|Registrar.cs|Static Dictionary — a parallel store of truth; live objects
 SS003|Rs.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|ScreenStreamCmdlets.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Sessions.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
-SS004|Slot.cs|Path literal '\Slots\Objects\faulting' is not a real namespace root — codename/HKOM/.ini paths are a store outside the one namespace (\Capability, \Shell, \Device, \Sessions, \Agent, \System)
 SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
@@ -150,7 +149,6 @@ SS007|WebViewDirectPortAdapter.cs|Empty catch block — a failure must degrade A
 SS007|WinDg.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS008|ScreenStreamCmdlets.cs|Cmdlet method 'PackYuv420Flat' returns byte[] — memory-bearing data must travel as a VOM handle (owned, refcounted, fenced), never a raw buffer/pointer across the boundary
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable

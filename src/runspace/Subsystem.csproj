@@ -4,7 +4,7 @@
     <RuntimeIdentifiers Condition="'$(SsX64)' == 'true'">android-arm64;android-x64</RuntimeIdentifiers>
     <RuntimeIdentifiers Condition="'$(RuntimeIdentifiers)' == ''">android-arm64</RuntimeIdentifiers>
     <TargetFramework>net11.0-android</TargetFramework>
-    <SupportedOSPlatformVersion>36.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>35.0</SupportedOSPlatformVersion>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>

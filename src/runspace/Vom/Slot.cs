@@ -29,7 +29,7 @@ public sealed class Slot
 
 public static unsafe partial class Vom
 {
-    public const string SlotsOwner = "\\Slots";
+    public const string SlotsOwner = "\\System\\Slots";
 
     // Load an assembly image into a fresh collectible ALC and register it as a refcounted handle under
     // \Slots (RefCount 1 = the loader's own reference). The handle's Reclaim unloads the ALC, so
@@ -169,7 +169,7 @@ public static unsafe partial class Vom
         var v1 = LoadSlot("good", EmitValueAssembly("SlotGood", 1));
         var (live, rolledBack) = ApplySlotWithRollback(v1, "faulting", EmitFaultingAssembly("SlotFaulting"), s => InvokeValue(s) == 1);
         bool v1Still = ReferenceEquals(live, v1) && InvokeValue(v1) == 1;   // we kept v1
-        bool faultingGone = !TryGetByPath(owner, "\\Slots\\Objects\\faulting", out _); // the faulting slot handle is freed
+        bool faultingGone = !TryGetByPath(owner, "\\System\\Slots\\Objects\\faulting", out _); // the faulting slot handle is freed
         return (v1Still, faultingGone, rolledBack);
     }
 

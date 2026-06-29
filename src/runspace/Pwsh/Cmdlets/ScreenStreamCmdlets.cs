@@ -183,7 +183,7 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
                 }
 
                 // 1. Pack YUV420 flat bytes
-                byte[] yuvData = PackYuv420Flat(img, w, h);
+                byte[] yuvData = ScreenYuv.PackYuv420Flat(img, w, h);
                 img.Close();
 
                 // 2. Blast raw YUV420 (Channel 0) if within startup phase
@@ -258,7 +258,13 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
         await stdoutStream.FlushAsync(ct);
     }
 
-    private static byte[] PackYuv420Flat(Android.Media.Image image, int w, int h)
+}
+
+// Pure YUV420 plane-packing — a non-cmdlet helper (memory-bearing byte[] stays internal to the encode
+// loop; it never crosses the cmdlet boundary, so it lives off the Cmdlet surface — SS008).
+internal static class ScreenYuv
+{
+    internal static byte[] PackYuv420Flat(Android.Media.Image image, int w, int h)
     {
         int ySize = w * h;
         int uvSize = (w / 2) * (h / 2);
@@ -365,12 +371,13 @@ internal sealed class ScreenStreamSession(
     public ImageReader     ImageReader    { get; } = imageReader;
     public CancellationTokenSource Cts   { get; } = cts;
 
-    public PSObject ToInfo(string id) =>
-        new PSObject().Also(o =>
-        {
-            o.Properties.Add(new PSNoteProperty("SessionId", id));
-            o.Properties.Add(new PSNoteProperty("Active",    !Cts.IsCancellationRequested));
-        });
+    public PSObject ToInfo(string id)
+    {
+        var o = new PSObject();
+        o.Properties.Add(new PSNoteProperty("SessionId", id));
+        o.Properties.Add(new PSNoteProperty("Active",    !Cts.IsCancellationRequested));
+        return o;
+    }
 }
 
 internal static class ScreenStreamRegistry
@@ -387,7 +394,7 @@ internal static class ScreenStreamRegistry
         s.Encoder.Stop();
         s.Encoder.Release();
         s.VirtualDisplay.Release();
-        s.ImageReader.Release();
+        s.ImageReader.Close();
         return true;
     }
 
