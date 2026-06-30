@@ -467,6 +467,16 @@ public static class Tflite
                     var (scl, zr, ax) = SynthQuant(ts[outIx[0]], g);
                     node.Input.Add(ins[0]); if (scl != null) { node.Input.Add(scl); node.Input.Add(zr); if (ax >= 0) node.Attribute.Add(IntAttr("axis", ax)); }
                     break; }
+                case "SUM": case "MEAN":   // ReduceSum / ReduceMean: tflite axes are input[1]; keep_dims = ReducerOptions[0]
+                    foreach (var s in ins) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("keepdims", boVal != 0 ? fr.FieldU8(boVal, 0) : 0));
+                    break;
+                case "FULLY_CONNECTED":    // y = input . weights^T (+ bias) -> Gemm(input, weights, bias), transB=1
+                    foreach (var s in ins) if (!string.IsNullOrEmpty(s)) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("transB", 1));
+                    { int act = boVal != 0 ? fr.FieldU8(boVal, 0) : 0;     // FullyConnectedOptions.fused_activation_function[0]
+                      if (act != 0) throw new NotImplementedException($"op[{o}] FULLY_CONNECTED fused_activation={act} unmapped"); }
+                    break;
                 default:
                     if (!AttrFreeSafe.Contains(tf))
                         throw new NotImplementedException($"op[{o}] {tf} -> {onnx}: attribute lowering not implemented (slice 2 targets the attribute-free section ops)");
@@ -492,7 +502,7 @@ public static class Tflite
     // ONNX ops whose dp-onnx kernels need no attributes for a faithful translation (broadcast/elementwise/select/cast).
     static readonly HashSet<string> AttrFreeSafe = new()
     {
-        "ADD","SUB","MUL","DIV","TANH","LOGISTIC","SIN","COS","SIGN","RSQRT",
+        "ADD","SUB","MUL","DIV","TANH","LOGISTIC","SIN","COS","SIGN","RSQRT","SOFTMAX",
         "EQUAL","NOT_EQUAL","LESS","GREATER_EQUAL","LOGICAL_AND","LOGICAL_OR","LOGICAL_NOT",
         "SELECT","SELECT_V2","MAXIMUM","FLOOR_MOD","CAST",
     };

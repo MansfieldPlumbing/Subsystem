@@ -52,6 +52,17 @@ Assert ($rOuts -ge 1) "section [2] produced $rOuts output tensor(s) off the sove
 Assert ($rFinite)    "section [2] output is finite (no NaN/Inf) — the translated embedder graph is numerically live"
 Write-Host "  gemma-4 E2B slice 2: section [2] embedder ran $ran nodes -> $rOuts finite output(s) on dp-onnx"
 
+# Slice 2b: a real compute block (not just the embedding) — section [5] is the audio-adapter RMSNorm + projection
+# (ReduceSum w/ keep_dims off the builtin_options union, Rsqrt, FULLY_CONNECTED -> Gemm transB). Translated + run.
+$r5 = (& $exe.FullName run $model --section 5 2>&1 | Out-String)
+$ran5     = if ($r5 -match '\[5\]\s+RAN\s+nodes=(\d+)') { [int]$Matches[1] } else { 0 }
+$r5Finite = [bool]($r5 -match '\[5\]\s+RAN\s+nodes=\d+.*finite=True')
+$r5Gemm   = [bool]($r5 -match 'FULLY_CONNECTED\s+-> Gemm')
+Assert ($ran5 -ge 11) "section [5] (RMSNorm + projection) translated + RAN end-to-end through Interp: $ran5 nodes"
+Assert ($r5Gemm)      "FULLY_CONNECTED lowered to Gemm (transB) + SUM->ReduceSum (keep_dims off builtin_options)"
+Assert ($r5Finite)    "section [5] output is finite — a real gemma compute block runs on dp-onnx, not just the embedder"
+Write-Host "  gemma-4 E2B slice 2b: section [5] RMSNorm+FC ran $ran5 nodes finite on dp-onnx"
+
 $pass = $fails.Count -eq 0
 Write-Host ""
 Write-Host ($(if($pass){"PASS - dp-onnx reads the gemma-4 E2B .litertlm sovereignly (no FlatBuffers lib, no LiteRT lib); op coverage measured."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
