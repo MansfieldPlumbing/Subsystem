@@ -11,10 +11,9 @@ using System.Threading.Tasks;
 using Onnx;
 using DpOnnx;
 using Subsystem.Vom;
-using Subsystem.RuntimeBroker;
 using VomClass = Subsystem.Vom.Vom;
 
-namespace Subsystem.Rb
+namespace Subsystem.RuntimeBroker
 {
     // Sovereign dp-onnx backed Runtime: the host-side DECODE LOOP that turns a prompt
     // into streamed tokens by driving the in-proc dp-onnx interpreter.
