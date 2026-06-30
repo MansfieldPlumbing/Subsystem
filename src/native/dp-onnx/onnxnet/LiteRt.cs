@@ -400,10 +400,10 @@ public static class Tflite
     static void SpawnSubGraph(byte[] tfl, int sgIx, List<string> parentIns, List<string> parentOuts, GraphProto g, string pfx)
     {
         var cg = ToModelProto(tfl, sgIx, out _).Graph;
+        // Inner graph-inputs -> parent operands (positional); every other value/init name -> prefixed (unique).
         var rename = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < cg.Input.Count && i < parentIns.Count; i++) rename[cg.Input[i].Name] = parentIns[i];
-        for (int i = 0; i < cg.Output.Count && i < parentOuts.Count; i++) rename[cg.Output[i].Name] = parentOuts[i];
-        string Map(string n) => string.IsNullOrEmpty(n) ? n : (rename.TryGetValue(n, out var r) ? r : pfx + n);
+        string Map(string nm) => string.IsNullOrEmpty(nm) ? nm : (rename.TryGetValue(nm, out var r) ? r : pfx + nm);
         foreach (var init in cg.Initializer) { init.Name = Map(init.Name); g.Initializer.Add(init); }
         foreach (var nd in cg.Node)
         {
@@ -412,6 +412,16 @@ public static class Tflite
             nd.Input.Clear(); foreach (var s in ri) nd.Input.Add(s);
             nd.Output.Clear(); foreach (var s in ro) nd.Output.Add(s);
             g.Node.Add(nd);
+        }
+        // Bind each composite result to the decomposition's i-th output via Identity -- robust to a passthrough
+        // output (output == an input, no producing node) that a direct rename would leave dangling.
+        for (int i = 0; i < parentOuts.Count && i < cg.Output.Count; i++)
+        {
+            if (string.IsNullOrEmpty(parentOuts[i])) continue;
+            var id = new NodeProto { OpType = "Identity", Name = pfx + "bind" + i };
+            id.Input.Add(Map(cg.Output[i].Name));
+            id.Output.Add(parentOuts[i]);
+            g.Node.Add(id);
         }
     }
 
