@@ -339,6 +339,26 @@ public static class Tflite
     static AttributeProto IntAttr(string name, long v) =>
         new() { Name = name, Type = AttributeProto.Types.AttributeType.Int, I = v };
 
+    static TensorProto I64Init(string name, long[] vals)
+    { var t = new TensorProto { Name = name, DataType = 7 }; t.Dims.Add((long)vals.Length); foreach (var v in vals) t.Int64Data.Add(v); return t; }
+
+    // Read a constant tensor's integer values (INT32/INT64 buffer) at translation time — for paddings, perm,
+    // begin/size that tflite carries as a constant input but ONNX wants as an attribute or a reshaped initializer.
+    static long[] ConstInts(byte[] tfl, int tStart, int bufStart, int bufCount, int ix)
+    {
+        var fr = new FlatReader(tfl);
+        int tn = fr.Deref(tStart + ix * 4);
+        int type = fr.FieldU8(tn, 1);
+        int bufIx = (int)fr.FieldU32(tn, 2);
+        if (bufIx <= 0 || bufIx >= bufCount) return Array.Empty<long>();
+        int df = fr.Field(fr.Deref(bufStart + bufIx * 4), 0);
+        if (df == 0) return Array.Empty<long>();
+        var b = fr.VecBytes(df);
+        if (type == 2) { var o = new long[b.Length / 4]; for (int k = 0; k < o.Length; k++) o[k] = BitConverter.ToInt32(b, k * 4); return o; }
+        if (type == 4) { var o = new long[b.Length / 8]; for (int k = 0; k < o.Length; k++) o[k] = BitConverter.ToInt64(b, k * 8); return o; }
+        return Array.Empty<long>();
+    }
+
     // Synthesize ONNX scale/zero_point initializers from a tflite tensor's QuantizationParameters; returns the
     // initializer names + per-axis axis (or -1 when per-tensor / unquantized). scale=FLOAT, zero_point=INT64.
     static (string scale, string zero, int axis) SynthQuant(TT t, GraphProto g)
@@ -477,6 +497,39 @@ public static class Tflite
                     { int act = boVal != 0 ? fr.FieldU8(boVal, 0) : 0;     // FullyConnectedOptions.fused_activation_function[0]
                       if (act != 0) throw new NotImplementedException($"op[{o}] FULLY_CONNECTED fused_activation={act} unmapped"); }
                     break;
+                case "PAD": {              // tflite paddings [r,2] (begin,end per axis) -> ONNX pads [all begins, all ends]
+                    node.Input.Add(ins[0]);
+                    long[] pp = ConstInts(tfl, tStart, bufStart, bufCount, inIx[1]);
+                    int rr = pp.Length / 2; var onnxPads = new long[rr * 2];
+                    for (int d = 0; d < rr; d++) { onnxPads[d] = pp[2 * d]; onnxPads[rr + d] = pp[2 * d + 1]; }
+                    var pt = I64Init(node.Name + "_pads", onnxPads); g.Initializer.Add(pt); node.Input.Add(pt.Name);
+                    break; }
+                case "TRANSPOSE": {        // perm is tflite input[1]; ONNX Transpose carries perm as an attribute
+                    node.Input.Add(ins[0]);
+                    long[] perm = ConstInts(tfl, tStart, bufStart, bufCount, inIx[1]);
+                    var pa = new AttributeProto { Name = "perm", Type = AttributeProto.Types.AttributeType.Ints };
+                    foreach (var p in perm) pa.Ints.Add(p);
+                    node.Attribute.Add(pa);
+                    break; }
+                case "CONCATENATION":      // ConcatenationOptions.axis[0] (fused_activation[1] assumed NONE)
+                    foreach (var s in ins) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("axis", boVal != 0 ? fr.FieldI32(boVal, 0) : 0));
+                    break;
+                case "SLICE": {            // tflite SLICE(input, begin, size) -> ONNX Slice(input, starts, ends, axes)
+                    node.Input.Add(ins[0]);
+                    long[] begin = ConstInts(tfl, tStart, bufStart, bufCount, inIx[1]);
+                    long[] size = ConstInts(tfl, tStart, bufStart, bufCount, inIx[2]);
+                    int rr = begin.Length; var ends = new long[rr]; var axes = new long[rr];
+                    for (int d = 0; d < rr; d++) { ends[d] = size[d] < 0 ? long.MaxValue : begin[d] + size[d]; axes[d] = d; }
+                    g.Initializer.Add(I64Init(node.Name + "_starts", begin)); node.Input.Add(node.Name + "_starts");
+                    g.Initializer.Add(I64Init(node.Name + "_ends", ends));    node.Input.Add(node.Name + "_ends");
+                    g.Initializer.Add(I64Init(node.Name + "_axes", axes));    node.Input.Add(node.Name + "_axes");
+                    break; }
+                case "BATCH_MATMUL": {     // BatchMatMulOptions.adj_x[0], adj_y[1]; ONNX MatMul has no transpose flag
+                    int adjX = boVal != 0 ? fr.FieldU8(boVal, 0) : 0, adjY = boVal != 0 ? fr.FieldU8(boVal, 1) : 0;
+                    if (adjX != 0 || adjY != 0) throw new NotImplementedException($"op[{o}] BATCH_MATMUL adj_x={adjX} adj_y={adjY} (needs a Transpose insert)");
+                    foreach (var s in ins) node.Input.Add(s);
+                    break; }
                 default:
                     if (!AttrFreeSafe.Contains(tf))
                         throw new NotImplementedException($"op[{o}] {tf} -> {onnx}: attribute lowering not implemented (slice 2 targets the attribute-free section ops)");
