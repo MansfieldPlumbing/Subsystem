@@ -204,6 +204,7 @@ public static class Tflite
         ["TILE"] = "Tile", ["EQUAL"] = "Equal", ["SUM"] = "ReduceSum", ["LOGICAL_OR"] = "Or", ["SIGN"] = "Sign",
         ["LOGICAL_AND"] = "And", ["LOGICAL_NOT"] = "Not", ["FLOOR_MOD"] = "Mod",
         ["RSQRT"] = "Rsqrt", ["NOT_EQUAL"] = "NotEqual", ["DEQUANTIZE"] = "DequantizeLinear", ["QUANTIZE"] = "QuantizeLinear",
+        ["UNPACK"] = "Unpack", ["DYNAMIC_UPDATE_SLICE"] = "DynamicUpdateSlice", ["PACK"] = "Pack", ["FILL"] = "Fill", ["REDUCE_MAX"] = "ReduceMax",
     };
 
     public static string MapToOnnx(string tfliteName) => ToOnnx.TryGetValue(tfliteName, out var v) ? v : null;
@@ -376,6 +377,22 @@ public static class Tflite
         return (sc.Name, zp.Name, perAxis ? t.QDim : -1);
     }
 
+    // Emit a Transpose of `input`'s last two dims (BATCH_MATMUL adj_x/adj_y; ONNX MatMul has no transpose flag).
+    static string EmitLastTwoTranspose(GraphProto g, int rank, string input, string outName)
+    {
+        if (rank < 2) return input;
+        var perm = new long[rank]; for (int i = 0; i < rank; i++) perm[i] = i;
+        (perm[rank - 2], perm[rank - 1]) = (perm[rank - 1], perm[rank - 2]);
+        var tn = new NodeProto { OpType = "Transpose", Name = outName + "_node" };
+        tn.Input.Add(input);
+        var pa = new AttributeProto { Name = "perm", Type = AttributeProto.Types.AttributeType.Ints };
+        foreach (var p in perm) pa.Ints.Add(p);
+        tn.Attribute.Add(pa);
+        tn.Output.Add(outName);
+        g.Node.Add(tn);
+        return outName;
+    }
+
     // Spawn-SubGraph: inline decomposition subgraph `sgIx` into `g`. Child inputs -> parentIns, child
     // outputs -> parentOuts (positional); every other value/initializer name is prefixed `pfx` to stay
     // unique across the many composite expansions. ToModelProto allocates the child fresh, so we consume
@@ -526,7 +543,7 @@ public static class Tflite
                     var (scl, zr, ax) = SynthQuant(ts[outIx[0]], g);
                     node.Input.Add(ins[0]); if (scl != null) { node.Input.Add(scl); node.Input.Add(zr); if (ax >= 0) node.Attribute.Add(IntAttr("axis", ax)); }
                     break; }
-                case "SUM": case "MEAN":   // ReduceSum / ReduceMean: tflite axes are input[1]; keep_dims = ReducerOptions[0]
+                case "SUM": case "MEAN": case "REDUCE_MAX":   // ReduceSum/Mean/Max: tflite axes=input[1]; keep_dims=ReducerOptions[0]
                     foreach (var s in ins) node.Input.Add(s);
                     node.Attribute.Add(IntAttr("keepdims", boVal != 0 ? fr.FieldU8(boVal, 0) : 0));
                     break;
@@ -564,11 +581,29 @@ public static class Tflite
                     g.Initializer.Add(I64Init(node.Name + "_ends", ends));    node.Input.Add(node.Name + "_ends");
                     g.Initializer.Add(I64Init(node.Name + "_axes", axes));    node.Input.Add(node.Name + "_axes");
                     break; }
-                case "BATCH_MATMUL": {     // BatchMatMulOptions.adj_x[0], adj_y[1]; ONNX MatMul has no transpose flag
+                case "BATCH_MATMUL": {     // BatchMatMulOptions.adj_x[0], adj_y[1]; ONNX MatMul has no transpose flag -> insert Transpose on the last two dims
                     int adjX = boVal != 0 ? fr.FieldU8(boVal, 0) : 0, adjY = boVal != 0 ? fr.FieldU8(boVal, 1) : 0;
-                    if (adjX != 0 || adjY != 0) throw new NotImplementedException($"op[{o}] BATCH_MATMUL adj_x={adjX} adj_y={adjY} (needs a Transpose insert)");
-                    foreach (var s in ins) node.Input.Add(s);
+                    string aN = adjX != 0 ? EmitLastTwoTranspose(g, ts[inIx[0]].Shape.Length, ins[0], node.Name + "_aT") : ins[0];
+                    string bN = adjY != 0 ? EmitLastTwoTranspose(g, ts[inIx[1]].Shape.Length, ins[1], node.Name + "_bT") : ins[1];
+                    node.Input.Add(aN); node.Input.Add(bN);
                     break; }
+                case "UNPACK":             // tflite UnpackOptions{ num[0], axis[1] }: N outputs along axis, axis removed
+                    node.Input.Add(ins[0]);
+                    node.Attribute.Add(IntAttr("axis", boVal != 0 ? fr.FieldI32(boVal, 1) : 0));
+                    break;
+                case "DYNAMIC_UPDATE_SLICE":   // (operand, update, start_0..start_{r-1}); all inputs pass through to the kernel
+                    foreach (var s in ins) node.Input.Add(s);
+                    break;
+                case "PACK":               // PackOptions{ values_count[0], axis[1] }: stack N inputs along a new axis
+                    foreach (var s in ins) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("axis", boVal != 0 ? fr.FieldI32(boVal, 1) : 0));
+                    break;
+                case "FILL":               // (dims, value) -> tensor of shape dims filled with value
+                    foreach (var s in ins) node.Input.Add(s);
+                    break;
+                case "GELU":               // GeluOptions{ approximate }; default ONNX Gelu approximate=none (exact erf)
+                    node.Input.Add(ins[0]);
+                    break;
                 default:
                     if (!AttrFreeSafe.Contains(tf))
                         throw new NotImplementedException($"op[{o}] {tf} -> {onnx}: attribute lowering not implemented (slice 2 targets the attribute-free section ops)");

@@ -34,9 +34,9 @@ public class Interp
         "Relu","LeakyRelu","Sigmoid","Tanh","Sqrt","Rsqrt","Exp","Neg","Abs","Floor","Sin","Cos","Erf","Clip","Softplus","Reciprocal",
         "Reshape","Transpose","Unsqueeze","Squeeze","Concat","Identity","Constant","Cast","Shape","Gather","Flatten",
         "Equal","NotEqual","Greater","Less","GreaterOrEqual","LessOrEqual","And","Or","Not","Min","Max","Mod","Round","Atan","Sign",
-        "Where","Expand","ConstantOfShape","Range","ReduceMean","ReduceSum","CumSum","Slice","Pad",
-        "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND",
-        "Split","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd","DequantizeLinear","QuantizeLinear",
+        "Where","Expand","ConstantOfShape","Fill","Range","ReduceMean","ReduceSum","ReduceMax","CumSum","Slice","Pad",
+        "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND","DynamicUpdateSlice",
+        "Split","Unpack","Pack","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd","DequantizeLinear","QuantizeLinear",
     };
 
     public static bool Profile = false;
@@ -135,8 +135,9 @@ public class Interp
             case "Expand": return One(Expand(x[0], x[1]));
             case "ConstantOfShape": return One(ConstantOfShape(x[0], n));
             case "Range": return One(Range(x[0], x[1], x[2]));
-            case "ReduceMean": return One(Reduce(x, n, mean: true));
-            case "ReduceSum": return One(Reduce(x, n, mean: false));
+            case "ReduceMean": return One(Reduce(x, n, "mean"));
+            case "ReduceSum": return One(Reduce(x, n, "sum"));
+            case "ReduceMax": return One(Reduce(x, n, "max"));
             case "CumSum": return One(CumSum(x[0], (int)x[1].AsI()[0], L(n, "exclusive", 0) != 0, L(n, "reverse", 0) != 0));
             case "Slice": return One(Slice(x, n));
             case "Pad": return One(Pad(x, n));
@@ -155,6 +156,10 @@ public class Interp
             case "LSTM": return Lstm(x, n);
             case "InstanceNormalization": return One(InstanceNorm(x, n));
             case "ReduceProd": return One(ReduceProd(x, n));
+            case "Unpack": return UnpackOp(x, n);
+            case "DynamicUpdateSlice": return One(DynamicUpdateSliceOp(x, n));
+            case "Pack": return One(PackOp(x, n));
+            case "Fill": return One(FillOp(x, n));
             default: throw new NotImplementedException($"node #?: {n.OpType} (name={n.Name})");
         }
     }
@@ -567,7 +572,7 @@ public class Interp
         return r;
     }
 
-    static Tensor Reduce(Tensor[] x, NodeProto n, bool mean)
+    static Tensor Reduce(Tensor[] x, NodeProto n, string mode)   // mode: "sum" | "mean" | "max" -- one loop, not a per-op copy
     {
         var a = x[0]; var d = a.AsF(); int r = a.Shape.Length;
         bool keep = L(n, "keepdims", 1) != 0;
@@ -581,23 +586,25 @@ public class Interp
         }
         int[] oshA = osh.Count == 0 ? new[] { 1 } : osh.ToArray(); var oStr = ContigStrides(oshA);
         long outN = 1; foreach (var dd in oshA) outN *= dd; long reduced = d.Length / Math.Max(1, outN);
+        bool isMax = mode == "max", isMean = mode == "mean";
         int m = axes.Count; bool trailing = m > 0; for (int k = r - m; k < r; k++) if (k < 0 || !axes.Contains(k)) trailing = false;
-        if (trailing)   // reducing a contiguous trailing block -> each output = SIMD sum of a contiguous run (LayerNorm/InstanceNorm mean)
+        if (trailing && !isMax)   // contiguous trailing block -> each output = SIMD sum of a contiguous run (sum/mean only)
         {
             var of = new float[outN];
-            System.Threading.Tasks.Parallel.For(0L, outN, i => { double s = SimdSum(d.AsSpan(checked((int)(i * reduced)), (int)reduced)); of[i] = (float)(mean ? s / reduced : s); });
+            System.Threading.Tasks.Parallel.For(0L, outN, i => { double s = SimdSum(d.AsSpan(checked((int)(i * reduced)), (int)reduced)); of[i] = (float)(isMean ? s / reduced : s); });
             return Tensor.F(of, oshA);
         }
         var acc = new double[outN];
+        if (isMax) for (long i = 0; i < outN; i++) acc[i] = double.NegativeInfinity;
         var idx = new int[r];
         for (long lin = 0; lin < d.Length; lin++)
         {
             long oi = 0; for (int k = 0; k < r; k++) { int od = outDimOfIn[k]; if (od >= 0) { int coord = axes.Contains(k) && keep ? 0 : idx[k]; oi += coord * oStr[od]; } }
-            acc[oi] += d[lin];
+            if (isMax) acc[oi] = Math.Max(acc[oi], d[lin]); else acc[oi] += d[lin];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
         }
         var o = new float[outN];
-        for (long i = 0; i < outN; i++) o[i] = (float)(mean ? acc[i] / reduced : acc[i]);
+        for (long i = 0; i < outN; i++) o[i] = (float)(isMean ? acc[i] / reduced : acc[i]);
         return Tensor.F(o, oshA);
     }
 
@@ -1009,6 +1016,120 @@ public class Interp
         for (long lin = 0; lin < d.Length; lin++) { accF[OutIndex()] *= d[lin]; Step(); }
         var o = new float[outN]; for (long i = 0; i < outN; i++) o[i] = (float)accF[i];
         return Tensor.F(o, oshA);
+    }
+
+    // tflite UNPACK — split `num`=Shape[axis] slices along `axis`, each with `axis` removed (the inverse of PACK).
+    // Multi-output: returns one squeezed tensor per slice; the Run loop maps outs[i] -> node.Output[i].
+    static Tensor[] UnpackOp(Tensor[] x, NodeProto n)
+    {
+        var a = x[0]; int r = a.Shape.Length;
+        int axis = (int)L(n, "axis", 0); if (axis < 0) axis += r;
+        int num = a.Shape[axis];
+        var osh = new List<int>(); for (int k = 0; k < r; k++) if (k != axis) osh.Add(a.Shape[k]);
+        int[] oshA = osh.Count == 0 ? new[] { 1 } : osh.ToArray();
+        var oStr = ContigStrides(oshA);
+        long sliceN = 1; foreach (var dd in oshA) sliceN *= dd;
+        bool isInt = a.IsInt;
+        var di = isInt ? null : a.AsF(); var ip = isInt ? a.Ip : null;
+        var bufF = isInt ? null : new float[num][]; var bufI = isInt ? new long[num][] : null;
+        for (int s = 0; s < num; s++) { if (isInt) bufI[s] = new long[sliceN]; else bufF[s] = new float[sliceN]; }
+        var idx = new int[r];
+        long len = isInt ? ip.LongLength : di.LongLength;
+        for (long lin = 0; lin < len; lin++)
+        {
+            int s = idx[axis];
+            long oi = 0; int od = 0;
+            for (int k = 0; k < r; k++) { if (k == axis) continue; oi += (long)idx[k] * oStr[od]; od++; }
+            if (isInt) bufI[s][oi] = ip[lin]; else bufF[s][oi] = di[lin];
+            for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
+        }
+        var res = new Tensor[num];
+        for (int s = 0; s < num; s++) res[s] = isInt ? Tensor.I(bufI[s], oshA) : Tensor.F(bufF[s], oshA);
+        return res;
+    }
+
+    // StableHLO DYNAMIC_UPDATE_SLICE — (operand, update, start_0..start_{r-1}) -> operand with `update`
+    // written at the clamped start position. The KV-cache write (a new token's K/V overlaid into the cache).
+    static Tensor DynamicUpdateSliceOp(Tensor[] x, NodeProto n)
+    {
+        var operand = x[0]; var update = x[1]; int r = operand.Shape.Length;
+        var starts = new int[r];
+        for (int k = 0; k < r; k++)
+        {
+            int si = (x.Length > 2 + k && x[2 + k] != null) ? (int)x[2 + k].AsI()[0] : 0;
+            starts[k] = Math.Max(0, Math.Min(si, operand.Shape[k] - update.Shape[k]));
+        }
+        var oStr = ContigStrides(operand.Shape);
+        var idx = new int[r];
+        if (operand.IsInt)
+        {
+            var o = (long[])operand.Ip.Clone(); var u = update.Ip;
+            for (long lin = 0; lin < u.LongLength; lin++)
+            {
+                long oi = 0; for (int k = 0; k < r; k++) oi += (long)(starts[k] + idx[k]) * oStr[k];
+                o[oi] = u[lin];
+                for (int k = r - 1; k >= 0; k--) { if (++idx[k] < update.Shape[k]) break; idx[k] = 0; }
+            }
+            return Tensor.I(o, operand.Shape);
+        }
+        else
+        {
+            var o = (float[])operand.AsF().Clone(); var u = update.AsF();
+            for (long lin = 0; lin < u.LongLength; lin++)
+            {
+                long oi = 0; for (int k = 0; k < r; k++) oi += (long)(starts[k] + idx[k]) * oStr[k];
+                o[oi] = u[lin];
+                for (int k = r - 1; k >= 0; k--) { if (++idx[k] < update.Shape[k]) break; idx[k] = 0; }
+            }
+            return Tensor.F(o, operand.Shape);
+        }
+    }
+
+    // tflite PACK — stack `num` inputs (same shape) along a NEW axis `axis` (the inverse of UNPACK).
+    static Tensor PackOp(Tensor[] x, NodeProto n)
+    {
+        int axis = (int)L(n, "axis", 0);
+        var first = x[0]; int r = first.Shape.Length; if (axis < 0) axis += r + 1;
+        int num = x.Length;
+        var osh = new List<int>(first.Shape); osh.Insert(axis, num);
+        int[] oshA = osh.ToArray(); long outN = 1; foreach (var dd in oshA) outN *= dd;
+        var oStr = ContigStrides(oshA);
+        bool isInt = first.IsInt;
+        var of = isInt ? null : new float[outN]; var oiArr = isInt ? new long[outN] : null;
+        for (int s = 0; s < num; s++)
+        {
+            var t = x[s];
+            var td = isInt ? null : t.AsF(); var ti = isInt ? t.Ip : null;
+            var idx = new int[r];
+            long len = isInt ? ti.LongLength : td.LongLength;
+            for (long lin = 0; lin < len; lin++)
+            {
+                long pos = 0; int id = 0;
+                for (int k = 0; k <= r; k++) { int c = (k == axis) ? s : idx[id++]; pos += (long)c * oStr[k]; }
+                if (isInt) oiArr[pos] = ti[lin]; else of[pos] = td[lin];
+                for (int k = r - 1; k >= 0; k--) { if (++idx[k] < t.Shape[k]) break; idx[k] = 0; }
+            }
+        }
+        return isInt ? Tensor.I(oiArr, oshA) : Tensor.F(of, oshA);
+    }
+
+    // tflite FILL — (dims, value) -> a tensor of shape `dims` filled with the scalar `value`.
+    static Tensor FillOp(Tensor[] x, NodeProto n)
+    {
+        int[] shape = Array.ConvertAll(x[0].AsI(), v => (int)v);
+        long count = 1; foreach (var d in shape) count *= d;
+        int[] osh = shape.Length == 0 ? new[] { 1 } : shape;
+        var val = x[1];
+        if (val.IsInt)
+        {
+            long v = val.Ip[0]; var o = new long[count]; for (long i = 0; i < count; i++) o[i] = v;
+            return Tensor.I(o, osh);
+        }
+        else
+        {
+            float v = val.AsF()[0]; var o = new float[count]; for (long i = 0; i < count; i++) o[i] = v;
+            return Tensor.F(o, osh);
+        }
     }
 
     // ONNX Gelu (opset 20) — none=exact erf, tanh=approx. [drafted by Antigravity #3, reviewed]
