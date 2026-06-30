@@ -39,9 +39,10 @@
     <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))jdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))jdk</JavaSdkDirectory>
     <JavacSourceVersion>21</JavacSourceVersion>
     <JavacTargetVersion>21</JavacTargetVersion>
-    <!-- libpsl .so resolution: $env:SS_LIBS overrides; else src\runspace\libs.
-         libpsl-android.so builds from native\build-native.ps1; libpsl-native.so is PowerShell's
-         own native lib (prebuilt — ships in the release assets, not generated here). -->
+    <!-- libpsl .so resolution: $env:SS_LIBS overrides; else src\runspace\libs. Only the SOVEREIGN
+         libpsl-android.so (built in-repo from native\libc.null.c via build-native.ps1) ships; PowerShell's
+         FOREIGN prebuilt libpsl-native.so is never packaged — MainActivity's DllImportResolver redirects
+         every libpsl-native P/Invoke to libpsl-android.so at runtime, so the blob would only be dead weight. -->
     <SsLibs Condition="'$(SS_LIBS)' != ''">$(SS_LIBS)</SsLibs>
     <SsLibs Condition="'$(SsLibs)' == ''">$(MSBuildProjectDirectory)\libs</SsLibs>
     <!-- Build posture = the AdbElevation ceiling. DEV is defined by default so ss-build keeps the
@@ -61,8 +62,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <!-- FORCE the compiler to use your safe dummy libraries (now at $(SsLibs), outside src) -->
-    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libpsl-native.so" />
+    <!-- Only the sovereign syslog stub ships (built in-repo from native/libc.null.c). The foreign
+         PowerShell libpsl-native.so is NOT packaged; the DllImportResolver redirects it to this stub. -->
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libpsl-android.so" />
     <!-- CUT 2026-06-24: off the official LiteRT-LM/flutter_gemma package entirely. On-device inference
          moves to the home-rolled, ORT-free managed OnnxRuntime leaf (dp-onnx / Rb GraphRuntime) — zero
@@ -73,8 +74,8 @@
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libGemmaModelConstraintProvider.so" /> -->
   </ItemGroup>
   <ItemGroup Condition="'$(SsX64)' == 'true'">
-    <!-- x86_64 libpsl stubs for Cuttlefish / x86_64 emulator (ABI inferred from the path). -->
-    <AndroidNativeLibrary Include="$(SsLibs)\x86_64\libpsl-native.so" />
+    <!-- x86_64 sovereign syslog stub for Cuttlefish / x86_64 emulator (the foreign libpsl-native.so is
+         redirected to it by the resolver, same as arm64). -->
     <AndroidNativeLibrary Include="$(SsLibs)\x86_64\libpsl-android.so" />
   </ItemGroup>
   <ItemGroup>
@@ -119,6 +120,18 @@
          shell resource embed below — source is not shipped twice. The atlas PNGs/metrics + fonts under
          shell/assets/** still embed (the GPU presenter loads them from the resource on Android). -->
     <Compile Include="..\shell\cell\*.cs" />
+    <!-- The dp-onnx engine, folded into the APK (CRQ144): the home-rolled ONNX reader (OnnxProto), the
+         .litertlm/.tflite reader + tflite->ModelProto translator (LiteRt), SentencePiece, the interpreter
+         (Interp) and the D3D12/Vulkan GPU seams — all Onnx/DpOnnx namespace, pure managed (System.* + lazy
+         P/Invoke). The SAME sovereign engine that runs gemma on ss.exe now compiles into the Android head, so
+         on-device inference is dp-onnx (D3D12 stays dormant on Android; the Vulkan seam carries the GPU path).
+         onnx-interp/Program.cs is excluded (its top-level Main would collide). Mirrors the Windows head's set. -->
+    <Compile Include="..\native\dp-onnx\onnxnet\OnnxProto.cs" Link="dp-onnx\OnnxProto.cs" />
+    <Compile Include="..\native\dp-onnx\onnxnet\LiteRt.cs" Link="dp-onnx\LiteRt.cs" />
+    <Compile Include="..\native\dp-onnx\onnxnet\SentencePiece.cs" Link="dp-onnx\SentencePiece.cs" />
+    <Compile Include="..\native\dp-onnx\onnx-interp\Interp.cs" Link="dp-onnx\Interp.cs" />
+    <Compile Include="..\native\dp-onnx\onnx-interp\GpuD3D12.cs" Link="dp-onnx\GpuD3D12.cs" />
+    <Compile Include="..\native\dp-onnx\onnx-interp\GpuVulkan.cs" Link="dp-onnx\GpuVulkan.cs" />
     <EmbeddedResource Include="..\shell\**\*" Exclude="..\shell\cell\**\*.cs">
       <LogicalName>shell/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>

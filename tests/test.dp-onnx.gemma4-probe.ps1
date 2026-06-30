@@ -39,6 +39,19 @@ $nowMapped = @('DEQUANTIZE','QUANTIZE','RSQRT','NOT_EQUAL') | Where-Object { $pr
 Assert ($nowMapped.Count -eq 4) "DEQUANTIZE/QUANTIZE/RSQRT/NOT_EQUAL map to dp-onnx kernels (mapped: $($nowMapped -join ','))"
 Write-Host "  gemma-4 E2B: $sections sections; main graph ops=$(if($cov){$cov.ops}) coverage=$(if($cov){"$($cov.mapped)/$($cov.distinct)"})"
 
+# Slice 2 (probe -> executable): the sovereign tflite->Onnx.ModelProto translator. The embedder section [2]
+# (token-mask + 2-bit per-row-quantized EMBEDDING_LOOKUP -> scale -> reshape) is translated and RUN through Interp.
+$rr = (& $exe.FullName run $model --section 2 2>&1 | Out-String)
+$ran     = if ($rr -match '\[2\]\s+RAN\s+nodes=(\d+)')        { [int]$Matches[1] } else { 0 }
+$rOuts   = if ($rr -match '\[2\]\s+RAN\s+nodes=\d+\s+inputs=\d+\s+outputs=(\d+)') { [int]$Matches[1] } else { 0 }
+$rFinite = [bool]($rr -match '\[2\]\s+RAN\s+nodes=\d+.*finite=True')
+$rEmbed  = [bool]($rr -match 'EMBEDDING_LOOKUP\s+-> Gather')
+Assert ($ran -ge 8)  "section [2] translated tflite->ModelProto and RAN end-to-end through Interp: $ran nodes dispatched"
+Assert ($rEmbed)     "EMBEDDING_LOOKUP lowered to Gather (2-bit per-row table dequantized to a float initializer)"
+Assert ($rOuts -ge 1) "section [2] produced $rOuts output tensor(s) off the sovereign translation"
+Assert ($rFinite)    "section [2] output is finite (no NaN/Inf) — the translated embedder graph is numerically live"
+Write-Host "  gemma-4 E2B slice 2: section [2] embedder ran $ran nodes -> $rOuts finite output(s) on dp-onnx"
+
 $pass = $fails.Count -eq 0
 Write-Host ""
 Write-Host ($(if($pass){"PASS - dp-onnx reads the gemma-4 E2B .litertlm sovereignly (no FlatBuffers lib, no LiteRT lib); op coverage measured."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})

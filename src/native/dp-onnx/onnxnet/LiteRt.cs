@@ -81,6 +81,14 @@ public readonly ref struct FlatReader
     public uint FieldU32(int table, int f, uint dflt = 0) { int o = Field(table, f); return o == 0 ? dflt : U32(o); }
     public int FieldU8(int table, int f, int dflt = 0) { int o = Field(table, f); return o == 0 ? dflt : U8(o); }
     public long FieldI64(int table, int f, long dflt = 0) { int o = Field(table, f); return o == 0 ? dflt : I64(o); }
+    public float FieldF32(int table, int f, float dflt = 0) { int o = Field(table, f); return o == 0 ? dflt : F32(o); }
+
+    // Typed scalar-vector reads (copy out; absent/empty -> zero-length). fieldLoc = Field(table, f); elements are
+    // inline at `start + k*stride`. Used by the .tflite -> ModelProto translator for shapes/indices/quant/weights.
+    public int[] VecI32(int fieldLoc) { var (s, c) = Vector(fieldLoc); var a = new int[c]; for (int k = 0; k < c; k++) a[k] = I32(s + k * 4); return a; }
+    public long[] VecI64(int fieldLoc) { var (s, c) = Vector(fieldLoc); var a = new long[c]; for (int k = 0; k < c; k++) a[k] = I64(s + k * 8); return a; }
+    public float[] VecF32(int fieldLoc) { var (s, c) = Vector(fieldLoc); var a = new float[c]; for (int k = 0; k < c; k++) a[k] = F32(s + k * 4); return a; }
+    public byte[] VecBytes(int fieldLoc) { var (s, c) = Vector(fieldLoc); return _b.Slice(s, c).ToArray(); }
 }
 
 // LITERTLM container (google-ai-edge/LiteRT-LM, litertlm_header_schema.fbs): ASCII magic "LITERTLM",
@@ -234,4 +242,258 @@ public static class Tflite
         }
         return (hist, subgraphs, tensors, ops);
     }
+
+    // ── probe -> executable: translate ONE .tflite SubGraph into the same Onnx.ModelProto IR that Interp runs. ──
+    // Field indices are positional vtable order from schema.fbs (extends the comment at the top of this class):
+    //   Tensor{ shape[0]:[int], type[1]:byte(TensorType), buffer[2]:uint, name[3]:string, quantization[4]:QuantizationParameters }
+    //   Buffer{ data[0]:[ubyte] }   (Model.buffers[4]; Tensor.buffer indexes it; buffer 0 = the empty/no-data buffer)
+    //   QuantizationParameters{ min[0], max[1], scale[2]:[float], zero_point[3]:[long], details[4], quantized_dimension[5]:int }
+    //   Operator (union): opcode_index[0], inputs[1]:[int], outputs[2]:[int], builtin_options_type[3]:byte, builtin_options[4]:table
+    //   ReshapeOptions{ new_shape[0]:[int] }   GatherOptions{ axis[0]:int, batch_dims[1]:int }
+    // Weights are inlined into TensorProto (Interp.FromProto has no external-data path). Interp.FromProto can't load
+    // int8/uint8/int16 initializers, so those are widened to INT32 here; quantized weights then flow through a
+    // synthesized DequantizeLinear (per the verified Interp contract: scale@input1, zero_point@input2, per-tensor
+    // when scale is scalar). One op convention differs from ONNX and is fixed here: tflite EMBEDDING_LOOKUP is
+    // (indices, table) but ONNX Gather is (data=table, indices) -> the two inputs are swapped.
+
+    sealed class TT { public string Name; public int[] Shape; public int Type; public bool Const;
+                      public float[] QScale; public long[] QZero; public int QDim; }
+
+    // ONNX TensorProto.DataType: FLOAT=1, INT32=6, INT64=7, BOOL=9, FLOAT16=10, DOUBLE=11, BFLOAT16=16.
+    static int OnnxElem(int tfliteType) => tfliteType switch
+    {
+        0 => 1, 1 => 10, 2 => 6, 4 => 7, 6 => 9, 10 => 11, 18 => 16,   // direct
+        3 or 9 or 7 or 16 => 6,                                        // uint8/int8/int16/uint16 -> INT32 (Interp can't load these)
+        15 or 12 => 7,                                                 // uint32/uint64 -> INT64
+        17 or 19 => 1,                                                 // int4 (17) / packed-4bit (19) -> dequantized to FLOAT
+        _ => throw new NotImplementedException($"tflite TensorType {tfliteType}")
+    };
+
+    // Sub-byte packed quantized weights (tflite TensorType 17/INT4, 19/packed) -> dequantized FLOAT initializer.
+    // The bit width is derived from the buffer (gemma's tied embedding table [262144,1536] packs at 2 bits/elem =
+    // 384 bytes/row). Layout assumed: little-endian sub-elements (low bits first), signed (q -= 2^bits when the top
+    // bit is set), per-row scale along quantized_dimension 0 (zero_point 0). value = (q - zero) * scale[row].
+    // Interp has no sub-byte tensor, so the table is materialized as float here (lazy-gather is a later slice);
+    // exact numerical parity vs the litert oracle is verified in a later milestone — this is the executability path.
+    static TensorProto DequantSubByte(string name, int[] shape, byte[] packed, float[] scale, long[] zero, int qdim)
+    {
+        long rows = shape.Length > 0 ? shape[0] : 1;
+        long cols = 1; for (int k = 1; k < shape.Length; k++) cols *= shape[k];
+        long total = rows * cols;
+        if (total <= 0) throw new InvalidDataException($"sub-byte tensor {name}: empty shape [{string.Join(",", shape)}]");
+        int bits = (int)((long)packed.Length * 8 / total);                  // 2 / 4 / 8
+        if (bits is not (2 or 4 or 8)) throw new NotImplementedException($"sub-byte tensor {name}: {bits} bits/elem (bytes={packed.Length} elems={total})");
+        int perByte = 8 / bits, mask = (1 << bits) - 1, half = 1 << (bits - 1);
+        bool perRow = scale != null && scale.Length == rows && rows > 1;
+        if (!perRow && scale != null && scale.Length > 1)
+            throw new NotImplementedException($"sub-byte {name}: only per-row(axis0)/per-tensor quant (qdim={qdim} scaleLen={scale.Length})");
+        var outb = new byte[total * 4];
+        for (long r = 0; r < rows; r++)
+        {
+            float s = scale == null || scale.Length == 0 ? 1f : (perRow ? scale[r] : scale[0]);
+            long z = zero != null && zero.Length > 0 ? zero[perRow ? r : 0] : 0;
+            for (long c = 0; c < cols; c++)
+            {
+                long idx = r * cols + c;
+                int q = (packed[(int)(idx / perByte)] >> (int)((idx % perByte) * bits)) & mask;
+                if (q >= half) q -= (1 << bits);                 // signed
+                int fb = BitConverter.SingleToInt32Bits((q - z) * s);
+                int o = (int)(idx << 2);
+                outb[o] = (byte)fb; outb[o + 1] = (byte)(fb >> 8); outb[o + 2] = (byte)(fb >> 16); outb[o + 3] = (byte)(fb >> 24);
+            }
+        }
+        var t = new TensorProto { Name = name, DataType = 1, RawData = new ByteString(outb) };
+        foreach (var d in shape) t.Dims.Add((long)d);
+        return t;
+    }
+
+    static byte[] WidenToI32(byte[] data, int elemBytes, bool signed)
+    {
+        int n = data.Length / elemBytes;
+        var o = new byte[n * 4];
+        for (int k = 0; k < n; k++)
+        {
+            int v = elemBytes == 1 ? (signed ? (sbyte)data[k] : data[k])
+                                   : (signed ? (short)(data[2 * k] | data[2 * k + 1] << 8) : (data[2 * k] | data[2 * k + 1] << 8));
+            o[4 * k] = (byte)v; o[4 * k + 1] = (byte)(v >> 8); o[4 * k + 2] = (byte)(v >> 16); o[4 * k + 3] = (byte)(v >> 24);
+        }
+        return o;
+    }
+
+    static TensorProto MakeInit(string name, int[] shape, int ttype, byte[] data)
+    {
+        var t = new TensorProto { Name = name, DataType = OnnxElem(ttype) };
+        foreach (var d in shape) t.Dims.Add((long)d);
+        byte[] raw = ttype switch
+        {
+            3 => WidenToI32(data, 1, false),   // UINT8
+            9 => WidenToI32(data, 1, true),    // INT8
+            7 => WidenToI32(data, 2, true),    // INT16
+            16 => WidenToI32(data, 2, false),  // UINT16
+            _ => data                          // direct dtypes keep their little-endian bytes
+        };
+        t.RawData = new ByteString(raw);
+        return t;
+    }
+
+    static AttributeProto IntAttr(string name, long v) =>
+        new() { Name = name, Type = AttributeProto.Types.AttributeType.Int, I = v };
+
+    // Synthesize ONNX scale/zero_point initializers from a tflite tensor's QuantizationParameters; returns the
+    // initializer names + per-axis axis (or -1 when per-tensor / unquantized). scale=FLOAT, zero_point=INT64.
+    static (string scale, string zero, int axis) SynthQuant(TT t, GraphProto g)
+    {
+        if (t.QScale == null || t.QScale.Length == 0) return (null, null, -1);
+        bool perAxis = t.QScale.Length > 1;
+        var sc = new TensorProto { Name = t.Name + "_scale", DataType = 1 };
+        if (perAxis) sc.Dims.Add(t.QScale.Length);
+        sc.FloatData.Add(t.QScale);
+        var zp = new TensorProto { Name = t.Name + "_zp", DataType = 7 };
+        long[] zarr = t.QZero != null && t.QZero.Length == t.QScale.Length ? t.QZero : new long[t.QScale.Length];
+        if (perAxis) zp.Dims.Add(zarr.Length);
+        zp.Int64Data.Add(zarr);
+        g.Initializer.Add(sc); g.Initializer.Add(zp);
+        return (sc.Name, zp.Name, perAxis ? t.QDim : -1);
+    }
+
+    // Translate subgraph `sgIx` of a .tflite model to ModelProto. `summary` carries a structural digest for the receipt.
+    public static ModelProto ToModelProto(byte[] tfl, int sgIx, out string summary)
+    {
+        var fr = new FlatReader(tfl);
+        int model = fr.Root;
+
+        var (ocStart, ocCount) = fr.Vector(fr.Field(model, 1));      // operator_codes
+        var opNames = new string[ocCount];
+        for (int i = 0; i < ocCount; i++)
+        {
+            int oc = fr.Deref(ocStart + i * 4);
+            int code = Math.Max(fr.FieldU8(oc, 0), fr.FieldI32(oc, 3));
+            opNames[i] = code == 32 ? "CUSTOM:" + (fr.Str(fr.Field(oc, 1)) ?? "?")
+                                    : (Builtin.TryGetValue(code, out var nm) ? nm : "OP_" + code);
+        }
+
+        var (sgStart, sgCount) = fr.Vector(fr.Field(model, 2));      // subgraphs
+        if (sgIx < 0 || sgIx >= sgCount) throw new ArgumentOutOfRangeException(nameof(sgIx), $"subgraph {sgIx} of {sgCount}");
+        int sg = fr.Deref(sgStart + sgIx * 4);
+        var (bufStart, bufCount) = fr.Vector(fr.Field(model, 4));    // buffers
+
+        // tensors -> TT[] + initializers from non-empty buffers
+        var (tStart, tCount) = fr.Vector(fr.Field(sg, 0));
+        var ts = new TT[tCount];
+        var g = new GraphProto { Name = $"tflite_sg{sgIx}" };
+        int initCount = 0, extWeightTensors = 0;
+        for (int i = 0; i < tCount; i++)
+        {
+            int tn = fr.Deref(tStart + i * 4);
+            var info = new TT {
+                Shape = fr.VecI32(fr.Field(tn, 0)),
+                Type = fr.FieldU8(tn, 1),
+                Name = fr.Str(fr.Field(tn, 3)) ?? $"t{i}",
+            };
+            int bufIx = (int)fr.FieldU32(tn, 2);
+            int q = fr.Sub(fr.Field(tn, 4));
+            if (q != 0) { info.QScale = fr.VecF32(fr.Field(q, 2)); info.QZero = fr.VecI64(fr.Field(q, 3)); info.QDim = fr.FieldI32(q, 5); }
+            byte[] data = null;
+            if (bufIx > 0 && bufIx < bufCount)
+            {
+                int buf = fr.Deref(bufStart + bufIx * 4);
+                int dataField = fr.Field(buf, 0);
+                if (dataField != 0) data = fr.VecBytes(dataField);
+                else if (fr.Field(buf, 1) != 0) extWeightTensors++;   // offset/size external buffer (not inline) — unsupported here
+            }
+            if (data != null && data.Length > 0)
+            {
+                info.Const = true;
+                g.Initializer.Add(info.Type is 17 or 19
+                    ? DequantSubByte(info.Name, info.Shape, data, info.QScale, info.QZero, info.QDim)
+                    : MakeInit(info.Name, info.Shape, info.Type, data));
+                initCount++;
+            }
+            ts[i] = info;
+        }
+
+        int[] sgIn = fr.VecI32(fr.Field(sg, 1));
+        int[] sgOut = fr.VecI32(fr.Field(sg, 2));
+        string TName(int ix) => ix < 0 ? "" : ts[ix].Name;
+        ValueInfoProto VI(int ix)
+        {
+            var t = ts[ix];
+            var sh = new TensorShapeProto();
+            foreach (var d in t.Shape) sh.Dim.Add(new TensorShapeProto.Dimension { DimValue = d });
+            return new ValueInfoProto { Name = t.Name, Type = new TypeProto { TensorType = new TypeProto.Types.Tensor { ElemType = OnnxElem(t.Type), Shape = sh } } };
+        }
+        foreach (int ix in sgIn) if (ix >= 0 && ix < tCount && !ts[ix].Const) g.Input.Add(VI(ix));
+        foreach (int ix in sgOut) if (ix >= 0 && ix < tCount) g.Output.Add(VI(ix));
+
+        // operators -> nodes
+        var (opStart, opCount) = fr.Vector(fr.Field(sg, 3));
+        var sb = new StringBuilder();
+        for (int o = 0; o < opCount; o++)
+        {
+            int op = fr.Deref(opStart + o * 4);
+            int ocix = (int)fr.FieldU32(op, 0);
+            string tf = (ocix >= 0 && ocix < opNames.Length) ? opNames[ocix] : "OP_?";
+            string onnx = MapToOnnx(tf) ?? throw new NotImplementedException($"op[{o}] {tf}: no dp-onnx kernel mapping (subgraph not fully covered)");
+            int[] inIx = fr.VecI32(fr.Field(op, 1));
+            int[] outIx = fr.VecI32(fr.Field(op, 2));
+            int boType = fr.FieldU8(op, 3);                 // builtin_options_type (union discriminator)
+            int boVal = fr.Sub(fr.Field(op, 4));            // builtin_options value table
+            var node = new NodeProto { OpType = onnx, Name = $"{tf}_{o}" };
+            var ins = new List<string>(); foreach (var ix in inIx) ins.Add(TName(ix));
+            var outs = new List<string>(); foreach (var ix in outIx) outs.Add(TName(ix));
+
+            switch (tf)
+            {
+                case "EMBEDDING_LOOKUP":   // tflite (indices, table) -> ONNX Gather(data=table, indices), axis 0
+                    node.Input.Add(ins[1]); node.Input.Add(ins[0]); node.Attribute.Add(IntAttr("axis", 0)); break;
+                case "GATHER":
+                    foreach (var s in ins) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("axis", boVal != 0 ? fr.FieldI32(boVal, 0) : 0)); break;
+                case "RESHAPE":
+                    node.Input.Add(ins[0]);
+                    if (ins.Count >= 2) node.Input.Add(ins[1]);     // shape carried as input tensor (an initializer)
+                    else {                                          // shape only in ReshapeOptions.new_shape -> synth INT64 initializer
+                        int[] ns = boVal != 0 ? fr.VecI32(fr.Field(boVal, 0)) : Array.Empty<int>();
+                        var st = new TensorProto { Name = node.Name + "_shape", DataType = 7 };
+                        st.Dims.Add(ns.Length); foreach (var d in ns) st.Int64Data.Add((long)d);
+                        g.Initializer.Add(st); node.Input.Add(st.Name);
+                    }
+                    break;
+                case "DEQUANTIZE": {        // input is a quantized tensor carrying scale/zp -> DequantizeLinear(x, scale, zp)
+                    var (scl, zr, ax) = SynthQuant(ts[inIx[0]], g);
+                    node.Input.Add(ins[0]); if (scl != null) { node.Input.Add(scl); node.Input.Add(zr); if (ax >= 0) node.Attribute.Add(IntAttr("axis", ax)); }
+                    break; }
+                case "QUANTIZE": {          // output tensor carries scale/zp -> QuantizeLinear(x, scale, zp)
+                    var (scl, zr, ax) = SynthQuant(ts[outIx[0]], g);
+                    node.Input.Add(ins[0]); if (scl != null) { node.Input.Add(scl); node.Input.Add(zr); if (ax >= 0) node.Attribute.Add(IntAttr("axis", ax)); }
+                    break; }
+                default:
+                    if (!AttrFreeSafe.Contains(tf))
+                        throw new NotImplementedException($"op[{o}] {tf} -> {onnx}: attribute lowering not implemented (slice 2 targets the attribute-free section ops)");
+                    foreach (var s in ins) node.Input.Add(s);
+                    break;
+            }
+            foreach (var s in outs) node.Output.Add(s);
+            g.Node.Add(node);
+            sb.Append($"  op[{o,3}] {tf,-18} -> {onnx,-16} in[{string.Join(",", inIx)}] out[{string.Join(",", outIx)}]\n");
+        }
+
+        summary = $"subgraph[{sgIx}] tensors={tCount} ops={opCount} initializers={initCount} inputs={g.Input.Count} outputs={g.Output.Count}"
+                + (extWeightTensors > 0 ? $" extWeightTensors={extWeightTensors}(UNSUPPORTED-external-buffer)" : "") + "\n"
+                + "  inputs:  " + string.Join("  ", g.Input.Select(v => $"{v.Name}{ShapeStr(v)}")) + "\n"
+                + "  outputs: " + string.Join("  ", g.Output.Select(v => $"{v.Name}{ShapeStr(v)}")) + "\n"
+                + sb;
+        return new ModelProto { Graph = g };
+    }
+
+    static string ShapeStr(ValueInfoProto v) =>
+        "[" + string.Join(",", v.Type.TensorType.Shape.Dim.Select(d => d.DimValue)) + "]";
+
+    // ONNX ops whose dp-onnx kernels need no attributes for a faithful translation (broadcast/elementwise/select/cast).
+    static readonly HashSet<string> AttrFreeSafe = new()
+    {
+        "ADD","SUB","MUL","DIV","TANH","LOGISTIC","SIN","COS","SIGN","RSQRT",
+        "EQUAL","NOT_EQUAL","LESS","GREATER_EQUAL","LOGICAL_AND","LOGICAL_OR","LOGICAL_NOT",
+        "SELECT","SELECT_V2","MAXIMUM","FLOOR_MOD","CAST",
+    };
 }

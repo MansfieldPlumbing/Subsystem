@@ -173,7 +173,7 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx> | run <model.onnx> [--inputs <dir>] [--out <wav>] | db <model.onnx> <out.db> | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx> <out.db> | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
@@ -362,6 +362,52 @@ static int ProbeLiteRtLm(string path)
     return 0;
 }
 
+// Translate ONE .litertlm TFLiteModel section into Onnx.ModelProto and RUN it through Interp, off a synthesized
+// feed (the probe->executable proof: the sovereign tflite reader produces a graph the dp-onnx engine executes).
+static int RunSection(string path, int sectionIx)
+{
+    var secs = LiteRtLm.ReadSections(path);
+    if (sectionIx < 0 || sectionIx >= secs.Count) { Console.Error.WriteLine($"section {sectionIx} out of range (0..{secs.Count - 1})"); return 1; }
+    var s = secs[sectionIx];
+    if (s.DataType != 3) { Console.Error.WriteLine($"section [{sectionIx}] is {LiteRtLm.TypeName(s.DataType)}, not TFLiteModel"); return 1; }
+
+    var tfl = LiteRtLm.ReadSectionBytes(path, s);
+    var model = Tflite.ToModelProto(tfl, 0, out string summary);
+    var g = model.Graph;
+    Console.WriteLine($"-- [{sectionIx}] TFLiteModel -> Onnx.ModelProto --");
+    Console.Write(summary);
+
+    // synthesize a safe feed: a dynamic / non-positive dim -> SEQ; int inputs -> small in-range indices; float -> 0.
+    const int SEQ = 8;
+    var feed = new Dictionary<string, Tensor>();
+    foreach (var vi in g.Input)
+    {
+        var tt = vi.Type.TensorType;
+        var dims = tt.Shape.Dim.Select(d => d.DimValue <= 0 ? SEQ : (int)d.DimValue).ToArray();
+        if (dims.Length == 0) dims = new[] { 1 };
+        long n = 1; foreach (var d in dims) n *= d;
+        bool isInt = tt.ElemType is 6 or 7 or 9;
+        if (isInt) { var a = new long[n]; for (long k = 0; k < n; k++) a[k] = k % 4; feed[vi.Name] = Tensor.I(a, dims); }
+        else feed[vi.Name] = Tensor.F(new float[n], dims);
+        Console.WriteLine($"  feed {vi.Name} [{string.Join(",", dims)}] {(isInt ? "int64" : "float")}");
+    }
+
+    int ran = 0; Dictionary<string, Tensor> outs = null; string err = null;
+    try { outs = new Interp(model).Run(feed, onNode: (_, __, ___) => ran++); }
+    catch (Exception ex) { err = $"[{ex.GetType().Name}] {ex.Message}"; }
+    if (err != null) { Console.WriteLine($"[{sectionIx}] FAILED after {ran}/{g.Node.Count} nodes: {err}"); return 1; }
+
+    bool finite = true; var shapes = new List<string>();
+    foreach (var kv in outs)
+    {
+        var t = kv.Value; shapes.Add($"{kv.Key}[{string.Join(",", t.Shape)}]");
+        foreach (var v in t.AsF()) if (float.IsNaN(v) || float.IsInfinity(v)) { finite = false; break; }
+    }
+    Console.WriteLine($"[{sectionIx}] RAN nodes={ran} inputs={g.Input.Count} outputs={outs.Count} finite={finite}");
+    Console.WriteLine($"  outputs: {string.Join("  ", shapes)}");
+    return 0;
+}
+
 static void ProbeTfliteBytes(byte[] tfl, string label)
 {
     var (hist, subgraphs, tensors, ops) = Tflite.OpHistogram(tfl);
@@ -418,10 +464,11 @@ static int Probe(string path, bool stopOnMissing = true)
 //       completion, diff the waveform against ORT's oracle.bin) -----
 static int Run(string[] args)
 {
-    string path = null, inputsDir = null, outPath = null, dumpNode = null, compareDir = null, injectNode = null; bool trace = false; int stopAfter = 0;
+    string path = null, inputsDir = null, outPath = null, dumpNode = null, compareDir = null, injectNode = null; bool trace = false; int stopAfter = 0; int sectionIx = -1;
     for (int i = 1; i < args.Length; i++)
         switch (args[i])
         {
+            case "--section": sectionIx = int.Parse(args[++i]); break;   // translate+run one .litertlm TFLiteModel section through Interp
             case "--inputs": inputsDir = args[++i]; break;
             case "--out": outPath = args[++i]; break;
             case "--trace": trace = true; break;
@@ -436,6 +483,7 @@ static int Run(string[] args)
             default: if (path == null) path = args[i]; break;
         }
     if (path == null) return Usage();
+    if (sectionIx >= 0) return RunSection(path, sectionIx);             // sovereign tflite-section -> ModelProto -> Interp
     if (inputsDir == null) return Probe(path, stopOnMissing: false);   // legacy zero-feed
 
     var model = ModelProto.Parser.ParseFrom(File.ReadAllBytes(path));
