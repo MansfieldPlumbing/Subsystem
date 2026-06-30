@@ -308,7 +308,10 @@ public class Interp
         return _gemmDxil = File.ReadAllBytes(p);
     }
     static Tensor GpuMatMul(Tensor A, Tensor B)
-    {   // mirrors MatMul's 4D broadcast, but dispatches each batch's GEMM to the GPU; CPU fallback if the mount fails
+    {   // mirrors MatMul's 4D broadcast, but dispatches each batch's GEMM to the GPU; ANY GPU fault degrades to the
+        // bit-exact CPU path (inv-9): missing loader (vulkan-1.dll/libvulkan.so/d3d12.dll), no device, no shader
+        // (gemm.dxil/gemm.spv), or a nonzero rc — all fall back to MatMul, once, logged. Assume Vulkan on Android 16;
+        // if it isn't there, CPU carries the GEMM. _gpuDead latches so we don't re-probe a dead GPU each node.
         if (_gpuDead) return MatMul(A, B);
         var a = A.AsF(); var b = B.AsF();
         int ra = A.Shape.Length, rb = B.Shape.Length;
@@ -319,18 +322,25 @@ public class Interp
         long[] sA = Strides(leadA, lead), sB = Strides(leadB, lead);
         var o = new float[outBatch * M * N];
         var aSub = new float[(long)M * K]; var bSub = new float[(long)K * N]; var cSub = new float[(long)M * N];
-        byte[] dxil = GemmDxil(); var bidx = new int[nb];
-        for (long bi = 0; bi < outBatch; bi++)
+        try
         {
-            long aB = 0, bB = 0; for (int k = 0; k < nb; k++) { aB += bidx[k] * sA[k]; bB += bidx[k] * sB[k]; }
-            Array.Copy(a, aB * M * K, aSub, 0, (long)M * K);
-            Array.Copy(b, bB * K * N, bSub, 0, (long)K * N);
-            int rc;
-            try { rc = Gpu.dpgpu_gemm(aSub, bSub, cSub, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length); }
-            catch (DllNotFoundException) { _gpuDead = true; return MatMul(A, B); }
-            if (rc != 0) { _gpuDead = true; return MatMul(A, B); }
-            Array.Copy(cSub, 0, o, bi * M * N, (long)M * N);
-            for (int k = nb - 1; k >= 0; k--) { if (++bidx[k] < lead[k]) break; bidx[k] = 0; }
+            byte[] dxil = GemmDxil(); var bidx = new int[nb];
+            for (long bi = 0; bi < outBatch; bi++)
+            {
+                long aB = 0, bB = 0; for (int k = 0; k < nb; k++) { aB += bidx[k] * sA[k]; bB += bidx[k] * sB[k]; }
+                Array.Copy(a, aB * M * K, aSub, 0, (long)M * K);
+                Array.Copy(b, bB * K * N, bSub, 0, (long)K * N);
+                int rc = Gpu.dpgpu_gemm(aSub, bSub, cSub, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
+                if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm rc={rc}");
+                Array.Copy(cSub, 0, o, bi * M * N, (long)M * N);
+                for (int k = nb - 1; k >= 0; k--) { if (++bidx[k] < lead[k]) break; bidx[k] = 0; }
+            }
+        }
+        catch (Exception ex)
+        {
+            _gpuDead = true;
+            Console.Error.WriteLine($"dp-onnx: GPU GEMM unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            return MatMul(A, B);
         }
         var sh = new int[nb + 2]; for (int k = 0; k < nb; k++) sh[k] = lead[k]; sh[nb] = M; sh[nb + 1] = N;
         return Tensor.F(o, sh);
