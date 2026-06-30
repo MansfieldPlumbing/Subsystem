@@ -376,6 +376,28 @@ public static class Tflite
         return (sc.Name, zp.Name, perAxis ? t.QDim : -1);
     }
 
+    // Spawn-SubGraph: inline decomposition subgraph `sgIx` into `g`. Child inputs -> parentIns, child
+    // outputs -> parentOuts (positional); every other value/initializer name is prefixed `pfx` to stay
+    // unique across the many composite expansions. ToModelProto allocates the child fresh, so we consume
+    // (rename + move) its nodes/initializers -- no clone. Recursive: a decomposition may itself hold composites.
+    static void SpawnSubGraph(byte[] tfl, int sgIx, List<string> parentIns, List<string> parentOuts, GraphProto g, string pfx)
+    {
+        var cg = ToModelProto(tfl, sgIx, out _).Graph;
+        var rename = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int i = 0; i < cg.Input.Count && i < parentIns.Count; i++) rename[cg.Input[i].Name] = parentIns[i];
+        for (int i = 0; i < cg.Output.Count && i < parentOuts.Count; i++) rename[cg.Output[i].Name] = parentOuts[i];
+        string Map(string n) => string.IsNullOrEmpty(n) ? n : (rename.TryGetValue(n, out var r) ? r : pfx + n);
+        foreach (var init in cg.Initializer) { init.Name = Map(init.Name); g.Initializer.Add(init); }
+        foreach (var nd in cg.Node)
+        {
+            nd.Name = pfx + nd.Name;
+            var ri = nd.Input.Select(Map).ToList(); var ro = nd.Output.Select(Map).ToList();
+            nd.Input.Clear(); foreach (var s in ri) nd.Input.Add(s);
+            nd.Output.Clear(); foreach (var s in ro) nd.Output.Add(s);
+            g.Node.Add(nd);
+        }
+    }
+
     // Translate subgraph `sgIx` of a .tflite model to ModelProto. `summary` carries a structural digest for the receipt.
     public static ModelProto ToModelProto(byte[] tfl, int sgIx, out string summary)
     {
@@ -453,9 +475,26 @@ public static class Tflite
             int op = fr.Deref(opStart + o * 4);
             int ocix = (int)fr.FieldU32(op, 0);
             string tf = (ocix >= 0 && ocix < opNames.Length) ? opNames[ocix] : "OP_?";
-            string onnx = MapToOnnx(tf) ?? throw new NotImplementedException($"op[{o}] {tf}: no dp-onnx kernel mapping (subgraph not fully covered)");
             int[] inIx = fr.VecI32(fr.Field(op, 1));
             int[] outIx = fr.VecI32(fr.Field(op, 2));
+
+            // Spawn-SubGraph (CRQ144): a STABLEHLO_COMPOSITE carries a decomposition_subgraph_index in
+            // builtin_options_2; spawn that subgraph as a child and splice it inline (no node for the
+            // composite itself). The Sub-VOM-is-a-VOM move applied to the graph: recursion, not a fused kernel.
+            if (tf == "STABLEHLO_COMPOSITE")
+            {
+                int bo2 = fr.Sub(fr.Field(op, 12));                 // builtin_options_2 = StableHLOCompositeOptions
+                int decompIx = bo2 != 0 ? fr.FieldI32(bo2, 1) : -1; // [1] = decomposition_subgraph_index
+                if (decompIx < 0 || decompIx >= sgCount)
+                    throw new NotImplementedException($"op[{o}] STABLEHLO_COMPOSITE: bad decomposition_subgraph_index={decompIx} (sgCount={sgCount})");
+                var pins = new List<string>(); foreach (var ix in inIx) pins.Add(TName(ix));
+                var pouts = new List<string>(); foreach (var ix in outIx) pouts.Add(TName(ix));
+                SpawnSubGraph(tfl, decompIx, pins, pouts, g, $"c{sgIx}_{o}_");
+                sb.Append($"  op[{o,3}] STABLEHLO_COMPOSITE -> Spawn-SubGraph[{decompIx}] in[{string.Join(",", inIx)}] out[{string.Join(",", outIx)}]\n");
+                continue;
+            }
+
+            string onnx = MapToOnnx(tf) ?? throw new NotImplementedException($"op[{o}] {tf}: no dp-onnx kernel mapping (subgraph not fully covered)");
             int boType = fr.FieldU8(op, 3);                 // builtin_options_type (union discriminator)
             int boVal = fr.Sub(fr.Field(op, 4));            // builtin_options value table
             var node = new NodeProto { OpType = onnx, Name = $"{tf}_{o}" };
