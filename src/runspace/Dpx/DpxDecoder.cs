@@ -10,14 +10,15 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Onnx;
 using DpOnnx;
+using Subsystem.RuntimeBroker;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem.Dpx
 {
-    // Sovereign dp-onnx backed Runtime: the host-side DECODE LOOP that turns a prompt
-    // into streamed tokens by driving the in-proc dp-onnx interpreter.
-    public sealed class DpOnnxRuntime : Runtime
+    // DPX decode face: the host-side DECODE LOOP that turns a prompt into streamed
+    // tokens by driving the in-proc dpx interpreter. Tensors and KV are VOM regions, off-GC.
+    public sealed class DpxDecoder : Runtime
     {
         private readonly string? _modelPath;
         private readonly string? _spmPath;
@@ -32,11 +33,11 @@ namespace Subsystem.RuntimeBroker
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private volatile bool _ready;
         private RbFault? _initFault;
-        private string _backendName = "DP-ONNX (uninitialized)";
+        private string _backendName = "DPX (uninitialized)";
         public bool? WorkerIsThreadPoolThread { get; private set; }
 
         // Constructor 1: Injected for testing
-        public DpOnnxRuntime(ModelProto model, SentencePieceTokenizer tokenizer, string unitId, int maxTokens = 4096)
+        public DpxDecoder(ModelProto model, SentencePieceTokenizer tokenizer, string unitId, int maxTokens = 4096)
         {
             _model = model;
             _tokenizer = tokenizer;
@@ -48,7 +49,7 @@ namespace Subsystem.RuntimeBroker
         }
 
         // Constructor 2: File-based for production
-        public DpOnnxRuntime(string modelPath, string spmPath, string unitId, int maxTokens = 4096)
+        public DpxDecoder(string modelPath, string spmPath, string unitId, int maxTokens = 4096)
         {
             _modelPath = modelPath;
             _spmPath = spmPath;
@@ -91,13 +92,13 @@ namespace Subsystem.RuntimeBroker
                     }
 
                     _interp = new DpOnnx.Interp(_model);
-                    _backendName = "DP-ONNX";
+                    _backendName = "DPX";
                     _ready = true;
                     return null;
                 }
                 catch (Exception ex)
                 {
-                    _initFault = new RbFault(RbFaultClass.BringUpFailed, _unitId, "CPU/DP-ONNX", ex.Message);
+                    _initFault = new RbFault(RbFaultClass.BringUpFailed, _unitId, "CPU/DPX", ex.Message);
                     return _initFault;
                 }
             }
@@ -116,7 +117,7 @@ namespace Subsystem.RuntimeBroker
             }
 
             var channel = Channel.CreateUnbounded<AgentDelta>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-            var owner = VomClass.CreateOwner($"\\Agent\\Rb\\DpOnnxRuntime\\{_unitId}");
+            var owner = VomClass.CreateOwner($"\\Agent\\Dpx\\DpxDecoder\\{_unitId}");
 
             await _turnGate.WaitAsync(ct);
             try
@@ -138,7 +139,7 @@ namespace Subsystem.RuntimeBroker
                     }
                     catch (Exception ex)
                     {
-                        var rbFault = new RbFault(RbFaultClass.DecodeFaulted, _unitId, "DP-ONNX", ex.Message);
+                        var rbFault = new RbFault(RbFaultClass.DecodeFaulted, _unitId, "DPX", ex.Message);
                         channel.Writer.TryWrite(new AgentDelta(AgentDeltaKind.Error, ex.Message, Fault: rbFault));
                     }
                     finally

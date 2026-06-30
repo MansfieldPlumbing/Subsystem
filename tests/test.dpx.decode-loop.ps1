@@ -1,5 +1,5 @@
 #requires -Version 7
-# test.rb.dponnx-decode-loop.ps1 — Proves the sovereign dp-onnx decode loop and KV-cache off-GC management.
+# test.dpx.decode-loop.ps1 — Proves the DPX decode loop and KV-cache off-GC management.
 # Authority = the binary. This comment is not authority; the receipt the run prints is.
 #   Dogfood:  ss -File tests/test.rb.dponnx-decode-loop.ps1
 
@@ -28,14 +28,14 @@ foreach ($tup in $bundleAssemblies) {
     } catch { }
 }
 
-# Compile both DpOnnxRuntime and SyntheticModelBuilder in a single assembly compilation
+# Compile both DpxDecoder and SyntheticModelBuilder in a single assembly compilation
 # to allow re-running the test with updated code in the same PowerShell session.
-Write-Host "Compiling DpOnnxRuntime and SyntheticModelBuilder via Roslyn..."
+Write-Host "Compiling DpxDecoder and SyntheticModelBuilder via Roslyn..."
 
 $syntaxTrees = [System.Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 
 # 1. Parse DpOnnxRuntime.cs
-$dpOnnxText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\RuntimeBroker\DpOnnxRuntime.cs"))
+$dpOnnxText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\DpxDecoder.cs"))
 $syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($dpOnnxText))
 
 # 2. Parse ToolDescriptor
@@ -55,6 +55,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Onnx;
 using Subsystem.RuntimeBroker;
+using Subsystem.Dpx;
 using Subsystem.Vom;
 
 public static class SyntheticModelBuilder
@@ -162,7 +163,7 @@ public static class SyntheticModelBuilder
         var spm = BuildTokenizer();
         var tokenizer = new SentencePieceTokenizer(spm);
 
-        var runtime = new DpOnnxRuntime(model, tokenizer, "synthetic_unit", 10);
+        var runtime = new DpxDecoder(model, tokenizer, "synthetic_unit", 10);
         var bringup = runtime.BringUp();
         if (bringup != null) return "has_error:True\nerror_msg:BringUp failed: " + bringup.NativeDetail;
 
@@ -291,10 +292,10 @@ $pass = $fails.Count -eq 0
 $reclaimedDetails = "handles=$activeHandlesDuringDecode/bytes=$activeBytesDuringDecode"
 
 Write-Host ""
-Write-Host ($(if($pass){"PASS — dp-onnx decode loop is sovereign, deterministic, off-GC, and thread-pool clean."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+Write-Host ($(if($pass){"PASS — DPX decode loop is sovereign, deterministic, off-GC, and thread-pool clean."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
 
 [pscustomobject]@{
-    test = 'test.rb.dponnx-decode-loop'
+    test = 'test.dpx.decode-loop'
     pass = $pass
     tokens = $tokensCount
     reclaimed = $reclaimedDetails
