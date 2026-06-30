@@ -27,6 +27,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ss</AssemblyName>
     <RollForward>LatestMajor</RollForward>
+    <!-- Gzip the single-file bundle (honored only on a PublishSingleFile publish; ~40% on disk,
+         tiny one-time decompress at startup). The drop-anywhere ss.exe stays self-contained. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <!-- The Windows exe (taskbar / Explorer) icon — the same S-within-S mark as the Android launcher.
          The binary .ico can't ride in the TEXT source dump, so it's also embedded as its OWN binary resource
          (below) and SelfSource.RestoreBinaryAssets writes it back beside this csproj on extract — so an

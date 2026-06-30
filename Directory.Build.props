@@ -25,5 +25,8 @@
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <!-- Ship English resources only: drop the ~13-language satellite DLLs (Roslyn + pwsh localizations).
+         Pure dead weight on a single-language tool; no runtime behavior change. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 </Project>
