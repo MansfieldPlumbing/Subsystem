@@ -66,20 +66,14 @@
          floor), GlyphAtlas (MSDF rasterizer), CellShell (multi-session pwsh), Tui (namespace view), Repl
          (the flip). One module compiled into BOTH heads; only the presenter branches per head. -->
     <Compile Include="..\..\shell\cell\*.cs" LinkBase="shell\cell" />
-    <!-- The dp-onnx inference engine, folded in-proc (CRQ143 P2): the home-rolled ONNX reader (OnnxProto),
-         the .litertlm/.tflite reader + tflite->ModelProto translator (LiteRt, CRQ144 slice 2), the interpreter
-         (Dp, ex-Interp), and the D3D12/Vulkan GPU seams — all Onnx/Subsystem.Dpx namespace, library code. Now
-         physically inside runspace/Dpx (ambient VOM-facing math, no boundary — it moved out from under
-         src/native/dp-onnx, which is for actual native/foreign boundaries). The CLI entry (Dpx/Program.cs) is
-         NOT linked (its top-level Main would collide, CS0017). Lets ss run gemma inference resident off the
-         .litertlm — no dp-onnx.exe child process. Same set as the SelfBuild roots. -->
-    <Compile Include="..\Dpx\OnnxProto.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\LiteRt.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\SentencePiece.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\Dp.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\MemGovernor.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\GpuD3D12.cs" LinkBase="Dpx" />
-    <Compile Include="..\Dpx\GpuVulkan.cs" LinkBase="Dpx" />
+    <!-- Subsystem.Dpx — dp-onnx folded in-proc (CRQ143 P2 + CRQ164), ambient VOM-facing math, no boundary
+         (it moved out from under src/native/dp-onnx, which is for actual native/foreign boundaries). A
+         DIRECTORY glob, not an enumerated file list — the enumerated version already went stale once
+         (DpTensor.cs missing at CRQ164 landing). DpxDecoder's Runtime is the lightweight windows/RuntimeTypes.cs
+         shim (already in scope, no RuntimeBroker/ needed); DpxQnn is pure P/Invoke resolved at load time (no
+         QNN toolchain/SDK dependency to compile, no cross-process boundary). Excluded: Dpx/Program.cs, the
+         standalone dp-onnx dev-CLI's own top-level Main (would collide, CS0017 — same reason as launcher/). -->
+    <Compile Include="..\Dpx\*.cs" Exclude="..\Dpx\Program.cs" LinkBase="Dpx" />
   </ItemGroup>
 
   <!-- The vendored DirectPort D3D12 binding (src/native/directport, built by its build.ps1). Copied

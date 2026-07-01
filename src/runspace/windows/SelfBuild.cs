@@ -232,19 +232,20 @@ internal static class SelfBuild
                             // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
                             // lives in windows/ (already covered by the windows/ root above).
                             "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs",
-                            // dp-onnx engine folded in-proc (CRQ143 P2), now physically inside Subsystem.Dpx: the ONNX
-                            // reader + the .litertlm/.tflite reader and tflite->ModelProto translator (LiteRt, CRQ144
-                            // slice 2) + interpreter (Dp, ex-Interp) + GPU seams as library code. The CLI entry
-                            // (Dpx/Program.cs) is EXCLUDED — its top-level Main would collide with the head (CS0017),
-                            // like launcher/. The .db/Tts callers come in F3.
-                            "src/runspace/Dpx/OnnxProto.cs", "src/runspace/Dpx/LiteRt.cs",
-                            "src/runspace/Dpx/SentencePiece.cs",
-                            "src/runspace/Dpx/Dp.cs", "src/runspace/Dpx/MemGovernor.cs",
-                            "src/runspace/Dpx/GpuD3D12.cs", "src/runspace/Dpx/GpuVulkan.cs" };
+                            // Subsystem.Dpx (dp-onnx folded in-proc, CRQ143 P2 + CRQ164): the ONNX reader, the
+                            // .litertlm/.tflite reader + translator (LiteRt), the interpreter (Dp, ex-Interp), the
+                            // GPU seams, DpxDecoder (Runtime is the lightweight windows/RuntimeTypes.cs shim, already
+                            // in scope via the windows/ root above — no RuntimeBroker/ needed), and DpxQnn (pure
+                            // P/Invoke against libQnnHtp/libQnnCpu, resolved at LOAD time on the target device, not
+                            // compile time here — no QNN toolchain/SDK dependency, no cross-process boundary, just
+                            // another VOM handle over unified memory). A DIRECTORY root, not an enumerated file list —
+                            // the enumerated version already went stale once (DpTensor.cs missing at CRQ164 landing).
+                            "src/runspace/Dpx/" };
         // launcher/ is a SEPARATE exe with its own Main — folding it into this ConsoleApplication
         // compile collides with windows/Program.cs (CS0017). Exclude it; it is superseded by the
-        // VOM slot-loader.
-        var excluded = new[] { "src/runspace/windows/launcher/" };
+        // VOM slot-loader. Dpx/Program.cs is the standalone dp-onnx dev-CLI's own top-level Main —
+        // same collision, same reason.
+        var excluded = new[] { "src/runspace/windows/launcher/", "src/runspace/Dpx/Program.cs" };
         var sources = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
             .Where(p =>
             {

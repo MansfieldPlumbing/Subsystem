@@ -234,7 +234,11 @@ public static class SyntheticModelBuilder
 $syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($builderCode))
 
 $compName = "DynamicAssembly_" + [Guid]::NewGuid().ToString("N")
+# AllowUnsafe: true, matching SubsystemWin.csproj/SelfBuild.cs's compile options — DpxDecoder's
+# KV-cache path aliases a VOM region's native pointer directly (zero-copy), which needs an unsafe
+# context; the production build already allows it, this dynamic recompile has to match.
 $options = [Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
+$options = $options.WithAllowUnsafe($true)
 
 $comp = [Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create(
     $compName,

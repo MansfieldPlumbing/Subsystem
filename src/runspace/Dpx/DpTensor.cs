@@ -12,6 +12,11 @@
 using System;
 using System.Runtime.CompilerServices;
 using Subsystem.Vom;
+// Vom (the static class) shares its name with the Subsystem.Vom namespace it lives in; the
+// established convention for the bare-static-call syntax (Vom.Alloc/.Close/.GetFence) is this
+// alias, same as DpxDecoder.cs's `VomClass` — resolves a namespace/type binder ambiguity that a
+// full dotnet build tolerates but ss build self's narrower Roslyn compile set does not.
+using VomClass = Subsystem.Vom.Vom;
 
 namespace Subsystem.Dpx;
 
@@ -53,7 +58,7 @@ public readonly struct DpTensor
     {
         long count = 1; foreach (var d in shape) count *= d;
         int byteCount = checked((int)(count * ElemBytes(format)));
-        var h = Vom.Alloc(owner, byteCount, format, "DpTensor", withFence, subdir, name);
+        var h = VomClass.Alloc(owner, byteCount, format, "DpTensor", withFence, subdir, name);
         return new DpTensor(owner, h, shape, null, null, 0, 0);
     }
 
@@ -62,10 +67,10 @@ public readonly struct DpTensor
     public static DpTensor AllocQuant(Owner owner, int[] shape, int packedByteCount, int qbits, int qaxis,
                                        int scaleCount, bool hasZero, string subdir = "Objects", string? name = null)
     {
-        var data = Vom.Alloc(owner, packedByteCount, VomFormat.Bytes, "DpTensor.Packed", false, subdir, name);
-        var scale = Vom.Alloc(owner, checked(scaleCount * ElemBytes(VomFormat.Bf16)), VomFormat.Bf16, "DpTensor.QScale", false, subdir, name is null ? null : name + ".qscale");
+        var data = VomClass.Alloc(owner, packedByteCount, VomFormat.Bytes, "DpTensor.Packed", false, subdir, name);
+        var scale = VomClass.Alloc(owner, checked(scaleCount * ElemBytes(VomFormat.Bf16)), VomFormat.Bf16, "DpTensor.QScale", false, subdir, name is null ? null : name + ".qscale");
         Handle? zero = hasZero
-            ? Vom.Alloc(owner, checked(scaleCount * ElemBytes(VomFormat.Bf16)), VomFormat.Bf16, "DpTensor.QZero", false, subdir, name is null ? null : name + ".qzero")
+            ? VomClass.Alloc(owner, checked(scaleCount * ElemBytes(VomFormat.Bf16)), VomFormat.Bf16, "DpTensor.QZero", false, subdir, name is null ? null : name + ".qzero")
             : null;
         return new DpTensor(owner, data, shape, scale, zero, qbits, qaxis);
     }
@@ -147,7 +152,7 @@ public readonly struct DpTensor
     // --- Fence (best-effort, latest-wins - the producer signals after a write, a consumer Waits /
     // WaitAny / WaitN against exactly the fences it needs; no locks in the hot path) ---
 
-    public Fence? GetFence() => Vom.GetFence(Owner, Data.Id);
+    public Fence? GetFence() => VomClass.GetFence(Owner, Data.Id);
 
     public void Signal(ulong value)
     {
@@ -165,8 +170,8 @@ public readonly struct DpTensor
 
     public void Close()
     {
-        Vom.Close(Owner, Data.Path);
-        if (QScale is Handle qs) Vom.Close(Owner, qs.Path);
-        if (QZero is Handle qz) Vom.Close(Owner, qz.Path);
+        VomClass.Close(Owner, Data.Path);
+        if (QScale is Handle qs) VomClass.Close(Owner, qs.Path);
+        if (QZero is Handle qz) VomClass.Close(Owner, qz.Path);
     }
 }

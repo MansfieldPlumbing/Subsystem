@@ -189,7 +189,7 @@ namespace Subsystem.Dpx
 
             string? mainOutputName = _model.Graph.Output.FirstOrDefault(o => !o.Name.Contains("present"))?.Name ?? "logits";
 
-            var kvCacheHandles = new Dictionary<string, Handle>(StringComparer.OrdinalIgnoreCase);
+            var kvCacheHandles = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
             var pastKvInputs = graphInputs.Where(i => i.Name.Contains("past") || i.Name.Contains("key_values")).ToList();
 
             int step = 0;
@@ -213,14 +213,12 @@ namespace Subsystem.Dpx
 
                     foreach (var kvInput in pastKvInputs)
                     {
-                        if (kvCacheHandles.TryGetValue(kvInput.Name, out var handle))
+                        if (kvCacheHandles.TryGetValue(kvInput.Name, out var kv))
                         {
-                            int count = handle.ByteCount / sizeof(float);
-                            float[] data = new float[count];
-                                Marshal.Copy(handle.Resource, data, 0, count);
-
+                            // Zero-copy: alias the persisted VOM region directly as the feed tensor's
+                            // native backing (Dp.Run only reads it) - no managed array, no Marshal.Copy.
                             int[] shape = GetKvInputShape(kvInput, step);
-                            feed[kvInput.Name] = Tensor.F(data, shape);
+                            unsafe { feed[kvInput.Name] = Tensor.F((float*)kv.Data.Resource, shape); }
                         }
                         else
                         {
@@ -279,25 +277,25 @@ namespace Subsystem.Dpx
 
                 if (pastKvInputs.Count > 0)
                 {
-                    var newCache = new Dictionary<string, Handle>(StringComparer.OrdinalIgnoreCase);
+                    var newCache = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (var kvOutput in outputs.Keys.Where(name => name.Contains("present")))
                     {
                         string pastName = kvOutput.Replace("present", "past");
                         var tensor = outputs[kvOutput];
-                        float[] fp = tensor.AsF().ToArray();
-                        int byteCount = fp.Length * sizeof(float);
 
-                        var handle = VomClass.Alloc(owner, byteCount, VomFormat.Float32, type: "TensorRegion");
-                            Marshal.Copy(fp, 0, handle.Resource, fp.Length);
+                        // Single copy straight into the persisted VOM region (source -> VOM), no
+                        // managed-array intermediate (was source -> GC array -> VOM, two copies).
+                        var kv = DpTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
+                        tensor.AsF().CopyTo(kv.ReadF32());
 
-                        newCache[pastName] = handle;
+                        newCache[pastName] = kv;
                     }
 
                     // Close old KV-cache regions
-                    foreach (var handle in kvCacheHandles.Values)
+                    foreach (var kv in kvCacheHandles.Values)
                     {
-                        VomClass.Close(owner, handle.Path);
+                        kv.Close();
                     }
 
                     kvCacheHandles = newCache;
@@ -307,9 +305,9 @@ namespace Subsystem.Dpx
             }
 
             // Clean up KV cache handles
-            foreach (var handle in kvCacheHandles.Values)
+            foreach (var kv in kvCacheHandles.Values)
             {
-                VomClass.Close(owner, handle.Path);
+                kv.Close();
             }
         }
 
