@@ -63,6 +63,8 @@
     <Compile Include="..\Adb\IAdbTransport.cs" LinkBase="Adb" />
     <Compile Include="..\Adb\AdbConnection.cs" LinkBase="Adb" />
     <Compile Include="..\Adb\AndroidPubKey.cs" LinkBase="Adb" />
+    <Compile Include="..\Adb\AgentActorProtocol.cs" LinkBase="Adb" />
+    <Compile Include="..\Adb\DialoguePresenter.cs" LinkBase="Adb" />
     <!-- shell/cell — the SHARED cell surface: Cell/CellBuffer, the ICellPresenter seam, VtRenderer (console
          floor), GlyphAtlas (MSDF rasterizer), CellShell (multi-session pwsh), Tui (namespace view), Repl
          (the flip). One module compiled into BOTH heads; only the presenter branches per head. -->

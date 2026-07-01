@@ -1,5 +1,6 @@
 using System;
 using Subsystem.Windows;
+using Subsystem.Adb;   // AgentActorHost / AgentActorDevice — the `ss actor` / `ss agent-actor` verbs
 
 namespace Subsystem.Windows;
 
@@ -53,6 +54,8 @@ public static class Program
             "status" or "st"                                                 => Status.Run(args[1..]),
             "refs"                                                           => Refs.Run(args[1..]),
             "adb"                                                            => Adb.Run(args[1..]),
+            "actor"                                                          => AgentActorHost.Run(args[1..]),
+            "agent-actor"                                                    => AgentActorDevice.Run(args[1..]),
             "directport" or "dp"                                             => DirectPortBench.Run(args[1..]),
             "tui"                                                            => Subsystem.Shell.Cell.Tui.Run(args[1..]),
             "cell"                                                           => Subsystem.Shell.Cell.CellShell.Run(args[1..], Shim.LoadProjectCmdlets),

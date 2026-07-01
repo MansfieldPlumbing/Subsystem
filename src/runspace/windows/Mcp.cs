@@ -24,6 +24,11 @@ namespace Subsystem.Windows;
 internal static class Mcp
 {
     private const string DefaultProtocol = "2024-11-05";
+    // Every tool result is clipped to this before it crosses the JSON-RPC wire. An unbounded Out-String (e.g.
+    // `Get-Request` fat-projected, or `ss_git` deep-JSON) used to return 60-75k chars and blow the CALLER's
+    // token budget — a hard error that returns NOTHING useful. A clipped result with a "narrow it" footer is
+    // strictly better than that error. ~40k chars ≈ 10k tokens; the curated tools (onboard/contextualize) fit under it.
+    private const int MaxToolChars = 40000;
 
     public static int Run(string[] args)
     {
@@ -89,12 +94,22 @@ internal static class Mcp
         new
         {
             name = "ss_run",
-            description = "Run a command in the ss runspace (PowerShell 7 built-ins + the project cmdlets: Get-Request/Remedy-*Request, Get-CodeContext, and the vom: provider — `Get-ChildItem vom:\\` walks the live VOM kernel). Returns the formatted output as text.",
+            description = "Run a command in the ss runspace (PowerShell 7 built-ins + the project cmdlets: Get-Request/Remedy-*Request, Get-CodeContext, and the vom: provider — `Get-ChildItem vom:\\` walks the live VOM kernel). Returns the formatted output as text, clipped to ~40k chars — narrow the command (Select-Object -First N / Where-Object) if you hit the clip footer.",
             inputSchema = new
             {
                 type = "object",
                 properties = new { command = new { type = "string", description = "The command line to run." } },
                 required = new[] { "command" },
+            },
+        },
+        new
+        {
+            name = "ss_cmdlets",
+            description = "The command surface at a glance: every ss PROJECT cmdlet (Get-Request, Remedy-ChangeRequest, Close-Request, Add-EosLog, Get-CodeContext, Get-GitGraphContext, Invoke-ModelAnalysis, Restore-CodeContext) plus any built-in cmdlet/function matching `filter`. Use this to discover what you can drive through ss_run instead of guessing cmdlet names.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new { filter = new { type = "string", description = "Name wildcard to match, e.g. '*Request' or 'Get-*' (default '*' = the whole surface)." } },
             },
         },
         new
@@ -121,7 +136,11 @@ internal static class Mcp
         {
             name = "ss_onboard",
             description = "The one-shot alignment package — telos, invariants, settled decisions, conventions, live state, and the contract. Call this FIRST on a cold session to understand the system from the binary.",
-            inputSchema = new { type = "object", properties = new { } },
+            inputSchema = new
+            {
+                type = "object",
+                properties = new { path = new { type = "string", description = "Source tree repository root. Optional." } }
+            },
         },
     };
 
@@ -130,8 +149,9 @@ internal static class Mcp
         var p = root.GetProperty("params");
         var name = p.GetProperty("name").GetString() ?? "";
         var a = p.TryGetProperty("arguments", out var av) ? av : default;
-        var text = RunTool(name, a, rs);
-        return new { content = new object[] { new { type = "text", text } }, isError = text.StartsWith("ERROR:", StringComparison.Ordinal) };
+        var raw = RunTool(name, a, rs);
+        var text = ApplyClip(raw, MaxToolChars);
+        return new { content = new object[] { new { type = "text", text } }, isError = raw.StartsWith("ERROR:", StringComparison.Ordinal) };
     }
 
     // The one tool dispatcher — shared by the JSON-RPC path (InvokeTool) and the `ss mcp call` shorthand.
@@ -142,9 +162,10 @@ internal static class Mcp
         {
             "ss_contextualize" => ReadContract(),
             "ss_run"           => Invoke(GetArg("command") ?? "", rs),
+            "ss_cmdlets"       => Invoke(CmdletQuery(GetArg("filter")), rs),
             "ss_git"           => Invoke($"Get-GitGraphContext{(GetArg("gitRoot") is string gr && gr.Length > 0 ? $" -GitRoot '{gr.Replace("'", "''")}'" : "")} | ConvertTo-Json -Depth 6", rs),
             "ss_map"           => CaptureConsole(() => LiveMap.Run(GetArg("path") ?? "", ReadContract())),
-            "ss_onboard"       => CaptureConsole(() => Onboard.Run(Array.Empty<string>())),
+            "ss_onboard"       => CaptureConsole(() => Onboard.Run(GetArg("path") is string p && p.Length > 0 ? new[] { "--path", p } : Array.Empty<string>())),
             _                  => "unknown tool: " + name,
         };
     }
@@ -154,7 +175,7 @@ internal static class Mcp
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: ss mcp call <tool> [-key val ...]\n  tools: ss_onboard · ss_contextualize · ss_map [-path <dir>] · ss_git [-gitRoot <dir>] · ss_run -command <cmd>");
+            Console.Error.WriteLine("usage: ss mcp call <tool> [-key val ...]\n  tools: ss_onboard · ss_contextualize · ss_cmdlets [-filter <wildcard>] · ss_map [-path <dir>] · ss_git [-gitRoot <dir>] · ss_run -command <cmd>");
             return 2;
         }
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -162,7 +183,7 @@ internal static class Mcp
             if (args[i].StartsWith("-", StringComparison.Ordinal) && i + 1 < args.Length) dict[args[i].TrimStart('-')] = args[++i];
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(dict));
         var text = RunTool(args[0], doc.RootElement, rs);
-        Console.WriteLine(text);
+        Console.WriteLine(ApplyClip(text, MaxToolChars));
         return text.StartsWith("ERROR:", StringComparison.Ordinal) ? 1 : 0;
     }
 
@@ -191,6 +212,27 @@ internal static class Mcp
         catch (Exception ex) { return "ERROR: " + ex.Message; }
         foreach (var e in ps.Streams.Error) sb.Append("\n[error] ").Append(e.ToString());
         return sb.ToString();
+    }
+
+    // Apply a ceiling to a tool result, with a "narrow it" footer — see MaxToolChars. Never throws; passes short text through.
+    private static string ApplyClip(string s, int max)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length <= max) return s ?? "";
+        return s.Substring(0, max) + $"\n\n[output clipped: {max:N0} of {s.Length:N0} chars shown. Narrow the command (Select-Object -First N / Where-Object / a tighter filter) to see the rest.]";
+    }
+
+    // ss_cmdlets — the command surface at a glance: the ss project cmdlets ALWAYS (Source is blank for ours), then
+    // everything matching `filter`. So an agent discovers what it can drive without guessing cmdlet names.
+    private static string CmdletQuery(string? filter)
+    {
+        var f = (string.IsNullOrWhiteSpace(filter) ? "*" : filter!).Replace("'", "''");
+        return
+            "$ours = Get-Command -CommandType Cmdlet,Function | Where-Object { -not $_.Source }; " +
+            "$m = @(Get-Command -Name '" + f + "' -CommandType Cmdlet,Function -ErrorAction SilentlyContinue); " +
+            "\"== ss project cmdlets ($($ours.Count)) ==\"; " +
+            "$ours | Sort-Object Name | Format-Table Name,CommandType -AutoSize | Out-String; " +
+            "\"== matching '" + f + "' ($($m.Count)) ==\"; " +
+            "$m | Sort-Object Source,Name | Format-Table Name,Source -AutoSize | Out-String";
     }
 
     private static Runspace OpenRunspace(global::Subsystem.Vom.Owner pwshMount)
