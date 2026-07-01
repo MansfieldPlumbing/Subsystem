@@ -4,9 +4,8 @@ param(
     [string]$Package
 )
 
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $raw = Invoke-AdbShell 'cmd package query-activities -a android.intent.action.MAIN'
-$tree = $raw | & "$PSScriptRoot\ConvertFrom-DumpsysTree.ps1"
+$tree = $raw | ConvertFrom-DumpsysTree
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 

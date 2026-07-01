@@ -4,9 +4,8 @@ param(
     [string]$Package
 )
 
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $raw = Invoke-AdbShell 'dumpsys app_function'
-$tree = $raw | & "$PSScriptRoot\ConvertFrom-DumpsysTree.ps1"
+$tree = $raw | ConvertFrom-DumpsysTree
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 

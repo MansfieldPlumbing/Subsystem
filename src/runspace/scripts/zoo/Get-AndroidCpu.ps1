@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param()
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 $raw = Invoke-AdbShell 'dumpsys cpuinfo'
 $lines = $raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
@@ -15,22 +15,24 @@ if ($totalLine -and $totalLine -match '^\s*([0-9.]+%)\s*TOTAL:') {
     $totalCpu = $Matches[1]
 }
 
-$procLines = [System.Collections.Generic.List[string]]::new()
+$procObjects = [System.Collections.Generic.List[PSCustomObject]]::new()
 foreach ($line in $lines) {
     if ($line -match '^\s*([0-9.]+%)\s+(\d+)/([^:]+):\s*(.*)$') {
-        $pct = $Matches[1]
-        $pid = $Matches[2]
+        $usage = $Matches[1]
+        $procId = $Matches[2]
         $name = $Matches[3]
-        $details = $Matches[4]
-        [void]$procLines.Add("$pct $pid $name $details")
+        $details = $Matches[4].Trim()
+        [void]$procObjects.Add([pscustomobject]@{
+            Usage = $usage
+            ProcessId = $procId
+            Name = $name
+            Details = $details
+        })
     }
 }
-
-$procHeader = @('Usage', 'PID', 'Name', 'Details')
-$procObjects = $procLines | & "$PSScriptRoot\ConvertFrom-Table.ps1" -Header $procHeader
 
 [pscustomobject]@{
     Load = $load
     TotalCpu = $totalCpu
-    Processes = $procObjects
+    Processes = $procObjects.ToArray()
 }

@@ -8,16 +8,26 @@ param(
     [string]$Scope = 'global'
 )
 
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-
 if (-not [string]::IsNullOrWhiteSpace($Key)) {
     $val = Invoke-AdbShell "settings get $Scope $Key"
     if ($null -ne $val) {
         $val = $val.Trim()
         if ($val -eq 'null') { return $null }
-        return $val
+        [pscustomobject]@{
+            Scope = $Scope
+            Key   = $Key
+            Value = $val
+        }
     }
-    return $null
 } else {
-    Invoke-AdbShell "settings list $Scope" | & "$PSScriptRoot\ConvertFrom-Settings.ps1"
+    $list = Invoke-AdbShell "settings list $Scope" | ConvertFrom-Settings
+    if ($list) {
+        foreach ($item in $list) {
+            [pscustomobject]@{
+                Scope = $Scope
+                Key   = $item.Key
+                Value = $item.Value
+            }
+        }
+    }
 }

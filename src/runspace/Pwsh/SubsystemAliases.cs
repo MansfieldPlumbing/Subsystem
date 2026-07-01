@@ -59,18 +59,43 @@ namespace Subsystem {
         // parse is skipped + reported (SS007) — one bad animal never closes the zoo.
         private static void LoadZoo(InitialSessionState iss) {
             try {
-                var assets = Android.App.Application.Context.Assets;
+                Android.Content.Res.AssetManager? assets = null;
+                try {
+                    assets = Android.App.Application.Context?.Assets;
+                } catch (System.Exception ex) { Dg.Log("alias", "Android assets context check: " + ex.Message); }
+
                 var files = assets?.List("zoo") ?? Array.Empty<string>();
-                foreach (var f in files) {
-                    if (!f.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) continue;
-                    try {
-                        using var s = assets!.Open("zoo/" + f);
-                        using var rd = new StreamReader(s);
-                        var text = rd.ReadToEnd();
-                        Parser.ParseInput(text, out _, out var errs);
-                        if (errs is { Length: > 0 }) { Dg.Log("alias", $"zoo {f} parse: {errs[0].Message}"); continue; }
-                        iss.Commands.Add(new SessionStateFunctionEntry(Path.GetFileNameWithoutExtension(f), text));
-                    } catch (System.Exception exf) { Dg.Log("alias", $"zoo {f} load failed: {exf.Message}"); }
+                if (files.Length > 0) {
+                    foreach (var f in files) {
+                        if (!f.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) continue;
+                        try {
+                            using var s = assets!.Open("zoo/" + f);
+                            using var rd = new StreamReader(s);
+                            var text = rd.ReadToEnd();
+                            Parser.ParseInput(text, out _, out var errs);
+                            if (errs is { Length: > 0 }) { Dg.Log("alias", $"zoo {f} parse: {errs[0].Message}"); continue; }
+                            iss.Commands.Add(new SessionStateFunctionEntry(Path.GetFileNameWithoutExtension(f), text));
+                        } catch (System.Exception exf) { Dg.Log("alias", $"zoo {f} load failed: {exf.Message}"); }
+                    }
+                } else {
+                    // Local fallback for Windows/development
+                    var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "src/runspace/scripts/zoo");
+                    if (!Directory.Exists(dir)) {
+                        dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../src/runspace/scripts/zoo");
+                    }
+                    if (!Directory.Exists(dir)) {
+                        dir = "src/runspace/scripts/zoo";
+                    }
+                    if (Directory.Exists(dir)) {
+                        foreach (var f in Directory.GetFiles(dir, "*.ps1")) {
+                            try {
+                                var text = File.ReadAllText(f);
+                                Parser.ParseInput(text, out _, out var errs);
+                                if (errs is { Length: > 0 }) { Dg.Log("alias", $"zoo {Path.GetFileName(f)} parse: {errs[0].Message}"); continue; }
+                                iss.Commands.Add(new SessionStateFunctionEntry(Path.GetFileNameWithoutExtension(f), text));
+                            } catch (System.Exception exf) { Dg.Log("alias", $"zoo {Path.GetFileName(f)} load failed: {exf.Message}"); }
+                        }
+                    }
                 }
             } catch (System.Exception ex) { Dg.Log("alias", "zoo load failed: " + ex.Message); }
         }

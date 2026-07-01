@@ -1,4 +1,3 @@
 [CmdletBinding()]
 param()
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-Invoke-AdbShell 'dumpsys thermalservice' | & "$PSScriptRoot\ConvertFrom-DumpsysTree.ps1"
+Invoke-AdbShell 'dumpsys thermalservice' | ConvertFrom-DumpsysTree

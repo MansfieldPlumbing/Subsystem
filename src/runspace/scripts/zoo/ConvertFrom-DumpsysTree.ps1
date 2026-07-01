@@ -9,9 +9,12 @@ begin {
 }
 
 process {
-    foreach ($line in $InputObject) {
-        if (-not [string]::IsNullOrWhiteSpace($line)) {
-            $lines.Add($line)
+    foreach ($item in $InputObject) {
+        if ($null -eq $item) { continue }
+        foreach ($line in ($item -split "\r?\n")) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $lines.Add($line)
+            }
         }
     }
 }

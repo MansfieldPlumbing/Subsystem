@@ -14,35 +14,38 @@ begin {
 }
 
 process {
-    foreach ($line in $InputObject) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            if ($hasData) {
-                if ($AsKeyValuePair) {
-                    foreach ($key in $currentBlock.Keys) {
-                        $results.Add([pscustomobject]@{ Key = $key; Value = $currentBlock[$key] })
+    foreach ($item in $InputObject) {
+        if ($null -eq $item) { continue }
+        foreach ($line in ($item -split "\r?\n")) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                if ($hasData) {
+                    if ($AsKeyValuePair) {
+                        foreach ($key in $currentBlock.Keys) {
+                            $results.Add([pscustomobject]@{ Key = $key; Value = $currentBlock[$key] })
+                        }
+                    } else {
+                        $results.Add([pscustomobject]$currentBlock)
                     }
-                } else {
-                    $results.Add([pscustomobject]$currentBlock)
+                    $currentBlock = [ordered]@{}
+                    $hasData = $false
                 }
-                $currentBlock = [ordered]@{}
-                $hasData = $false
+                continue
             }
-            continue
-        }
-        
-        # Match [key]: [value] (e.g. getprop)
-        if ($line -match '^\s*\[([^\]]+)\]:\s*\[(.*)\]\s*$') {
-            $key = $Matches[1].Trim()
-            $val = $Matches[2].Trim()
-            $currentBlock[$key] = $val
-            $hasData = $true
-        }
-        # Match key: value or key=value
-        elseif ($line -match '^\s*([^=:]+?)\s*[:=]\s*(.*)$') {
-            $key = $Matches[1].Trim()
-            $val = $Matches[2].Trim()
-            $currentBlock[$key] = $val
-            $hasData = $true
+            
+            # Match [key]: [value] (e.g. getprop)
+            if ($line -match '^\s*\[([^\]]+)\]:\s*\[(.*)\]\s*$') {
+                $key = $Matches[1].Trim()
+                $val = $Matches[2].Trim()
+                $currentBlock[$key] = $val
+                $hasData = $true
+            }
+            # Match key: value or key=value
+            elseif ($line -match '^\s*([^=:]+?)\s*[:=]\s*(.*)$') {
+                $key = $Matches[1].Trim()
+                $val = $Matches[2].Trim()
+                $currentBlock[$key] = $val
+                $hasData = $true
+            }
         }
     }
 }

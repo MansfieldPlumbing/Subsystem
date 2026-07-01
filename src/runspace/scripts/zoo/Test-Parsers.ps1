@@ -1,6 +1,10 @@
 # Unit test suite for shape parsers
 $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-
+Get-ChildItem "$PSScriptRoot\ConvertFrom-*.ps1" | ForEach-Object {
+    $name = $_.BaseName
+    $content = Get-Content $_.FullName -Raw
+    Invoke-Expression "function global:$name { $content }"
+}
 # Helper assert function
 function Assert-Equal($Actual, $Expected, $Msg) {
     if ($Actual -ne $Expected) {
@@ -23,7 +27,7 @@ Technology: Li-ion
 [sys.usb.state]: [adb]
 "@ -split "`r?`n"
 
-$kvResult = $kvInput | & "$PSScriptRoot\ConvertFrom-KeyValue.ps1"
+$kvResult = $kvInput | ConvertFrom-KeyValue
 $allPass = $allPass -and (Assert-Equal $kvResult.Level "100" "KV parser property Level")
 $allPass = $allPass -and (Assert-Equal $kvResult.Technology "Li-ion" "KV parser property Technology")
 $allPass = $allPass -and (Assert-Equal $kvResult.'sys.usb.config' "adb" "KV parser property sys.usb.config")
@@ -35,7 +39,7 @@ airplane_mode_on=0
 device_name=motorola razr+ 2024
 "@ -split "`r?`n"
 
-$settingsResult = $settingsInput | & "$PSScriptRoot\ConvertFrom-Settings.ps1"
+$settingsResult = $settingsInput | ConvertFrom-Settings
 $allPass = $allPass -and (Assert-Equal $settingsResult.Count 2 "Settings parsed count")
 $allPass = $allPass -and (Assert-Equal $settingsResult[0].Key "airplane_mode_on" "Settings key 0")
 $allPass = $allPass -and (Assert-Equal $settingsResult[0].Value "0" "Settings value 0")
@@ -50,7 +54,7 @@ PID PPID USER RSS_KB Name
 789 123 radio 1234 com.android.phone
 "@ -split "`r?`n"
 
-$tableResult = $tableInput | & "$PSScriptRoot\ConvertFrom-Table.ps1"
+$tableResult = $tableInput | ConvertFrom-Table
 $allPass = $allPass -and (Assert-Equal $tableResult.Count 2 "Table parsed count")
 $allPass = $allPass -and (Assert-Equal $tableResult[0].PID "123" "Table PID 0")
 $allPass = $allPass -and (Assert-Equal $tableResult[0].Name "system_server" "Table Name 0")
@@ -68,7 +72,7 @@ Whitelist system apps:
   com.motorola.mobiledesktop.core
 "@ -split "`r?`n"
 
-$treeResult = $treeInput | & "$PSScriptRoot\ConvertFrom-DumpsysTree.ps1"
+$treeResult = $treeInput | ConvertFrom-DumpsysTree
 $allPass = $allPass -and (Assert-Equal $treeResult.Settings.version "4" "Tree nested object property version")
 $allPass = $allPass -and (Assert-Equal $treeResult.Settings.min_futurity "+5s0ms" "Tree nested object property min_futurity")
 $allPass = $allPass -and (Assert-Equal $treeResult.'Whitelist system apps'.Count 2 "Tree array child count")
