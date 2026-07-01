@@ -8,9 +8,13 @@ namespace Subsystem.Vom;
 public enum VomFormat
 {
     Float32 = 0,   // the universal element
-    Half    = 1,
+    Half    = 1,   // IEEE-754 binary16 (5-bit exp / 10-bit mantissa, 65504 overflow ceiling)
     Raw32   = 2,
     Bytes   = 3,   // control plane: commands / JSON / CLI text ride here, same lifecycle rules
+    Bf16    = 4,   // top 16 bits of fp32 (1/8/7): a FREE truncate/shift from fp32, no rebias, same
+                   // dynamic range as fp32 (no Half's overflow cliff) — NPU-native (Hexagon HMX).
+                   // Distinct byte layout from Half; do not conflate the two.
+    Int64   = 5,   // signed 64-bit element (ONNX INT64 tensors: token ids, shape/index tensors).
 }
 
 // The lean NT-style object header (VOM-SPEC §2). Immutable + pointer-stable for its whole lifetime

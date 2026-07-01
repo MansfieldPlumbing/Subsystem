@@ -890,9 +890,9 @@
     "Id": 145,
     "Kind": "Change",
     "Category": "Vom",
-    "Summary": "GPU PE-factory / pure-C# D3D12 spine - the keystone. wip/vom-gpu-compiler assembles a native PE32+ on the GPU via an HLSL compute shader, driven by pure-C# D3D12 (raw COM-vtable dispatch, only OS exports P/Invoked, NO home-built DLLs - directport.dll/dpgpu.dll are drift), the VOM brokering every D3D12 resource as a cascade-reclaimed handle. VERIFIED 2026-06-25 emits a structurally-valid OS-loadable PE (Start-Process accepts it, PEReader PE32+/WindowsCui, .text holds GPU-emitted x64) after fixing 3 bugs CBV-to-RootConstants, Machine/Sections swap, optional-header offset map. This is the spine - one pure-C# D3D12 region+fence+handle layer that DirectPort present, dpgpu compute, and GPU inference all ride. NEXT lift from wip into src, mount DirectPort + the dp-onnx GPU off-ramp on it. Frontier functional PE (epilogue + IAT into data directory). Scott 2026-06-25.",
+    "Summary": "GPU PE-factory / pure-C# D3D12 spine - the keystone. src/tools/VomGpuCompiler assembles a native PE32+ on the GPU via an HLSL compute shader, driven by pure-C# D3D12 (raw COM-vtable dispatch, only OS exports P/Invoked, NO home-built DLLs - directport.dll/dpgpu.dll are drift), the VOM brokering every D3D12 resource as a cascade-reclaimed handle. VERIFIED 2026-06-25 emits a structurally-valid OS-loadable PE (Start-Process accepts it, PEReader PE32+/WindowsCui, .text holds GPU-emitted x64) after fixing 3 bugs CBV-to-RootConstants, Machine/Sections swap, optional-header offset map. This is the spine - one pure-C# D3D12 region+fence+handle layer that DirectPort present, dpgpu compute, and GPU inference all ride. NEXT lift from wip into src, mount DirectPort + the dp-onnx GPU off-ramp on it. Frontier functional PE (epilogue + IAT into data directory). Scott 2026-06-25.",
     "RelatedFiles": [
-      "wip/vom-gpu-compiler/compile.ps1"
+      "src/tools/VomGpuCompiler/compile.ps1"
     ],
     "Severity": 2,
     "Status": "Open",
