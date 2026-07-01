@@ -1912,6 +1912,12 @@
         "Noted": 1782943930,
         "Disposition": "note",
         "Body": "Fable 5 session INTEGRATING now on Scott's direct order (sprint: everything to main + GitHub constantly): (1) committing the main-tree uncommitted work (CRQ172 rename + SS009 fixes, CRQ174 gate debt, CRQ160/161 test fixes - all hive-receipted green by the Sonnet 5 session), (2) merging claude/distracted-khayyam-a29e10 (CRQ178 onboard manifest + onboard cwd-down fix), (3) rebuild + gate + push origin main, (4) swapping S:\\subsystem\\ss.exe (rename-old + copy, the CRQ177 dance) so the next MCP reconnect serves the manifest. Peer sessions: pull/rebase before your next commit."
+      },
+      {
+        "Request": 168,
+        "Noted": 1782945880,
+        "Disposition": "progress",
+        "Body": "Fable 5 session receipt 2026-07-01 late: main pushed through 4612314 (four commits tonight: 5baeafa Sonnet rename/gate-debt work committed, c7c4435 CRQ178 onboard manifest merge, 449455e Adb registered gate 575->573, 4612314 full hive projected to requests.json). Gate GREEN 573/0. S:\\subsystem\\ss.exe swapped to the new build (manifest + 40k clip + ss_cmdlets + Adb contract) - MCP servers pick it up on next reconnect/launch. Sprint assignments filed: CRQ179 (e2b wiki-expert, Gemini brief in EOS), CRQ180 (one-stop shop), CRQ181 (SS028 analyzer, Antigravity brief in EOS), CRQ182 (mechanical burn-down ~178 findings, brief in EOS), CRQ183 (e2b over MCP), CRQ184 (hive snapshot projection mechanism). Design-blocked gate debt (~395 findings: SS024/SS025 retired-term renames, SS013 verb catalog, SS015 static-state placement, SS011 R1 namespace migration + RuntimeBroker/Onnx registration, SS014 Dg DAG grants, SS003 dictionary triage, SS012 type renames, SS022 HTTP UI transport, SS026 Dp.Alloc handle redesign) needs Scott decisions - enumerated in CRQ182 as out-of-scope."
       }
     ],
     "Ref": "CRQ000000000168"
@@ -2085,7 +2091,14 @@
     "Created": 1782942441,
     "Closed": 0,
     "Disposition": "",
-    "EosLog": [],
+    "EosLog": [
+      {
+        "Request": 177,
+        "Noted": 1782946180,
+        "Disposition": "assignment",
+        "Body": "SONNET 5 ASSIGNMENT (Claude Code peer, runs PARALLEL with the Fable session): make ss.exe rebuildable IN SITU. Scott 2026-07-01 verbatim: \"ss.exe should be able to be rebuilt insitu\". Today the dance is: build to a side path, rename the locked exe, copy over, restart the MCP connection - the ss.exe.*.old corpses in the repo root are the receipts. The Slot machinery EXISTS and is GREEN: src/runspace/Vom/Slot.cs (LoadSlot/EnterSlot/LeaveSlot + ApplySlotSwapTest/ApplySlotRollbackTest; tests/test.vom.slot-swap.ps1 and test.vom.slot-rollback.ps1 both PASS as of tonight, CRQ161). DELIVERABLES: (1) wire `ss build self --replace`: compile from the tree in-proc, load the new managed assembly into a Slot, EnterSlot on the serving surfaces (the MCP dispatcher first), LeaveSlot + free-at-zero the old - no process restart, no file-lock fight; fault -> rollback per slot-rollback semantics. (2) On-disk A/B fallback: write beside + atomic-rename at next start; retire the .old-corpse litter (one .prev max). (3) Receipt: tests/test.vom.insitu-rebuild.ps1 - rebuild WHILE the MCP server is serving; prove tools/list answers before AND after and a version/feature marker proves the new build is live post-swap. CONSTRAINTS: gate GREEN 0 new at every commit (ss check --gate; --write-baseline shrinks only); brutally synchronous - no async, Fence idiom only; verbs from the closed catalog; commit to main + push constantly (sprint law); CLAIM this request via Add-EosLog before starting. COORDINATION: Fable holds CRQ183 (e2b-over-MCP) and may touch Mcp.cs RunTool dispatch - land the Slot seam first or sequence via EOS on this request. CONTEXT: sssd.exe (vom.exe was its precursor - Scott tonight) spawns ss.exe mcp as a child per this CRQ's original note; the daemon relaunching a swapped child is the fallback rung if in-proc slot swap of the full single-file bundle (native deps) proves infeasible - document which rung you land and why."
+      }
+    ],
     "Ref": "CRQ000000000177"
   },
   {
@@ -2147,7 +2160,14 @@
     "Created": 1782945572,
     "Closed": 0,
     "Disposition": "",
-    "EosLog": [],
+    "EosLog": [
+      {
+        "Request": 180,
+        "Noted": 1782946179,
+        "Disposition": "design",
+        "Body": "Scott 2026-07-01 additions, verbatim: \"the goal is and has been that ss the apk can make ss the exe and ive done work with shaders to make pe loaders so that we dont need msvc and it answers the ken thompson trusting trust thing its benign\" + \"vom.exe was simply the precusor to sssd.exe\". So the one-stop-shop chain: the apk (Android head) carries source + in-proc Roslyn -> emits ss.exe; the native/PE side rides the shader PE-loader work (the GPU PE-factory of CRQ145 - vom.exe was the PRECURSOR, sssd.exe is the target, correcting any record that filed vom.exe as an isolated experiment) so no MSVC anywhere in the loop. The trusting-trust answer: the toolchain that builds the system IS the system - source carried in the image, auditable end to end, no opaque third-party compiler between source and binary; benign by construction and by inspection. In-tree seams: src/runspace/Device/PeLoader.cs, src/tools/VomGpuCompiler, SelfBuild.cs."
+      }
+    ],
     "Ref": "CRQ000000000180"
   },
   {
@@ -2205,5 +2225,81 @@
     "Disposition": "",
     "EosLog": [],
     "Ref": "CRQ000000000183"
+  },
+  {
+    "Id": 184,
+    "Kind": "Change",
+    "Category": "Cm",
+    "Summary": "Hive snapshot rots silently - requests.json had 41 records/max CRQ149 while the drive-root subsystem-requests.db held 83/max CRQ183; nothing projects the live hive back to the repo, so clones seeded a 6-month-stale hive and ss build self embedded it. Fixed manually 2026-07-01 (Get-Request -All | ConvertTo-Json, commit 4612314). MECHANISM NEEDED: the projection is one truth flowing outward (invariant 3) - either Write-on-mutate (each Remedy-*/Add-EosLog/Close-Request refreshes requests.json when the repo is present) or a Project verb the pre-commit/gate path runs. No new terms: it is the same Project the registry already does for the namespace.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782945828,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000184"
+  },
+  {
+    "Id": 185,
+    "Kind": "Change",
+    "Category": "Device",
+    "Summary": "ADB-FREE USB TRANSPORT - adb is scoped to adb-specific stuff; the cable must not require it. Scott 2026-07-01 verbatim: \"not everything is adb or shouldnt have to be... adb is scoped for adb specific stuff but how much of this usb transport can be done without adb. obvious goal being able to do what scrcpy does and the federated compute mesh without having to even turn on adb\". The invariant-9 ladder: RUNG 1 - USB tethering/NCM: the phone exposes an IP interface over the cable with NO adb and no dev mode; the CRQ169 UDP DirectPort courier rides it UNCHANGED (push/fenced/latest-wins) - scrcpy-function = the apk pushes screen frames as DirectPort regions over that courier, and the federated mesh (CRQ173) uses the same courier. Zero new transport code; the work is discovery over the usb NIC. RUNG 2 - AOA (Android Open Accessory) bulk endpoints: the true ADB-free USB pipe when tethering is off; host flips the device to accessory mode, the apk answers - one new transport, same DirectPort contract over it. RUNG 3 - adb, scoped: install / first-pair / shell only. One concept (the courier), N carriers, graceful degradation.",
+    "RelatedFiles": [],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782946158,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000185"
+  },
+  {
+    "Id": 186,
+    "Kind": "Change",
+    "Category": "shell",
+    "Summary": "PROJECTION/VISUALIZATION DOCTRINE - WinDirStat is the gold-standard recipe; reuse it repeatedly for everything. Scott 2026-07-01 verbatim: \"as far as projection goes i think windirstat is the gold standard and we should repeatedly use that recipe for everything especially visualization\". The recipe: ONE treemap projection - size = weight (bytes / lines / findings / tokens), color = kind, hover/click = the record - over any tree the system already projects: the VOM namespace (vom.obp), the FILES manifest (CRQ178), gate debt by rule x file (beside remedy.obp), model.db tensors by bytes, per-owner quota usage. One presenter recipe, N mounts; presenters hold nothing, the projection is computed from the namespace on demand (invariant 4).",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782946158,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 186,
+        "Noted": 1782946247,
+        "Disposition": "note",
+        "Body": "Prior raw-prompt provenance recovered from Claude session transcripts (outside the repo): Scott 2026-06-30: \"windirstat. that is the fucking goat\"; Scott 2026-07-01 morning: \"i love me some windirstat i want to always be able to see the runspace memory like that\". The recipe is already instantiated ONCE: vom.obp is described in the 07-01 morning session as a WinDirStat-style squarified treemap/cushion-map of the VOM heap in raw canvas (committed in aaaf6f1). This CRQ = reuse that exact recipe for every other tree projection, not invent per-surface visualizations."
+      }
+    ],
+    "Ref": "CRQ000000000186"
+  },
+  {
+    "Id": 187,
+    "Kind": "Change",
+    "Category": "Pwsh",
+    "Summary": "CMDLET SURFACE STRATEGY - chainable + comprehensive. Scott 2026-07-01 verbatim: \"ive been told the cmdlet zoo sucks and im not sure it does suck.. but idk. we should definitely make things chainable or more comprehensive so i need u to strategize that for me\". Fable is running the survey now (zoo scripts + compiled cmdlet families + the vom: provider); the strategy lands as EOS on this request. Doctrine anchors: objects never strings; handles/records over the pipeline; verbs from the closed catalog only; the vom: provider is the spine; a chainable object pipeline is also what makes e2b intents composable (CRQ179) - the same recipe serves the 2B driver and the human.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782946158,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 187,
+        "Noted": 1782946247,
+        "Disposition": "note",
+        "Body": "Origin of the critique recovered from Claude session transcripts: Scott 2026-06-29: \"ive been told my cmdlet zoo for android should be turned into a singular telemetry cmdlet and i think one t...\" (cut in snippet; session local_c462fe6c, Photo sphere / Kernel SPI design). So the outside advice was CONSOLIDATION (one telemetry cmdlet with facets) vs the current N Get-Android* family - a design question the strategy must answer explicitly, weighing pwsh idiom (a family with one shared output record type chains better than one mega-cmdlet with a -Facet switch) against surface area for the 2B driver (fewer intents is better, CRQ179). Also on record: docs STATUS.md notes \"Antigravitys .ps1 cmdlet zoo canonized\" and CRQ153-era work debugged the Android zoo from the tray."
+      },
+      {
+        "Request": 187,
+        "Noted": 1782946707,
+        "Disposition": "design",
+        "Body": "STRATEGY (Fable, from a 3-agent survey that READ every zoo script + every compiled cmdlet family + VomDrive.cs, and VERIFIED failures by reproduction). THE GRADE: the zoo does NOT suck as a design - whoever said so graded the wrong axis. Design B+ (tested ConvertFrom-* parser core, thin Get-* wrappers over the elevated adb channel, typed RequestRecord/CapabilityRecord, the vom: provider is genuinely excellent). SHIPPING DISCIPLINE: D - (1) 11 of 20 zoo scripts are provably broken ON-DEVICE: they invoke siblings as files via & $PSScriptRoot\\X.ps1, but zoo scripts load as asset-backed functions where that path is NULL (verified by reproduction); (2) 9 pipe Invoke-AdbShell's single blob string into line-oriented parsers (garbage parse); (3) Get-AndroidCpu.ps1 assigns the READ-ONLY automatic $pid, silently substituting the HOST process id into every row (verified) - wrong data, worse than an error; (4) all 8 zoo/cs compiled twins are permanently SHADOWED dead code (function wins over cmdlet at resolution) and have already drifted from their .ps1 canon; (5) across ~90 total cmdlets, NOT ONE Stop/Remove/Set/Close binds the handle its own Get/Start sibling emits - zero ValueFromPipelineByPropertyName welds anywhere; (6) the write/lifecycle plane talks to Host.UI in colored text instead of emitting records (New-Session returns NOTHING, errors as red text not ErrorRecords, Start-AndroidScreenStream emits its handle as a STDERR scrape-line). THE DOCTRINE (6 principles): 1. THE WELD RULE - every handle a Get/Start emits binds into its Stop/Remove/Set/Close sibling ByPropertyName, same property name. 2. Objects-never-strings means TYPED RECORDS, not Dictionary/hashtable rows (those break dot-binding - strings with extra steps). 3. Host.UI is presentation, NEVER a return channel; errors are ErrorRecords. 4. The vom: provider is the spine - idiomatic faces (Remove-Item vom:\\... IS Stop-VomThread) before any new verb. 5. Chainability IS CRQ179 compliance - stable PascalCase property names; every weld is an intent join for e2b. 6. Parsers are library (pure, pipeline-fed, blob-safe), wrappers are welds (call functions by NAME, never by file). ORDERED MOVES (owner): M1 delete the 8 shadowed cs/ twins [S, SCOTT ruling]; M2 the weld pass - one-line ByPropertyName retrofits across ~10 named Get|Stop/Close/Set pairs incl. Close-Request.Id + Add-EosLog.Id [S, SONNET]; M3 fix the zoo's two mechanical killers: function-name calls + parsers split blobs in process{} [M, SONNET]; M4 point-fix $pid corruption + Get-AndroidSetting naked string [S, SONNET]; M5 evict non-animals (Test-Parsers' bare exit can tear down the runspace; Test-BinderSurface dead-on-arrival; Invoke-RdConsult permanent stub) [S, SCOTT ruling]; M6 records-not-hashtables retrofit on DeviceReader/Surface/Wallpaper/AgentSession [M, SONNET]; M7 unbreak the lifecycle console-talkers (Session family emits records, Detach->Disconnect approved verb) [M, FABLE]; M8 de-stringify the perception plane: Get-AndroidScreen parsed frame object, Invoke-Agent emits a turn record by default with -Stream as the host opt-in [M, FABLE]; M9 zoo record-extraction for the 6 amorphous-tree emitters (Thermal/Alarm/Job/DeviceIdle/Gfx/Netstat -> flat typed records, -Raw keeps the tree) [L, FABLE spec + SONNET impl]; M10 ship the actuation verbs (Set-AndroidSetting, Stop/Start-AndroidApp, Push/Receive-AndroidFile, Get-AndroidLog streaming logcat records - the zoo is 100% read-only today, a Get-only catalog gives the pipe nothing to chain INTO) [M, FABLE]; M11 coverage backfill (~10 lookalike dumps) ONLY after the pattern is fixed [L, SONNET]; M12 grow vom: into the spine (RemoveItem face, GetContentReader, fix the O(N^2) rebuild, wildcards) [M, FABLE]; M13 the WinDirStat hook (CRQ186): ONE Show-Treemap presenter cmdlet taking ANY record stream + -Weight/-Kind/-Label - Get-ChildItem vom:\\Sessions -Recurse | Show-Treemap -Weight Bytes -Kind Type - buildable only after the record discipline lands [L, FABLE]; M14 ratify or alias the Remedy verb [S, SCOTT ruling]. Net: about two weeks of mostly one-line and pattern-per-file fixes turns \"emits objects\" into \"composes\" - which is also exactly what makes e2b's intent set composable."
+      }
+    ],
+    "Ref": "CRQ000000000187"
   }
 ]
