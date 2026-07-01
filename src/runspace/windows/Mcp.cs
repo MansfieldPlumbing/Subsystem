@@ -28,28 +28,36 @@ internal static class Mcp
     public static int Run(string[] args)
     {
         // One warm runspace for the session — project cmdlets load once, reused on every tools/call.
-        using var rs = OpenRunspace();
-        // Shorthand: `ss mcp call <tool> [-key val ...]` drives ONE tool directly and prints the result — no
-        // hand-written JSON-RPC handshake. e.g. `ss mcp call ss_git -gitRoot S:\subsystem-project\subsystem-main`.
-        if (args.Length > 0 && args[0].Equals("call", StringComparison.OrdinalIgnoreCase))
-            return CallShorthand(args[1..], rs);
-        string? line;
-        while ((line = Console.In.ReadLine()) != null)
+        var pwshMount = global::Subsystem.Vom.Vom.CreateOwner("\\Device\\Pwsh");
+        using var rs = OpenRunspace(pwshMount);
+        try
         {
-            if (line.Length == 0) continue;
-            JsonDocument req;
-            try { req = JsonDocument.Parse(line); } catch { continue; }   // ignore non-JSON noise
-            using (req)
+            // Shorthand: `ss mcp call <tool> [-key val ...]` drives ONE tool directly and prints the result — no
+            // hand-written JSON-RPC handshake. e.g. `ss mcp call ss_git -gitRoot S:\subsystem-project\subsystem-main`.
+            if (args.Length > 0 && args[0].Equals("call", StringComparison.OrdinalIgnoreCase))
+                return CallShorthand(args[1..], rs);
+            string? line;
+            while ((line = Console.In.ReadLine()) != null)
             {
-                var root = req.RootElement;
-                var method = root.TryGetProperty("method", out var m) ? (m.GetString() ?? "") : "";
-                // A request carries an id and gets a reply; a notification (initialized/cancelled) does not.
-                if (!root.TryGetProperty("id", out var idEl)) continue;
-                object? result = null, error = null;
-                try { result = Resolve(method, root, rs); }
-                catch (Exception ex) { error = new { code = -32603, message = ex.Message }; }
-                Write(idEl, result, error);
+                if (line.Length == 0) continue;
+                JsonDocument req;
+                try { req = JsonDocument.Parse(line); } catch { continue; }   // ignore non-JSON noise
+                using (req)
+                {
+                    var root = req.RootElement;
+                    var method = root.TryGetProperty("method", out var m) ? (m.GetString() ?? "") : "";
+                    // A request carries an id and gets a reply; a notification (initialized/cancelled) does not.
+                    if (!root.TryGetProperty("id", out var idEl)) continue;
+                    object? result = null, error = null;
+                    try { result = Resolve(method, root, rs); }
+                    catch (Exception ex) { error = new { code = -32603, message = ex.Message }; }
+                    Write(idEl, result, error);
+                }
             }
+        }
+        finally
+        {
+            global::Subsystem.Vom.Vom.Terminate(pwshMount);
         }
         return 0;
     }
@@ -185,7 +193,7 @@ internal static class Mcp
         return sb.ToString();
     }
 
-    private static Runspace OpenRunspace()
+    private static Runspace OpenRunspace(global::Subsystem.Vom.Owner pwshMount)
     {
         var iss = InitialSessionState.CreateDefault();
         iss.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
@@ -196,6 +204,7 @@ internal static class Mcp
         Shim.LoadProjectCmdlets(iss);
         var rs = RunspaceFactory.CreateRunspace(iss);
         rs.Open();
+        global::Subsystem.Vom.Vom.Register(pwshMount, "PwshRuntime", rs, onReclaim: rs.Dispose, name: "Runspace");
         return rs;
     }
 

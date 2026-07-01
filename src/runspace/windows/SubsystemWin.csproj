@@ -52,6 +52,7 @@
   <ItemGroup>
     <Compile Include="..\Vom\*.cs" LinkBase="Vom" />
     <Compile Include="..\Cm\*.cs" LinkBase="Cm" />
+    <Compile Include="..\Pwsh\VomDrive.cs" LinkBase="Pwsh" />
     <!-- VomInterop: the native Float32-region surface (256-aligned, row-major) — pure Vom + Marshal, no
          Android. The producer side of the WebView DirectPort adapter publishes/reads regions through it. -->
     <Compile Include="..\Device\VomInterop.cs" LinkBase="Device" />

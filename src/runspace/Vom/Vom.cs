@@ -208,6 +208,19 @@ public static unsafe partial class Vom
             bytes = Interlocked.Read(ref o.CurrentBytes),
             maxBytes = o.MaxBytes,
             cancelled = o.Cts.IsCancellationRequested,
+            details = o.PathToId.Select(kv => {
+                if (o.Handles.TryGet(kv.Value, out var e) && e != null)
+                {
+                    var h = e.Descriptor;
+                    return new {
+                        path = h.Path,
+                        type = h.Type,
+                        format = h.Format.ToString(),
+                        bytes = h.ByteCount
+                    };
+                }
+                return null;
+            }).Where(d => d != null).ToArray()
         }).ToArray();
 
     // --- Teardown self-test (VOM-SPEC §11 step 4) ---

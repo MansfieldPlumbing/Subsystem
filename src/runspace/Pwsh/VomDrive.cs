@@ -159,14 +159,14 @@ public sealed class VomDrive : NavigationCmdletProvider
 // addressing + stats only; the native Resource pointer never appears here.
 public sealed class VomNode
 {
-    public string Path = "";
-    public string Name = "";
-    public string Kind = "";       // root | namespace | owner | handle
-    public long Handles;
-    public long Bytes;
-    public long MaxBytes;
-    public bool Cancelled;
-    public string? Type;           // handle descriptor type
-    public string? Format;         // handle format
-    public int Children;
+    public string Path { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "";       // root | namespace | owner | handle
+    public long Handles { get; set; }
+    public long Bytes { get; set; }
+    public long MaxBytes { get; set; }
+    public bool Cancelled { get; set; }
+    public string? Type { get; set; }           // handle descriptor type
+    public string? Format { get; set; }         // handle format
+    public int Children { get; set; }
 }
