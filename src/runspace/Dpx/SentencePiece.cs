@@ -158,6 +158,8 @@ public sealed class SentencePieceTokenizer
     private readonly SentencePieceType[] _idToType;
     private readonly int[] _byteToId = new int[256];
     private readonly HashSet<int> _specialTokenIds = new();
+    private Dictionary<ByteArrayKey, int> _bytesToPiece;   // bytes -> piece id, built once (longest-match Encode)
+    private int _maxPieceBytes;
 
     public SentencePieceTokenizer(SpModelProto model)
     {
@@ -214,73 +216,38 @@ public sealed class SentencePieceTokenizer
         byte[] utf8Bytes = Encoding.UTF8.GetBytes(normalized);
         int len = utf8Bytes.Length;
 
-        var backtraceScore = new float[len + 1];
-        var prevNode = new int[len + 1];
-        var prevLen = new int[len + 1];
-        var tokenId = new int[len + 1];
-        for (int i = 1; i <= len; i++) backtraceScore[i] = float.NegativeInfinity;
-        backtraceScore[0] = 0;
-
-        int maxPieceBytes = 0;
-        foreach (var p in _model.Pieces)
+        // Greedy LONGEST-MATCH segmentation. This model's piece "scores" are rank-based (~494-id), NOT unigram
+        // log-probs, so a max-sum Viterbi degenerates to char/byte level (short low-id pieces outscore long
+        // high-id ones). Longest-match takes the longest real piece at each position and reproduces the proper
+        // word-pieces (▁France, ▁the, …); single-byte <0xNN> fallback only when nothing longer matches.
+        if (_bytesToPiece == null)
         {
-            int pBytes = Encoding.UTF8.GetByteCount(p.Piece);
-            if (pBytes > maxPieceBytes) maxPieceBytes = pBytes;
-        }
-        if (maxPieceBytes == 0) maxPieceBytes = 32;
-
-        var bytesToPiece = new Dictionary<ByteArrayKey, (int id, float score)>();
-        foreach (var p in _model.Pieces)
-        {
-            if (p.Type == SentencePieceType.Control || p.Type == SentencePieceType.Byte) continue;
-            byte[] pBytes = Encoding.UTF8.GetBytes(p.Piece);
-            if (pBytes.Length > 0)
-                bytesToPiece[new ByteArrayKey(pBytes)] = (_pieceToId[p.Piece], p.Score);
-        }
-
-        for (int pos = 0; pos < len; pos++)
-        {
-            byte b = utf8Bytes[pos];
-            int fallbackId = _byteToId[b];
-            float fallbackScore = _idToScore[fallbackId];
-
-            float scoreWithFallback = backtraceScore[pos] + fallbackScore;
-            if (scoreWithFallback > backtraceScore[pos + 1])
+            _bytesToPiece = new Dictionary<ByteArrayKey, int>();
+            _maxPieceBytes = 0;
+            foreach (var p in _model.Pieces)
             {
-                backtraceScore[pos + 1] = scoreWithFallback;
-                prevNode[pos + 1] = pos;
-                prevLen[pos + 1] = 1;
-                tokenId[pos + 1] = fallbackId;
+                if (p.Type == SentencePieceType.Control || p.Type == SentencePieceType.Byte) continue;
+                byte[] pBytes = Encoding.UTF8.GetBytes(p.Piece);
+                if (pBytes.Length == 0) continue;
+                _bytesToPiece[new ByteArrayKey(pBytes)] = _pieceToId[p.Piece];
+                if (pBytes.Length > _maxPieceBytes) _maxPieceBytes = pBytes.Length;
             }
-
-            int limit = Math.Min(len - pos, maxPieceBytes);
-            for (int l = 1; l <= limit; l++)
-            {
-                var key = new ByteArrayKey(utf8Bytes, pos, l);
-                if (bytesToPiece.TryGetValue(key, out var pieceInfo))
-                {
-                    float scoreWithPiece = backtraceScore[pos] + pieceInfo.score;
-                    int nextPos = pos + l;
-                    if (scoreWithPiece > backtraceScore[nextPos])
-                    {
-                        backtraceScore[nextPos] = scoreWithPiece;
-                        prevNode[nextPos] = pos;
-                        prevLen[nextPos] = l;
-                        tokenId[nextPos] = pieceInfo.id;
-                    }
-                }
-            }
+            if (_maxPieceBytes == 0) _maxPieceBytes = 32;
         }
 
         var resultIds = new List<int>();
-        int curr = len;
-        while (curr > 0)
+        int pos = 0;
+        while (pos < len)
         {
-            if (backtraceScore[curr] == float.NegativeInfinity) break;
-            resultIds.Add(tokenId[curr]);
-            curr = prevNode[curr];
+            int bestLen = 0, bestId = -1;
+            int limit = Math.Min(len - pos, _maxPieceBytes);
+            for (int l = limit; l >= 1; l--)   // longest first
+            {
+                if (_bytesToPiece.TryGetValue(new ByteArrayKey(utf8Bytes, pos, l), out int id)) { bestLen = l; bestId = id; break; }
+            }
+            if (bestId >= 0) { resultIds.Add(bestId); pos += bestLen; }
+            else { resultIds.Add(_byteToId[utf8Bytes[pos]]); pos += 1; }   // byte fallback
         }
-        resultIds.Reverse();
         return resultIds;
     }
 

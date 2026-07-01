@@ -6,7 +6,7 @@
 // (V340 over P2000) with DPGPU_ADAPTER override, parity with dpgpu.cpp.
 using System.Runtime.InteropServices;
 
-namespace DpOnnx;
+namespace Subsystem.Dpx;
 
 unsafe static class GpuD3D12
 {

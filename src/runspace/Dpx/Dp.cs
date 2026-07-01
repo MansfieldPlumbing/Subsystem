@@ -1,4 +1,4 @@
-// Interp.cs - the dp-onnx engine (Tensor, Interp kernels, Gpu backend seam), split out of Program.cs
+// Dp.cs - the dp-onnx engine (Tensor, Dp kernels, Gpu backend seam), split out of Program.cs
 // so it compiles as library code in-proc (no CLI Main). The CLI entry + mode handlers stay in Program.cs.
 using System;
 using System.Collections.Generic;
@@ -8,25 +8,229 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Onnx;
 
-namespace DpOnnx;
+namespace Subsystem.Dpx;
+
+public static unsafe class TensorArena
+{
+    private static bool _active;
+    private static long _peakOffset;
+    private static long _currentAlloc;
+    private static readonly Dictionary<IntPtr, int> _refCounts = new();
+
+    public static bool Active
+    {
+        get => _active;
+        set => _active = value;
+    }
+
+    public static long PeakOffset => _peakOffset;
+
+    public static void Initialize(long capacityBytes)
+    {
+    }
+
+    public static void Reset()
+    {
+    }
+
+    public static void Release()
+    {
+    }
+
+    public static void TrackAlloc(long count)
+    {
+        long bytes = count * sizeof(float);
+        long padded = (bytes + 255) & ~255;
+        _currentAlloc += padded;
+        if (_currentAlloc > _peakOffset) _peakOffset = _currentAlloc;
+    }
+
+    public static void TrackFree(long count)
+    {
+        long bytes = count * sizeof(float);
+        long padded = (bytes + 255) & ~255;
+        _currentAlloc -= padded;
+    }
+
+    public static float* Alloc(long count)
+    {
+        long bytes = count * sizeof(float);
+        long padded = (bytes + 255) & ~255;
+        float* ptr = (float*)NativeMemory.AlignedAlloc((nuint)padded, 256);
+        TrackAlloc(count);
+        return ptr;
+    }
+
+    public static Span<float> AllocSpan(long count)
+    {
+        if (_active)
+        {
+            return new Span<float>(Alloc(count), (int)count);
+        }
+        return new float[count];
+    }
+
+    public static void AddRef(float* ptr)
+    {
+        if (ptr == null) return;
+        IntPtr ip = (IntPtr)ptr;
+        lock (_refCounts)
+        {
+            _refCounts[ip] = _refCounts.GetValueOrDefault(ip) + 1;
+        }
+    }
+
+    public static bool DecRef(float* ptr)
+    {
+        if (ptr == null) return false;
+        IntPtr ip = (IntPtr)ptr;
+        lock (_refCounts)
+        {
+            if (_refCounts.TryGetValue(ip, out int count))
+            {
+                if (count <= 1)
+                {
+                    _refCounts.Remove(ip);
+                    return true;
+                }
+                else
+                {
+                    _refCounts[ip] = count - 1;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+}
 
 public class Tensor
 {
     public int[] Shape;
     public float[] Fp;     // float payload (null if int)
+    private unsafe float* _nativePtr;
+    public unsafe float* NativePtr
+    {
+        get => _nativePtr;
+        set
+        {
+            if (_nativePtr != value)
+            {
+                _nativePtr = value;
+                if (_nativePtr != null) TensorArena.AddRef(_nativePtr);
+            }
+        }
+    }
     public long[] Ip;      // int64 payload (null if float)
+    // --- packed quantized payload: weights kept in their native 2/4/8-bit form; dequant is DEFERRED to the kernel
+    // (QGemm / quant Gather). Nothing ever materializes the full fp32 weight on the hot path -> resident stays packed.
+    public byte[] Qb;      // packed sub-byte/byte weights; little-endian, low bits first, signed
+    public int Qbits;      // 2 / 4 / 8 (derived from byte-count vs element-count at load)
+    public float[] Qscale; // per-row scale along Qaxis (length = Shape[Qaxis])
+    public float[] Qzero;  // per-row zero-point (same length); null => symmetric (0)
+    public int Qaxis;      // quantized dimension (axis 0 for gemma's per-output-channel weights)
+    public byte[] Rawb;    // raw integer-weight bytes (UINT8/INT8), un-widened — the block-q4 contrib ops
+                           // (MatMulNBits / GatherBlockQuantized) read the packed nibbles straight from here.
+    public bool IsQuant => Qb != null;
     public bool IsInt => Ip != null;
     public long Count { get { long n = 1; foreach (var d in Shape) n *= d; return n; } }
     public static Tensor F(float[] d, params int[] s) => new() { Fp = d, Shape = s };
+    public static unsafe Tensor F(float* ptr, params int[] s) => new() { NativePtr = ptr, Shape = s };
+    public static unsafe Tensor F(Span<float> span, params int[] s)
+    {
+        if (TensorArena.Active)
+        {
+            fixed (float* p = span)
+            {
+                return new Tensor { NativePtr = p, Shape = s };
+            }
+        }
+        return new Tensor { Fp = span.ToArray(), Shape = s };
+    }
     public static Tensor I(long[] d, params int[] s) => new() { Ip = d, Shape = s };
-    public float[] AsF() => Fp ?? Array.ConvertAll(Ip, x => (float)x);
-    public long[] AsI() => Ip ?? Array.ConvertAll(Fp, x => (long)x);
+    // AsF on a quant tensor materializes the full fp32 — the FALLBACK for any op that isn't quant-aware. The hot
+    // consumers (Gemm, Gather) read Qb directly and never hit this; if some other op touches a weight it gets a
+    // transient fp32 (freed by the caller), so correctness is never wrong, only that one op pays.
+    public unsafe Span<float> AsF() => IsQuant ? Dequant() : (NativePtr != null ? new Span<float>(NativePtr, (int)Count) : (Fp ?? Array.ConvertAll(Ip, x => (float)x)));
+    public unsafe long[] AsI()
+    {
+        if (Ip != null) return Ip;
+        var f = AsF();
+        var res = new long[f.Length];
+        for (int i = 0; i < f.Length; i++) res[i] = (long)f[i];
+        return res;
+    }
+
+    public static unsafe Tensor AllocNative(params int[] shape)
+    {
+        long count = 1;
+        foreach (var d in shape) count *= d;
+        long bytes = count * sizeof(float);
+        long padded = (bytes + 255) & ~255;
+        void* ptr = NativeMemory.AlignedAlloc((nuint)padded, 256);
+        new Span<float>(ptr, (int)count).Clear();
+        TensorArena.TrackAlloc(count);
+        return Tensor.F((float*)ptr, shape);
+    }
+
+    public unsafe void FreeNative()
+    {
+        if (_nativePtr != null)
+        {
+            if (TensorArena.DecRef(_nativePtr))
+            {
+                TensorArena.TrackFree(Count);
+                NativeMemory.AlignedFree(_nativePtr);
+            }
+            _nativePtr = null;
+        }
+    }
+
+    public unsafe Tensor Clone()
+    {
+        var t = new Tensor
+        {
+            Shape = Shape,
+            Fp = Fp,
+            Ip = Ip,
+            Qb = Qb,
+            Qbits = Qbits,
+            Qscale = Qscale,
+            Qzero = Qzero,
+            Qaxis = Qaxis
+        };
+        t.NativePtr = _nativePtr; // calls AddRef!
+        return t;
+    }
+
+    // Dequant a single weight element by flat (row-major) index: (q - zero[row]) * scale[row].
+    public float Deq(long elem)
+    {
+        int per = 8 / Qbits, mask = (1 << Qbits) - 1, half = 1 << (Qbits - 1);
+        int q = (Qb[(int)(elem / per)] >> (int)((elem % per) * Qbits)) & mask;
+        if (q >= half) q -= (1 << Qbits);                       // signed sub-element
+        long row = QRow(elem);
+        return (q - (Qzero != null ? Qzero[row] : 0f)) * Qscale[row];
+    }
+    // Which Qaxis-row a flat index falls in (inner = product of dims after Qaxis).
+    public long QRow(long elem)
+    {
+        long inner = 1; for (int k = Qaxis + 1; k < Shape.Length; k++) inner *= Shape[k];
+        return (elem / inner) % Shape[Qaxis];
+    }
+    public static readonly System.Collections.Generic.HashSet<string> QFbSeen = new();
+    float[] Dequant()
+    {
+        long n = Count;
+        if (n > 1_000_000) { var key = string.Join("x", Shape); lock (QFbSeen) if (QFbSeen.Add(key)) System.Console.Error.WriteLine($"\n[QFALLBACK] full dequant {key} = {n * 4 / 1e6:F0}MB fp32 — a quant weight hit a non-quant-aware op"); }
+        var o = new float[n]; for (long i = 0; i < n; i++) o[i] = Deq(i); return o;
+    }
 }
 
-public class Interp
+public class Dp
 {
     readonly ModelProto _m;
-    public Interp(ModelProto m) => _m = m;
+    public Dp(ModelProto m) => _m = m;
 
     public static readonly HashSet<string> Implemented = new()
     {
@@ -37,6 +241,7 @@ public class Interp
         "Where","Expand","ConstantOfShape","Fill","Range","ReduceMean","ReduceSum","ReduceMax","CumSum","Slice","Pad",
         "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND","DynamicUpdateSlice",
         "Split","Unpack","Pack","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd","DequantizeLinear","QuantizeLinear",
+        "MatMulNBits","GatherBlockQuantized","RotaryEmbedding","SimplifiedLayerNormalization","GroupQueryAttention",
     };
 
     public static bool Profile = false;
@@ -49,11 +254,46 @@ public class Interp
     Dictionary<string, Tensor> _winit;   // decoded initializers, cached: streaming Run()s many short feeds over ONE graph -> decode the 82M weights ONCE, not per chunk
     public Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null)
     {
-        if (_winit == null) { _winit = new Dictionary<string, Tensor>(); foreach (var init in _m.Graph.Initializer) _winit[init.Name] = FromProto(init); }
+        if (_winit == null)
+        {
+            // Decode initializers into the cached _winit (the ONLY copy kernels read across Run()s), freeing each
+            // weight's source bytes AS it is decoded — so the ModelProto fp32 bytes and the _winit copy never
+            // both pile up (keeps the fp32-path transient near steady, not 2x). Periodic reclaim of the freed LOH.
+            _winit = new Dictionary<string, Tensor>();
+            // Index initializers by name so a packed weight can find its sibling "<name>_scale"/"<name>_zp"
+            // (EmitNativeQuant emits the three separately). A weight with a _scale sibling and a 2/4/8-bit
+            // byte:element ratio stays PACKED (a quant Tensor); everything else widens via FromProto as before.
+            var byName = new Dictionary<string, TensorProto>();
+            foreach (var it in _m.Graph.Initializer) byName[it.Name] = it;
+            int k = 0;
+            foreach (var init in _m.Graph.Initializer)
+            {
+                byName.TryGetValue(init.Name + "_scale", out var scP);
+                if (IsPackedQuant(init, scP))
+                    _winit[init.Name] = MakeQuant(init, scP, byName.GetValueOrDefault(init.Name + "_zp"));
+                else
+                    _winit[init.Name] = FromProto(init);
+                init.RawData = new ByteString(System.Array.Empty<byte>());   // source bytes consumed; free them now
+                if ((++k & 63) == 0) GC.Collect();
+            }
+            _m.Graph.Initializer.Clear();
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+        }
         var env = new Dictionary<string, Tensor>(_winit);   // shallow: kernels allocate fresh outputs, never mutate weight arrays in place -> safe to reuse across chunks
         foreach (var kv in feed) env[kv.Key] = kv.Value;
-        foreach (var node in _m.Graph.Node)
+        var nodes = _m.Graph.Node;
+        // Liveness reclaim: free each intermediate once its LAST consumer has run. A 4630-node decoder otherwise
+        // keeps every output forever (hundreds of 32MB [.,32003,.] tensors -> ~10GB). Weights alias _winit, so
+        // evicting them from env can't free them (correct — they're reused across streaming Run()s); only the
+        // per-run intermediates are reclaimed. Graph outputs are pinned. Pure memory management — numerics intact.
+        var lastUse = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < nodes.Count; i++) foreach (var inp in nodes[i].Input) if (!string.IsNullOrEmpty(inp)) lastUse[inp] = i;
+        var pinned = new HashSet<string>(_m.Graph.Output.Select(o => o.Name), StringComparer.Ordinal);
+        DpxMem.Sample();   // ambient RAM reading at entry (telemetry inlet for the host)
+        for (int ni = 0; ni < nodes.Count; ni++)
         {
+            var node = nodes[ni];
             var ins = node.Input.Select(n => string.IsNullOrEmpty(n) ? null : env[n]).ToArray();
             Tensor[] outs;
             if (Profile)
@@ -70,8 +310,27 @@ public class Interp
             { outs[0] = ins[0]; Dropped++; }
             for (int i = 0; i < node.Output.Count && i < outs.Length; i++) if (!string.IsNullOrEmpty(node.Output[i])) env[node.Output[i]] = outs[i];
             onNode?.Invoke(node, outs, env);   // env passed so a hook can INJECT an oracle value for downstream
+            foreach (var inp in node.Input)    // reclaim dead intermediates (last use is this node; never a pinned graph output)
+                if (!string.IsNullOrEmpty(inp) && lastUse.TryGetValue(inp, out var lu) && lu == ni && !pinned.Contains(inp))
+                {
+                    if (env.Remove(inp, out var t))
+                    {
+                        if (!_winit.ContainsKey(inp) && !feed.ContainsKey(inp))
+                        {
+                            t?.FreeNative();
+                        }
+                    }
+                }
         }
-        return _m.Graph.Output.ToDictionary(o => o.Name, o => env[o.Name]);
+        var result = _m.Graph.Output.ToDictionary(o => o.Name, o => env[o.Name]);
+        foreach (var kvp in env)
+        {
+            if (!_winit.ContainsKey(kvp.Key) && !feed.ContainsKey(kvp.Key) && !pinned.Contains(kvp.Key))
+            {
+                kvp.Value?.FreeNative();
+            }
+        }
+        return result;
     }
 
     public static Tensor[] Dispatch(NodeProto n, Tensor[] x)
@@ -101,11 +360,13 @@ public class Interp
             case "Clip": { float lo = x.Length > 1 && x[1] != null ? x[1].AsF()[0] : float.NegativeInfinity;
                            float hi = x.Length > 2 && x[2] != null ? x[2].AsF()[0] : float.PositiveInfinity;
                            return One(Un(x[0], a => MathF.Min(hi, MathF.Max(lo, a)))); }
-            case "MatMul": return One(UseGpuMatMul ? GpuMatMul(x[0], x[1]) : MatMul(x[0], x[1]));
+            case "MatMul":
+                if (x[1].IsQuant) return One(QGemm(x[0], x[1], transB: false, 1.0f, null, 0.0f));
+                return One(UseGpuMatMul ? GpuMatMul(x[0], x[1]) : MatMul(x[0], x[1]));
             case "Gemm": return One(Gemm(n, x));
-            case "Identity": return One(x[0]);
+            case "Identity": return One(x[0].Clone());
             case "Constant": return One(FromProto(n.Attribute.First(a => a.Name == "value").T));
-            case "Cast": return One(x[0]);   // payloads are already widened; layout-preserving
+            case "Cast": return One(x[0].Clone());   // payloads are already widened; layout-preserving
             case "DequantizeLinear": return One(DequantizeLinear(x, n));
             case "QuantizeLinear": return One(QuantizeLinear(x, n));
             case "Reshape": return One(Reshape(x[0], x[1]));
@@ -160,6 +421,12 @@ public class Interp
             case "DynamicUpdateSlice": return One(DynamicUpdateSliceOp(x, n));
             case "Pack": return One(PackOp(x, n));
             case "Fill": return One(FillOp(x, n));
+            // ---- Gemma-3n E2B q4 ONNX contrib ops (com.microsoft), grounded against the q4 .db export ----
+            case "MatMulNBits": return One(MatMulNBits(x, n));
+            case "GatherBlockQuantized": return One(GatherBlockQuantized(x, n));
+            case "RotaryEmbedding": return One(RotaryEmbedding(x, n));
+            case "SimplifiedLayerNormalization": return One(SimplifiedLayerNorm(x, n));
+            case "GroupQueryAttention": return GroupQueryAttention(x, n);
             default: throw new NotImplementedException($"node #?: {n.OpType} (name={n.Name})");
         }
     }
@@ -168,7 +435,7 @@ public class Interp
     static Tensor[] One(Tensor t) => new[] { t };
 
     static Tensor Un(Tensor a, Func<float, float> f)
-    { var d = a.AsF(); var o = new float[d.Length]; for (int i = 0; i < d.Length; i++) o[i] = f(d[i]); return Tensor.F(o, a.Shape); }
+    { var d = a.AsF(); var o = TensorArena.AllocSpan(d.Length); for (int i = 0; i < d.Length; i++) o[i] = f(d[i]); return Tensor.F(o, a.Shape); }
 
     // The coordinate along `axis` for linear index i, given shape sh (for per-axis quant scale/zero-point lookup).
     static int AxisCoord(long i, int[] sh, int axis)
@@ -182,14 +449,15 @@ public class Interp
     // `axis`. The tflite DEQUANTIZE that lifts gemma's int weights/activations back to float for the f32 interp.
     static Tensor DequantizeLinear(Tensor[] x, NodeProto n)
     {
+        if (x[0].IsQuant) return x[0].Clone();   // packed weight: scale/zp already attached at load -> defer to QGemm/Gather, no fp32 blow-up
         var q = x[0].AsF(); var scale = x[1].AsF();
         var zp = x.Length > 2 && x[2] != null ? x[2].AsF() : null;
         bool perAxis = scale.Length > 1; int axis = (int)L(n, "axis", 1);
-        var o = new float[q.Length];
+        var o = TensorArena.AllocSpan(q.Length);
         for (long i = 0; i < q.Length; i++)
         {
             int c = perAxis ? AxisCoord(i, x[0].Shape, axis) : 0;
-            o[i] = (q[i] - (zp != null ? zp[c] : 0f)) * scale[c];
+            o[(int)i] = (q[(int)i] - (zp != null ? zp[c] : 0f)) * scale[c];
         }
         return Tensor.F(o, x[0].Shape);
     }
@@ -207,8 +475,8 @@ public class Interp
         var o = new long[v.Length];
         for (long i = 0; i < v.Length; i++)
         {
-            int c = perAxis ? AxisCoord(i, x[0].Shape, axis) : 0;
-            long q = (long)MathF.Round(v[i] / scale[c], MidpointRounding.ToEven) + (long)(zp != null ? zp[c] : 0f);
+            int c = perAxis ? AxisCoord((int)i, x[0].Shape, axis) : 0;
+            long q = (long)MathF.Round(v[(int)i] / scale[c], MidpointRounding.ToEven) + (long)(zp != null ? zp[c] : 0f);
             o[i] = Math.Clamp(q, QMIN, QMAX);
         }
         return Tensor.I(o, x[0].Shape);
@@ -231,30 +499,40 @@ public class Interp
 
     public enum BinOp { Add, Sub, Mul, Div }
     // Vectorized Add/Sub/Mul/Div: SIMD Vector<float> when shapes match (the common generator case); op-switch (no delegate) on broadcast.
-    static Tensor BcastV(Tensor a, Tensor b, BinOp op)
+    static unsafe Tensor BcastV(Tensor a, Tensor b, BinOp op)
     {
         var fa = a.AsF(); var fb = b.AsF();
         if (a.Shape.AsSpan().SequenceEqual(b.Shape))
         {
-            int n = fa.Length, vw = Vector<float>.Count, i = 0; var o = new float[n];
+            int n = fa.Length, vw = Vector<float>.Count, i = 0; var o = TensorArena.AllocSpan(n);
             for (; i + vw <= n; i += vw)
-                (op switch { BinOp.Add => new Vector<float>(fa, i) + new Vector<float>(fb, i), BinOp.Sub => new Vector<float>(fa, i) - new Vector<float>(fb, i), BinOp.Mul => new Vector<float>(fa, i) * new Vector<float>(fb, i), _ => new Vector<float>(fa, i) / new Vector<float>(fb, i) }).CopyTo(o, i);
+                (op switch { BinOp.Add => new Vector<float>(fa.Slice(i)) + new Vector<float>(fb.Slice(i)), BinOp.Sub => new Vector<float>(fa.Slice(i)) - new Vector<float>(fb.Slice(i)), BinOp.Mul => new Vector<float>(fa.Slice(i)) * new Vector<float>(fb.Slice(i)), _ => new Vector<float>(fa.Slice(i)) / new Vector<float>(fb.Slice(i)) }).CopyTo(o.Slice(i));
             for (; i < n; i++) o[i] = op switch { BinOp.Add => fa[i] + fb[i], BinOp.Sub => fa[i] - fb[i], BinOp.Mul => fa[i] * fb[i], _ => fa[i] / fb[i] };
             return Tensor.F(o, a.Shape);
         }
         int[] sh = BroadcastShape(a.Shape, b.Shape);
-        long n2 = 1; foreach (var d in sh) n2 *= d; var oo = new float[n2];
+        long n2 = 1; foreach (var d in sh) n2 *= d; var oo = TensorArena.AllocSpan(n2);
         var (sa, sb) = (Strides(a.Shape, sh), Strides(b.Shape, sh));
         int rank = sh.Length, last = rank - 1, inner = rank > 0 ? sh[last] : 1; long outer = inner > 0 ? n2 / inner : 0;
         if (rank > 0 && sa[last] <= 1 && sb[last] <= 1 && inner >= Vector<float>.Count)   // innermost contiguous(1)/broadcast(0) in both -> SIMD the inner run, parallel over outer
         {
             bool sa0 = sa[last] == 0, sb0 = sb[last] == 0;
-            System.Threading.Tasks.Parallel.For(0L, outer, o =>
+            fixed (float* p_oo = oo)
+            fixed (float* p_fa = fa)
+            fixed (float* p_fb = fb)
             {
-                long rem = o, ia0 = 0, ib0 = 0;
-                for (int k = last - 1; k >= 0; k--) { int d = (int)(rem % sh[k]); rem /= sh[k]; ia0 += d * sa[k]; ib0 += d * sb[k]; }
-                VecBinRun(oo.AsSpan(checked((int)(o * inner)), inner), fa.AsSpan(checked((int)ia0), sa0 ? 1 : inner), sa0, fb.AsSpan(checked((int)ib0), sb0 ? 1 : inner), sb0, op);
-            });
+                float* ptr_oo = p_oo; float* ptr_fa = p_fa; float* ptr_fb = p_fb;
+                int ooLen = oo.Length; int faLen = fa.Length; int fbLen = fb.Length;
+                System.Threading.Tasks.Parallel.For(0L, outer, o =>
+                {
+                    long rem = o, ia0 = 0, ib0 = 0;
+                    for (int k = last - 1; k >= 0; k--) { int d = (int)(rem % sh[k]); rem /= sh[k]; ia0 += d * sa[k]; ib0 += d * sb[k]; }
+                    var span_oo = new Span<float>(ptr_oo, ooLen);
+                    var span_fa = new Span<float>(ptr_fa, faLen);
+                    var span_fb = new Span<float>(ptr_fb, fbLen);
+                    VecBinRun(span_oo.Slice(checked((int)(o * inner)), (int)inner), span_fa.Slice(checked((int)ia0), sa0 ? 1 : (int)inner), sa0, span_fb.Slice(checked((int)ib0), sb0 ? 1 : (int)inner), sb0, op);
+                });
+            }
             return Tensor.F(oo, sh);
         }
         var idx = new int[rank];
@@ -262,8 +540,8 @@ public class Interp
         {
             long ia = 0, ib = 0;
             for (int k = 0; k < rank; k++) { ia += idx[k] * sa[k]; ib += idx[k] * sb[k]; }
-            float x = fa[ia], y = fb[ib];
-            oo[lin] = op switch { BinOp.Add => x + y, BinOp.Sub => x - y, BinOp.Mul => x * y, _ => x / y };
+            float x = fa[(int)ia], y = fb[(int)ib];
+            oo[(int)lin] = op switch { BinOp.Add => x + y, BinOp.Sub => x - y, BinOp.Mul => x * y, _ => x / y };
             for (int k = rank - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; }
         }
         return Tensor.F(oo, sh);
@@ -274,14 +552,14 @@ public class Interp
         var fa = a.AsF(); var fb = b.AsF();
         int[] sh = BroadcastShape(a.Shape, b.Shape);
         long n = 1; foreach (var d in sh) n *= d;
-        var o = new float[n];
+        var o = TensorArena.AllocSpan(n);
         var (sa, sb) = (Strides(a.Shape, sh), Strides(b.Shape, sh));
         var idx = new int[sh.Length];
         for (long lin = 0; lin < n; lin++)
         {
             long ia = 0, ib = 0;
             for (int k = 0; k < sh.Length; k++) { ia += idx[k] * sa[k]; ib += idx[k] * sb[k]; }
-            o[lin] = f(fa[ia], fb[ib]);
+            o[(int)lin] = f(fa[(int)ia], fb[(int)ib]);
             for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; }
         }
         return Tensor.F(o, sh);
@@ -325,7 +603,7 @@ public class Interp
         int[] lead = BroadcastShape(leadA, leadB);
         int nb = lead.Length; long outBatch = 1; foreach (var d in lead) outBatch *= d;
         long[] sA = Strides(leadA, lead), sB = Strides(leadB, lead);
-        var o = new float[outBatch * M * N];
+        var o = TensorArena.AllocSpan(outBatch * M * N);
         var aSub = new float[(long)M * K]; var bSub = new float[(long)K * N]; var cSub = new float[(long)M * N];
         try
         {
@@ -333,11 +611,11 @@ public class Interp
             for (long bi = 0; bi < outBatch; bi++)
             {
                 long aB = 0, bB = 0; for (int k = 0; k < nb; k++) { aB += bidx[k] * sA[k]; bB += bidx[k] * sB[k]; }
-                Array.Copy(a, aB * M * K, aSub, 0, (long)M * K);
-                Array.Copy(b, bB * K * N, bSub, 0, (long)K * N);
+                a.Slice((int)(aB * M * K), M * K).CopyTo(aSub);
+                b.Slice((int)(bB * K * N), K * N).CopyTo(bSub);
                 int rc = Gpu.dpgpu_gemm(aSub, bSub, cSub, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
                 if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm rc={rc}");
-                Array.Copy(cSub, 0, o, bi * M * N, (long)M * N);
+                cSub.CopyTo(o.Slice((int)(bi * M * N), M * N));
                 for (int k = nb - 1; k >= 0; k--) { if (++bidx[k] < lead[k]) break; bidx[k] = 0; }
             }
         }
@@ -360,7 +638,7 @@ public class Interp
         for (; j < n; j++) dst[j] += a * src[j];
     }
 
-    static Tensor MatMul(Tensor A, Tensor B)
+    static unsafe Tensor MatMul(Tensor A, Tensor B)
     {   // [..,M,K] x [..,K,N] with FULL leading-dim broadcast (preserves rank — attention is 4D)
         var a = A.AsF(); var b = B.AsF();
         int ra = A.Shape.Length, rb = B.Shape.Length;
@@ -371,21 +649,31 @@ public class Interp
         int nb = lead.Length; long outBatch = 1; foreach (var d in lead) outBatch *= d;
         long[] sA = Strides(leadA, lead);                  // batch-unit strides (0 where broadcast)
         long[] sB = Strides(leadB, lead);
-        var o = new float[outBatch * M * N];
+        var o = TensorArena.AllocSpan(outBatch * M * N);
         // precompute per-batch input offsets (outBatch is small), then parallelize over (batch,row) — k-order preserved -> bit-identical
         var aOff = new long[outBatch]; var bOff = new long[outBatch];
         { var bidx = new int[nb]; for (long bi = 0; bi < outBatch; bi++) { long aB = 0, bB = 0; for (int k = 0; k < nb; k++) { aB += bidx[k] * sA[k]; bB += bidx[k] * sB[k]; } aOff[bi] = aB * M * K; bOff[bi] = bB * K * N; for (int k = nb - 1; k >= 0; k--) { if (++bidx[k] < lead[k]) break; bidx[k] = 0; } } }
-        System.Threading.Tasks.Parallel.For(0L, outBatch * M, r =>
+        fixed (float* p_o = o)
+        fixed (float* p_a = a)
+        fixed (float* p_b = b)
         {
-            long bi = r / M; int i = (int)(r % M);
-            long bo = bOff[bi], orow = (bi * M + i) * (long)N, aRow = aOff[bi] + (long)i * K;
-            var dst = o.AsSpan(checked((int)orow), N); dst.Clear();
-            for (int k = 0; k < K; k++)   // axpy: dst += a[i,k] * B_row_k (SIMD over N); k-order preserved
+            float* ptr_o = p_o; float* ptr_a = p_a; float* ptr_b = p_b;
+            int oLen = o.Length; int aLen = a.Length; int bLen = b.Length;
+            System.Threading.Tasks.Parallel.For(0L, outBatch * M, r =>
             {
-                float aik = a[checked((int)(aRow + k))];
-                if (aik != 0f) AxpyInto(dst, b.AsSpan(checked((int)(bo + (long)k * N)), N), aik);
-            }
-        });
+                long bi = r / M; int i = (int)(r % M);
+                long bo = bOff[bi], orow = (bi * M + i) * (long)N, aRow = aOff[bi] + (long)i * K;
+                var span_o = new Span<float>(ptr_o, oLen);
+                var span_a = new Span<float>(ptr_a, aLen);
+                var span_b = new Span<float>(ptr_b, bLen);
+                var dst = span_o.Slice(checked((int)orow), N); dst.Clear();
+                for (int k = 0; k < K; k++)   // axpy: dst += a[i,k] * B_row_k (SIMD over N); k-order preserved
+                {
+                    float aik = span_a[checked((int)(aRow + k))];
+                    if (aik != 0f) AxpyInto(dst, span_b.Slice(checked((int)(bo + (long)k * N)), N), aik);
+                }
+            });
+        }
         var sh = new int[nb + 2];
         for (int k = 0; k < nb; k++) sh[k] = lead[k];
         sh[nb] = M; sh[nb + 1] = N;
@@ -396,15 +684,262 @@ public class Interp
     {
         float alpha = F(n, "alpha", 1), beta = F(n, "beta", 1);
         bool ta = L(n, "transA", 0) != 0, tb = L(n, "transB", 0) != 0;
+        if (x[1].IsQuant)   // packed weight: dequant fused INTO the dot -> the fp32 weight is never built
+            return QGemm(ta ? Transpose(x[0], new[] { 1, 0 }) : x[0], x[1], tb, alpha, x.Length > 2 ? x[2] : null, beta);
         var A = ta ? Transpose(x[0], new[] { 1, 0 }) : x[0];
         var B = tb ? Transpose(x[1], new[] { 1, 0 }) : x[1];
-        var m = MatMul(A, B); var md = m.Fp;
+        var m = MatMul(A, B); var md = m.AsF();
         for (int i = 0; i < md.Length; i++) md[i] *= alpha;
         if (x.Length > 2 && x[2] != null) { var cb = Bcast(m, x[2], (p, q) => p + beta * q); return cb; }
         return m;
     }
 
-    static Tensor Reshape(Tensor a, Tensor shapeT, int flattenAxis = -1, Tensor src = null)
+    // Fused dequant-Gemm: Y = alpha*(A @ dequant(W)) [+ beta*C]. A is fp32 [M,K]; W is a PACKED weight, never
+    // expanded to fp32. Mario-hop accumulation: sum the raw (q · a) in fp32 across K, then lift to real units with
+    // the per-row scale/zp at the ROW boundary — int-domain throughput, fp32-domain precision.
+    // Fast path = the gemma shape (transB, per-output-row scale on Qaxis 0): Y[m,n] = scale[n]*(Σ_k a[m,k]·q[n,k] − zp[n]·Σ_k a[m,k]).
+    static unsafe Tensor QGemm(Tensor A, Tensor W, bool transB, float alpha, Tensor C, float beta)
+    {
+        var a = A.AsF();
+        int M = A.Shape[A.Shape.Length - 2], K = A.Shape[A.Shape.Length - 1];
+        int N = transB ? W.Shape[0] : W.Shape[1];
+        var qb = W.Qb; var sc = W.Qscale; var zp = W.Qzero;
+        int bits = W.Qbits, per = 8 / bits, mask = (1 << bits) - 1, half = 1 << (bits - 1);
+        var y = TensorArena.AllocSpan((long)M * N);
+        if (transB && W.Qaxis == 0)
+        {
+            var asum = TensorArena.AllocSpan(M);                                  // Σ_k a[m,k] for the zero-point term (per row, once)
+            for (int m = 0; m < M; m++) { float s = 0f; int o = m * K; for (int kk = 0; kk < K; kk++) s += a[o + kk]; asum[m] = s; }
+            fixed (float* p_y = y)
+            fixed (float* p_asum = asum)
+            fixed (float* p_a = a)
+            {
+                float* ptr_y = p_y; float* ptr_asum = p_asum; float* ptr_a = p_a;
+                int yLen = y.Length; int asumLen = asum.Length; int aLen = a.Length;
+                System.Threading.Tasks.Parallel.For(0, N, nn =>
+                {
+                    long rb = (long)nn * K; float s = sc[nn], z = zp != null ? zp[nn] : 0f;
+                    var span_y = new Span<float>(ptr_y, yLen);
+                    var span_asum = new Span<float>(ptr_asum, asumLen);
+                    var span_a = new Span<float>(ptr_a, aLen);
+                    for (int m = 0; m < M; m++)
+                    {
+                        int ao = m * K; float acc = 0f;
+                        for (int k = 0; k < K; k++)
+                        {
+                            long ei = rb + k;
+                            int q = (qb[(int)(ei / per)] >> (int)((ei % per) * bits)) & mask;
+                            if (q >= half) q -= (1 << bits);
+                            acc += span_a[ao + k] * q;
+                        }
+                        span_y[(int)((long)m * N + nn)] = alpha * s * (acc - z * span_asum[m]);
+                    }
+                });
+            }
+        }
+        else   // general fallback: per-element Deq (folds scale+zp inside) — correct for any transB/axis, just slower
+        {
+            fixed (float* p_y = y)
+            fixed (float* p_a = a)
+            {
+                float* ptr_y = p_y; float* ptr_a = p_a;
+                int yLen = y.Length; int aLen = a.Length;
+                System.Threading.Tasks.Parallel.For(0, N, nn =>
+                {
+                    var span_y = new Span<float>(ptr_y, yLen);
+                    var span_a = new Span<float>(ptr_a, aLen);
+                    for (int m = 0; m < M; m++)
+                    {
+                        int ao = m * K; float acc = 0f;
+                        for (int k = 0; k < K; k++)
+                            acc += span_a[ao + k] * W.Deq(transB ? ((long)nn * K + k) : ((long)k * N + nn));
+                        span_y[(int)((long)m * N + nn)] = alpha * acc;
+                    }
+                });
+            }
+        }
+        var outT = Tensor.F(y, M, N);
+        return C != null ? Bcast(outT, C, (p, q) => p + beta * q) : outT;
+    }
+
+    // ===== Gemma-3n E2B q4 ONNX contrib ops (com.microsoft). Block-wise UNSIGNED uint4 with an explicit per-block
+    // zero-point — distinct from QGemm's per-row SIGNED packing. Contracts read straight off the q4 .db export. =====
+
+    // one 4-bit nibble at logical index `idx` in a packed row starting at byte `rowOff` (low nibble = even idx).
+    static int Nib4(byte[] buf, int rowOff, int idx) => (buf[rowOff + (idx >> 1)] >> ((idx & 1) << 2)) & 0xF;
+
+    // MatMulNBits: Y = A @ dequant(B)^T. B is uint8 [N, K/bs, bs*bits/8] (k-major nibbles, byte=k/2). scale/zp are
+    // per (output-row n, block b=k/bs); 4-bit unsigned, dequant = (q - zp)·scale. zp defaults to 2^(bits-1) when absent.
+    static unsafe Tensor MatMulNBits(Tensor[] x, NodeProto n)
+    {
+        int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
+        int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
+        var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
+        byte[] B = x[1].Rawb; byte[] zpb = x.Length > 3 && x[3] != null ? x[3].Rawb : null;
+        var y = TensorArena.AllocSpan((long)M * N);
+        fixed (float* p_y = y) fixed (float* p_a = a) fixed (float* p_sc = scsp)   // pin: Span can't cross the lambda boundary (CS8175)
+        {
+            float* py = p_y; float* pa = p_a; float* psc = p_sc; int yl = y.Length, al = a.Length;
+            System.Threading.Tasks.Parallel.For(0, N, nn =>
+            {
+                var sy = new Span<float>(py, yl); var sa = new Span<float>(pa, al); var sc = new Span<float>(psc, scLen);
+                int rb = nn * rowBytes, zb = nn * zpRowBytes;
+                for (int m = 0; m < M; m++)
+                {
+                    int ao = m * K; float acc = 0f;
+                    for (int b = 0; b < nBlk; b++)
+                    {
+                        float s = sc[nn * nBlk + b]; int zp = zpb != null ? Nib4(zpb, zb, b) : defZp;
+                        float aq = 0f, asum = 0f; int k0 = b * bs;
+                        for (int i = 0; i < bs; i++)
+                        { int k = k0 + i; int q = (B[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF; float av = sa[ao + k]; aq += av * q; asum += av; }
+                        acc += s * (aq - zp * asum);   // int-domain accumulate, lift to real units at the block boundary
+                    }
+                    sy[m * N + nn] = acc;
+                }
+            });
+        }
+        var outShape = (int[])x[0].Shape.Clone(); outShape[outShape.Length - 1] = N;
+        return Tensor.F(y, outShape);
+    }
+
+    // GatherBlockQuantized: gather rows of a block-q4 table by indices, dequant inline (gemma embed: data uint8
+    // [V, H·bits/8], quantize_axis=1 along H, gather_axis=0). out = dequant(data[indices]) -> [*indices.shape, H].
+    static Tensor GatherBlockQuantized(Tensor[] x, NodeProto n)
+    {
+        int bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
+        int gAxis = (int)L(n, "gather_axis", 0), qAxis = (int)L(n, "quantize_axis", 1);
+        if (gAxis != 0 || qAxis != 1) throw new NotImplementedException($"GatherBlockQuantized gather_axis={gAxis} quantize_axis={qAxis} (only 0/1 wired)");
+        byte[] data = x[0].Rawb; var idx = x[1].AsI(); var sc = x[2].AsF(); byte[] zpb = x.Length > 3 && x[3] != null ? x[3].Rawb : null;
+        int V = x[0].Shape[0]; int rowBytes = 1; for (int k = 1; k < x[0].Shape.Length; k++) rowBytes *= x[0].Shape[k];
+        int H = rowBytes * 8 / bits, nBlk = H / bs, zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
+        long outN = (long)idx.Length * H; var o = TensorArena.AllocSpan(outN);
+        for (int t = 0; t < idx.Length; t++)
+        {
+            long r = idx[t]; if (r < 0) r += V; int rb = (int)r * rowBytes, zb = (int)r * zpRowBytes, sb = (int)r * nBlk; long ob = (long)t * H;
+            for (int k = 0; k < H; k++)
+            {
+                int b = k / bs; int q = (data[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF;
+                int zp = zpb != null ? Nib4(zpb, zb, b) : defZp;
+                o[(int)(ob + k)] = (q - zp) * sc[sb + b];
+            }
+        }
+        var outShape = new List<int>(x[1].Shape) { H };
+        return Tensor.F(o, outShape.ToArray());
+    }
+
+    // RotaryEmbedding (com.microsoft): rotate-half RoPE. cos/sin caches are [maxpos, head_dim/2]; position_ids index
+    // them. interleaved=0 pairs the two halves: out[i]=x[i]·cos - x[i+half]·sin; out[i+half]=x[i+half]·cos + x[i]·sin.
+    // num_heads inferred from a 3D [B,S,hidden] input (head_dim = 2·cos_cols); a 4D [B,N,S,H] input is used as-is.
+    static Tensor RotaryEmbedding(Tensor[] x, NodeProto n)
+    {
+        var inp = x[0]; var pos = x[1].AsI(); var cos = x[2].AsF(); var sin = x[3].AsF();
+        bool interleaved = L(n, "interleaved", 0) != 0;
+        int half = x[2].Shape[x[2].Shape.Length - 1], rotDim = 2 * half, rank = inp.Shape.Length;
+        int B, Nh, S, Hd;
+        if (rank == 4) { B = inp.Shape[0]; Nh = inp.Shape[1]; S = inp.Shape[2]; Hd = inp.Shape[3]; }
+        else { B = inp.Shape[0]; S = inp.Shape[1]; int heads = (int)L(n, "num_heads", 0); Hd = rotDim; Nh = heads > 0 ? heads : inp.Shape[2] / Hd; }
+        var src = inp.AsF(); var o = TensorArena.AllocSpan(src.Length); src.CopyTo(o);
+        int posCols = x[1].Shape[x[1].Shape.Length - 1];
+        for (int b = 0; b < B; b++)
+            for (int s = 0; s < S; s++)
+            {
+                long p = pos[(b * posCols + s) % pos.Length], cb = p * half;
+                for (int h = 0; h < Nh; h++)
+                {
+                    long bI = rank == 4 ? (((long)b * Nh + h) * S + s) * Hd : (((long)b * S + s) * Nh + h) * Hd;
+                    for (int i = 0; i < half; i++)
+                    {
+                        float c = cos[(int)(cb + i)], sn = sin[(int)(cb + i)];
+                        if (interleaved)
+                        { float a0 = src[(int)(bI + 2 * i)], a1 = src[(int)(bI + 2 * i + 1)]; o[(int)(bI + 2 * i)] = a0 * c - a1 * sn; o[(int)(bI + 2 * i + 1)] = a1 * c + a0 * sn; }
+                        else
+                        { float a0 = src[(int)(bI + i)], a1 = src[(int)(bI + i + half)]; o[(int)(bI + i)] = a0 * c - a1 * sn; o[(int)(bI + i + half)] = a1 * c + a0 * sn; }
+                    }
+                }
+            }
+        return Tensor.F(o, inp.Shape);
+    }
+
+    // SimplifiedLayerNormalization (RMSNorm): y = x / sqrt(mean(x²)+eps) · weight. No mean-subtract, no bias.
+    static Tensor SimplifiedLayerNorm(Tensor[] x, NodeProto n)
+    {
+        var X = x[0]; var w = x[1].AsF(); var xf = X.AsF();
+        int r = X.Shape.Length, axis = (int)L(n, "axis", -1); if (axis < 0) axis += r;
+        float eps = F(n, "epsilon", 1e-5f);
+        long inner = 1; for (int k = axis; k < r; k++) inner *= X.Shape[k];
+        long outer = X.Count / inner; var o = TensorArena.AllocSpan(X.Count);
+        for (long ob = 0; ob < outer; ob++)
+        {
+            long bI = ob * inner; double ss = 0;
+            for (long i = 0; i < inner; i++) { double d = xf[(int)(bI + i)]; ss += d * d; }
+            float inv = (float)(1.0 / Math.Sqrt(ss / inner + eps));
+            for (long i = 0; i < inner; i++) o[(int)(bI + i)] = xf[(int)(bI + i)] * inv * w[(int)(i % w.Length)];
+        }
+        return Tensor.F(o, X.Shape);
+    }
+
+    static long KvIdx(Tensor t, int b, int h, int s, int S, int Nkv, int H)
+        => t.Shape.Length == 4 ? (((long)b * Nkv + h) * S + s) * H : (((long)b * S + s) * Nkv + h) * H;
+    // additive attention_bias lookup with size-1 broadcast over a 4D [.,.,Sq,Tk] bias.
+    static float BiasAt(ReadOnlySpan<float> bf, int[] sh, int b, int qh, int qi, int kj)
+    {
+        if (sh == null || sh.Length < 4) return 0f;
+        int i0 = sh[0] == 1 ? 0 : b, i1 = sh[1] == 1 ? 0 : qh, i2 = sh[2] == 1 ? 0 : qi, i3 = sh[3] == 1 ? 0 : kj;
+        return bf[(int)((((long)i0 * sh[1] + i1) * sh[2] + i2) * sh[3] + i3)];
+    }
+
+    // GroupQueryAttention (com.microsoft): grouped MQA with KV-cache append, causal + sliding-window mask, additive
+    // attention_bias[10]. do_rotary=0 here (RoPE applied by upstream RotaryEmbedding nodes). q[B,S,Nq·H]; k/v[B,S,Nkv·H];
+    // past_k/v[B,Nkv,past,H]. Outputs: attn[B,S,Nq·H], present_k/v[B,Nkv,total,H] (the full cache; window only masks).
+    static Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n)
+    {
+        int Nq = (int)L(n, "num_heads", 0), Nkv = (int)L(n, "kv_num_heads", 0), win = (int)L(n, "local_window_size", -1);
+        float scaleAttr = F(n, "scale", 0f), softcap = F(n, "softcap", 0f);
+        var pastK = x[3]; var pastV = x[4];
+        int B = pastK.Shape[0], past = pastK.Shape[2], H = pastK.Shape[3];
+        int S = x[0].Shape.Length == 4 ? x[0].Shape[2] : x[0].Shape[1];
+        int total = past + S; float scale = scaleAttr != 0 ? scaleAttr : 1f / MathF.Sqrt(H);
+        var qf = x[0].AsF(); var kf = x[1].AsF(); var vf = x[2].AsF();
+        var pkf = pastK.Count > 0 ? pastK.AsF() : default; var pvf = pastV.Count > 0 ? pastV.AsF() : default;
+        var pk = TensorArena.AllocSpan((long)B * Nkv * total * H); var pv = TensorArena.AllocSpan((long)B * Nkv * total * H);
+        for (int b = 0; b < B; b++)
+            for (int hh = 0; hh < Nkv; hh++)
+            {
+                for (int t = 0; t < past; t++)
+                { long d = (((long)b * Nkv + hh) * total + t) * H, sI = (((long)b * Nkv + hh) * past + t) * H; for (int e = 0; e < H; e++) { pk[(int)(d + e)] = pkf[(int)(sI + e)]; pv[(int)(d + e)] = pvf[(int)(sI + e)]; } }
+                for (int t = 0; t < S; t++)
+                { long d = (((long)b * Nkv + hh) * total + past + t) * H, sK = KvIdx(x[1], b, hh, t, S, Nkv, H), sV = KvIdx(x[2], b, hh, t, S, Nkv, H); for (int e = 0; e < H; e++) { pk[(int)(d + e)] = kf[(int)(sK + e)]; pv[(int)(d + e)] = vf[(int)(sV + e)]; } }
+            }
+        var bias = x.Length > 10 ? x[10] : null; var bf = bias != null && bias.Count > 0 ? bias.AsF() : default; var bsh = bias != null && bias.Count > 0 ? bias.Shape : null;
+        int g = Nq / Nkv; var outp = TensorArena.AllocSpan((long)B * S * Nq * H);
+        var scores = new float[total];
+        for (int b = 0; b < B; b++)
+            for (int qh = 0; qh < Nq; qh++)
+            {
+                int kvh = qh / g;
+                for (int qi = 0; qi < S; qi++)
+                {
+                    int qpos = past + qi; long qBase = x[0].Shape.Length == 4 ? (((long)b * Nq + qh) * S + qi) * H : (((long)b * S + qi) * Nq + qh) * H;
+                    float mx = float.NegativeInfinity;
+                    for (int kj = 0; kj < total; kj++)
+                    {
+                        if (kj > qpos || (win > 0 && qpos - kj >= win)) { scores[kj] = float.NegativeInfinity; continue; }
+                        long kBase = (((long)b * Nkv + kvh) * total + kj) * H; float dot = 0f;
+                        for (int e = 0; e < H; e++) dot += qf[(int)(qBase + e)] * pk[(int)(kBase + e)];
+                        dot *= scale; if (softcap > 0) dot = softcap * MathF.Tanh(dot / softcap);
+                        dot += BiasAt(bf, bsh, b, qh, qi, kj);
+                        scores[kj] = dot; if (dot > mx) mx = dot;
+                    }
+                    double sum = 0; for (int kj = 0; kj < total; kj++) { if (float.IsNegativeInfinity(scores[kj])) { scores[kj] = 0f; continue; } float e = MathF.Exp(scores[kj] - mx); scores[kj] = e; sum += e; }
+                    float inv = sum > 0 ? (float)(1.0 / sum) : 0f; long oBase = (((long)b * S + qi) * Nq + qh) * H;
+                    for (int e = 0; e < H; e++) { float acc = 0f; for (int kj = 0; kj < total; kj++) if (scores[kj] != 0f) acc += scores[kj] * pv[(int)((((long)b * Nkv + kvh) * total + kj) * H + e)]; outp[(int)(oBase + e)] = acc * inv; }
+                }
+            }
+        return new[] { Tensor.F(outp, B, S, Nq * H), Tensor.F(pk, B, Nkv, total, H), Tensor.F(pv, B, Nkv, total, H) };
+    }
+
+    static unsafe Tensor Reshape(Tensor a, Tensor shapeT, int flattenAxis = -1, Tensor src = null)
     {
         int[] sh;
         if (flattenAxis >= 0)
@@ -415,25 +950,25 @@ public class Interp
             for (int k = 0; k < want.Length; k++) { if (want[k] == -1) neg = k; else if (want[k] == 0) { sh[k] = a.Shape[k]; known *= sh[k]; } else { sh[k] = (int)want[k]; known *= sh[k]; } }
             if (neg >= 0) sh[neg] = (int)(a.Count / known);
         }
-        return a.IsInt ? Tensor.I(a.Ip, sh) : Tensor.F(a.Fp, sh);
+        return a.IsInt ? Tensor.I(a.Ip, sh) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh) : Tensor.F(a.Fp, sh));
     }
 
-    static Tensor Squeeze(Tensor a, Tensor axesT, NodeProto n)
+    static unsafe Tensor Squeeze(Tensor a, Tensor axesT, NodeProto n)
     {
         var axes = axesT?.AsI()?.Select(v => (int)(v < 0 ? v + a.Shape.Length : v)).ToHashSet();
         var sh = new List<int>();
         for (int k = 0; k < a.Shape.Length; k++) if (!(a.Shape[k] == 1 && (axes == null || axes.Contains(k)))) sh.Add(a.Shape[k]);
-        return a.IsInt ? Tensor.I(a.Ip, sh.ToArray()) : Tensor.F(a.Fp, sh.ToArray());
+        return a.IsInt ? Tensor.I(a.Ip, sh.ToArray()) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh.ToArray()) : Tensor.F(a.Fp, sh.ToArray()));
     }
 
-    static Tensor Unsqueeze(Tensor a, Tensor axesT, NodeProto n)
+    static unsafe Tensor Unsqueeze(Tensor a, Tensor axesT, NodeProto n)
     {
         var axesList = (axesT?.AsI() ?? Ints(n, "axes").Select(v => (long)v).ToArray());
         int r = a.Shape.Length + axesList.Length;
         var axes = axesList.Select(v => (int)(v < 0 ? v + r : v)).ToHashSet();
         var sh = new int[r]; int si = 0;
         for (int k = 0; k < r; k++) sh[k] = axes.Contains(k) ? 1 : a.Shape[si++];
-        return a.IsInt ? Tensor.I(a.Ip, sh) : Tensor.F(a.Fp, sh);
+        return a.IsInt ? Tensor.I(a.Ip, sh) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh) : Tensor.F(a.Fp, sh));
     }
 
     static Tensor Transpose(Tensor a, int[] perm)
@@ -441,12 +976,12 @@ public class Interp
         int r = a.Shape.Length;
         if (perm == null || perm.Length == 0) { perm = new int[r]; for (int k = 0; k < r; k++) perm[k] = r - 1 - k; }
         var outShape = new int[r]; for (int k = 0; k < r; k++) outShape[k] = a.Shape[perm[k]];
-        var inStr = ContigStrides(a.Shape); var d = a.AsF(); var o = new float[d.Length];
+        var inStr = ContigStrides(a.Shape); var d = a.AsF(); var o = TensorArena.AllocSpan(d.Length);
         var idx = new int[r];
         for (long lin = 0; lin < d.Length; lin++)
         {
             long src = 0; for (int k = 0; k < r; k++) src += idx[k] * inStr[perm[k]];
-            o[lin] = d[src];
+            o[(int)lin] = d[(int)src];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < outShape[k]) break; idx[k] = 0; }
         }
         return Tensor.F(o, outShape);
@@ -456,7 +991,7 @@ public class Interp
     {
         int r = xs[0].Shape.Length; if (axis < 0) axis += r;
         var outShape = (int[])xs[0].Shape.Clone(); outShape[axis] = xs.Sum(t => t.Shape[axis]);
-        long n = 1; foreach (var d in outShape) n *= d; var o = new float[n];
+        long n = 1; foreach (var d in outShape) n *= d; var o = TensorArena.AllocSpan(n);
         long outStrAxis = 1; for (int k = axis + 1; k < r; k++) outStrAxis *= outShape[k];
         long blocks = 1; for (int k = 0; k < axis; k++) blocks *= outShape[k];
         long outRow = outShape[axis] * outStrAxis;
@@ -464,7 +999,7 @@ public class Interp
         foreach (var t in xs)
         {
             var d = t.AsF(); long inRow = t.Shape[axis] * outStrAxis;
-            for (long bl = 0; bl < blocks; bl++) Array.Copy(d, bl * inRow, o, bl * outRow + offAxis * outStrAxis, inRow);
+            for (long bl = 0; bl < blocks; bl++) d.Slice((int)(bl * inRow), (int)inRow).CopyTo(o.Slice((int)(bl * outRow + offAxis * outStrAxis), (int)inRow));
             offAxis += t.Shape[axis];
         }
         return Tensor.F(o, outShape);
@@ -480,14 +1015,15 @@ public class Interp
         var outShape = new List<int>(); for (int k = 0; k < axis; k++) outShape.Add(data.Shape[k]);
         foreach (var di in indices.Shape) outShape.Add(di);
         for (int k = axis + 1; k < r; k++) outShape.Add(data.Shape[k]);
-        bool fInt = data.IsInt; var df = fInt ? null : data.Fp; var dl = fInt ? data.Ip : null;
+        bool fInt = data.IsInt; var df = (fInt || data.IsQuant) ? (Span<float>)default : data.AsF(); var dl = fInt ? data.Ip : null;
         long total = outer * idx.Length * inner;
-        var of = fInt ? null : new float[total]; var ol = fInt ? new long[total] : null;
+        var of = fInt ? (Span<float>)default : TensorArena.AllocSpan(total); var ol = fInt ? new long[total] : null;
         long w = 0;
         for (long o = 0; o < outer; o++)
             foreach (var ix0 in idx)
             { long ix = ix0 < 0 ? ix0 + axisLen : ix0; long baseI = (o * axisLen + ix) * inner;
-              if (fInt) Array.Copy(dl, baseI, ol, w, inner); else Array.Copy(df, baseI, of, w, inner); w += inner; }
+              if (data.IsQuant) { for (long j = 0; j < inner; j++) of[(int)(w + j)] = data.Deq(baseI + j); }   // dequant just this row
+              else if (fInt) Array.Copy(dl, baseI, ol, w, inner); else df.Slice((int)baseI, (int)inner).CopyTo(of.Slice((int)w, (int)inner)); w += inner; }
         return fInt ? Tensor.I(ol, outShape.ToArray()) : Tensor.F(of, outShape.ToArray());
     }
 
@@ -502,7 +1038,7 @@ public class Interp
         for (long lin = 0; lin < n; lin++)
         {
             long ia = 0, ib = 0; for (int k = 0; k < sh.Length; k++) { ia += idx[k] * sa[k]; ib += idx[k] * sb[k]; }
-            o[lin] = f(fa[ia], fb[ib]) ? 1L : 0L;
+            o[lin] = f(fa[(int)ia], fb[(int)ib]) ? 1L : 0L;
             for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; }
         }
         return Tensor.I(o, sh);
@@ -520,14 +1056,18 @@ public class Interp
         {
             var xi = x.Ip; var yi = y.Ip; var o = new long[n];
             for (long lin = 0; lin < n; lin++)
-            { long ic = 0, ix = 0, iy = 0; for (int k = 0; k < sh.Length; k++) { ic += idx[k] * sc[k]; ix += idx[k] * sx[k]; iy += idx[k] * sy[k]; }
-              o[lin] = cf[ic] != 0 ? xi[ix] : yi[iy]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; } }
+            {
+                long ic = 0, ix = 0, iy = 0; for (int k = 0; k < sh.Length; k++) { ic += idx[k] * sc[k]; ix += idx[k] * sx[k]; iy += idx[k] * sy[k]; }
+                o[lin] = cf[(int)ic] != 0 ? xi[ix] : yi[iy]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; }
+            }
             return Tensor.I(o, sh);
         }
-        var xf = x.AsF(); var yf = y.AsF(); var of = new float[n];
+        var xf = x.AsF(); var yf = y.AsF(); var of = TensorArena.AllocSpan(n);
         for (long lin = 0; lin < n; lin++)
-        { long ic = 0, ix = 0, iy = 0; for (int k = 0; k < sh.Length; k++) { ic += idx[k] * sc[k]; ix += idx[k] * sx[k]; iy += idx[k] * sy[k]; }
-          of[lin] = cf[ic] != 0 ? xf[ix] : yf[iy]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; } }
+        {
+            long ic = 0, ix = 0, iy = 0; for (int k = 0; k < sh.Length; k++) { ic += idx[k] * sc[k]; ix += idx[k] * sx[k]; iy += idx[k] * sy[k]; }
+            of[(int)lin] = cf[(int)ic] != 0 ? xf[(int)ix] : yf[(int)iy]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; }
+        }
         return Tensor.F(of, sh);
     }
 
@@ -537,7 +1077,7 @@ public class Interp
         int[] sh = BroadcastShape(a.Shape, tgt); long n = 1; foreach (var d in sh) n *= d;
         var sa = Strides(a.Shape, sh); var idx = new int[sh.Length];
         if (a.IsInt) { var d = a.Ip; var o = new long[n]; for (long lin = 0; lin < n; lin++) { long ia = 0; for (int k = 0; k < sh.Length; k++) ia += idx[k] * sa[k]; o[lin] = d[ia]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; } } return Tensor.I(o, sh); }
-        else { var d = a.Fp; var o = new float[n]; for (long lin = 0; lin < n; lin++) { long ia = 0; for (int k = 0; k < sh.Length; k++) ia += idx[k] * sa[k]; o[lin] = d[ia]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; } } return Tensor.F(o, sh); }
+        else { var d = a.AsF(); var o = TensorArena.AllocSpan(n); for (long lin = 0; lin < n; lin++) { long ia = 0; for (int k = 0; k < sh.Length; k++) ia += idx[k] * sa[k]; o[(int)lin] = d[(int)ia]; for (int k = sh.Length - 1; k >= 0; k--) { if (++idx[k] < sh[k]) break; idx[k] = 0; } } return Tensor.F(o, sh); }
     }
 
     static Tensor ConstantOfShape(Tensor shapeT, NodeProto n)
@@ -548,9 +1088,9 @@ public class Interp
         {
             var vt = FromProto(va.T);
             if (vt.IsInt) { var o = new long[cnt]; var v = vt.Ip[0]; for (long i = 0; i < cnt; i++) o[i] = v; return Tensor.I(o, sh); }
-            else { var o = new float[cnt]; var v = vt.Fp[0]; for (long i = 0; i < cnt; i++) o[i] = v; return Tensor.F(o, sh); }
+            else { var o = TensorArena.AllocSpan(cnt); var v = vt.AsF()[0]; for (long i = 0; i < cnt; i++) o[(int)i] = v; return Tensor.F(o, sh); }
         }
-        return Tensor.F(new float[cnt], sh);
+        return Tensor.F(TensorArena.AllocSpan(cnt), sh);
     }
 
     static Tensor Range(Tensor start, Tensor limit, Tensor delta)
@@ -559,7 +1099,7 @@ public class Interp
         { long s = start.Ip[0], l = limit.AsI()[0], d = delta.AsI()[0]; var li = new List<long>();
           if (d > 0) for (long v = s; v < l; v += d) li.Add(v); else if (d < 0) for (long v = s; v > l; v += d) li.Add(v); return Tensor.I(li.ToArray(), li.Count); }
         else
-        { float s = start.Fp[0], l = limit.AsF()[0], d = delta.AsF()[0]; var lf = new List<float>();
+        { float s = start.AsF()[0], l = limit.AsF()[0], d = delta.AsF()[0]; var lf = new List<float>();
           if (d > 0) for (float v = s; v < l; v += d) lf.Add(v); else if (d < 0) for (float v = s; v > l; v += d) lf.Add(v); return Tensor.F(lf.ToArray(), lf.Count); }
     }
 
@@ -572,7 +1112,7 @@ public class Interp
         return r;
     }
 
-    static Tensor Reduce(Tensor[] x, NodeProto n, string mode)   // mode: "sum" | "mean" | "max" -- one loop, not a per-op copy
+    static unsafe Tensor Reduce(Tensor[] x, NodeProto n, string mode)   // mode: "sum" | "mean" | "max" -- one loop, not a per-op copy
     {
         var a = x[0]; var d = a.AsF(); int r = a.Shape.Length;
         bool keep = L(n, "keepdims", 1) != 0;
@@ -590,8 +1130,20 @@ public class Interp
         int m = axes.Count; bool trailing = m > 0; for (int k = r - m; k < r; k++) if (k < 0 || !axes.Contains(k)) trailing = false;
         if (trailing && !isMax)   // contiguous trailing block -> each output = SIMD sum of a contiguous run (sum/mean only)
         {
-            var of = new float[outN];
-            System.Threading.Tasks.Parallel.For(0L, outN, i => { double s = SimdSum(d.AsSpan(checked((int)(i * reduced)), (int)reduced)); of[i] = (float)(isMean ? s / reduced : s); });
+            var of = TensorArena.AllocSpan(outN);
+            fixed (float* p_of = of)
+            fixed (float* p_d = d)
+            {
+                float* ptr_of = p_of; float* ptr_d = p_d;
+                int ofLen = of.Length; int dLen = d.Length;
+                System.Threading.Tasks.Parallel.For(0L, outN, i =>
+                {
+                    var span_of = new Span<float>(ptr_of, ofLen);
+                    var span_d = new Span<float>(ptr_d, dLen);
+                    double s = SimdSum(span_d.Slice(checked((int)(i * reduced)), (int)reduced));
+                    span_of[(int)i] = (float)(isMean ? s / reduced : s);
+                });
+            }
             return Tensor.F(of, oshA);
         }
         var acc = new double[outN];
@@ -600,11 +1152,11 @@ public class Interp
         for (long lin = 0; lin < d.Length; lin++)
         {
             long oi = 0; for (int k = 0; k < r; k++) { int od = outDimOfIn[k]; if (od >= 0) { int coord = axes.Contains(k) && keep ? 0 : idx[k]; oi += coord * oStr[od]; } }
-            if (isMax) acc[oi] = Math.Max(acc[oi], d[lin]); else acc[oi] += d[lin];
+            if (isMax) acc[oi] = Math.Max(acc[oi], d[(int)lin]); else acc[oi] += d[(int)lin];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
         }
-        var o = new float[outN];
-        for (long i = 0; i < outN; i++) o[i] = (float)(isMean ? acc[i] / reduced : acc[i]);
+        var o = TensorArena.AllocSpan(outN);
+        for (long i = 0; i < outN; i++) o[(int)i] = (float)(isMean ? acc[i] / reduced : acc[i]);
         return Tensor.F(o, oshA);
     }
 
@@ -613,11 +1165,11 @@ public class Interp
         int r = a.Shape.Length; if (axis < 0) axis += r; var src = a.AsF();
         long inner = 1; for (int k = axis + 1; k < r; k++) inner *= a.Shape[k];
         int A = a.Shape[axis]; long outer = 1; for (int k = 0; k < axis; k++) outer *= a.Shape[k];
-        var o = new float[src.Length];
+        var o = TensorArena.AllocSpan(src.Length);
         for (long ob = 0; ob < outer; ob++) for (long inr = 0; inr < inner; inr++)
         {
             long baseI = ob * A * inner + inr; float run = 0;
-            for (int t = 0; t < A; t++) { int ti = rev ? A - 1 - t : t; long pos = baseI + (long)ti * inner; if (excl) { o[pos] = run; run += src[pos]; } else { run += src[pos]; o[pos] = run; } }
+            for (int t = 0; t < A; t++) { int ti = rev ? A - 1 - t : t; long pos = baseI + (long)ti * inner; if (excl) { o[(int)pos] = run; run += src[(int)pos]; } else { run += src[(int)pos]; o[(int)pos] = run; } }
         }
         return Tensor.F(o, a.Shape);
     }
@@ -641,7 +1193,7 @@ public class Interp
         var osh = new int[r]; for (int k = 0; k < r; k++) osh[k] = (int)Math.Max(0, Math.Ceiling((en[k] - st[k]) / (double)stp[k]));
         long outN = 1; foreach (var dd in osh) outN *= dd; var inStr = ContigStrides(a.Shape); var idx = new int[r];
         if (a.IsInt) { var d = a.Ip; var o = new long[outN]; for (long lin = 0; lin < outN; lin++) { long si = 0; for (int k = 0; k < r; k++) si += (st[k] + idx[k] * stp[k]) * inStr[k]; o[lin] = d[si]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < osh[k]) break; idx[k] = 0; } } return Tensor.I(o, osh); }
-        else { var d = a.Fp; var o = new float[outN]; for (long lin = 0; lin < outN; lin++) { long si = 0; for (int k = 0; k < r; k++) si += (st[k] + idx[k] * stp[k]) * inStr[k]; o[lin] = d[si]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < osh[k]) break; idx[k] = 0; } } return Tensor.F(o, osh); }
+        else { var d = a.AsF(); var o = TensorArena.AllocSpan(outN); for (long lin = 0; lin < outN; lin++) { long si = 0; for (int k = 0; k < r; k++) si += (st[k] + idx[k] * stp[k]) * inStr[k]; o[(int)lin] = d[(int)si]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < osh[k]) break; idx[k] = 0; } } return Tensor.F(o, osh); }
     }
 
     static Tensor Pad(Tensor[] x, NodeProto n)
@@ -652,8 +1204,8 @@ public class Interp
         var begin = new int[r]; var end = new int[r];
         for (int i = 0; i < axesA.Length; i++) { int ax = (int)axesA[i]; if (ax < 0) ax += r; begin[ax] = (int)pads[i]; end[ax] = (int)pads[i + axesA.Length]; }
         var osh = new int[r]; for (int k = 0; k < r; k++) osh[k] = a.Shape[k] + begin[k] + end[k];
-        long outN = 1; foreach (var dd in osh) outN *= dd; var inStr = ContigStrides(a.Shape); var d = a.AsF(); var o = new float[outN];
-        if (mode == "constant") for (long i = 0; i < outN; i++) o[i] = cval;
+        long outN = 1; foreach (var dd in osh) outN *= dd; var inStr = ContigStrides(a.Shape); var d = a.AsF(); var o = TensorArena.AllocSpan(outN);
+        if (mode == "constant") for (long i = 0; i < outN; i++) o[(int)i] = cval;
         var idx = new int[r];
         for (long lin = 0; lin < outN; lin++)
         {
@@ -666,7 +1218,7 @@ public class Interp
                 else { if (src < 0 || src >= a.Shape[k]) { inside = false; break; } }
                 si += (long)src * inStr[k];
             }
-            if (mode == "constant") { if (inside) o[lin] = d[si]; } else o[lin] = d[si];
+            if (mode == "constant") { if (inside) o[(int)lin] = d[(int)si]; } else o[(int)lin] = d[(int)si];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < osh[k]) break; idx[k] = 0; }
         }
         return Tensor.F(o, osh);
@@ -688,15 +1240,15 @@ public class Interp
         var initH = (x.Length > 5 && x[5] != null) ? x[5].AsF() : null;
         var initC = (x.Length > 6 && x[6] != null) ? x[6].AsF() : null;
         string dir = Str(n, "direction", "forward");
-        var Y = new float[(long)seq * numDir * batch * H];
-        var Yh = new float[(long)numDir * batch * H]; var Yc = new float[(long)numDir * batch * H];
+        var Y = TensorArena.AllocSpan((long)seq * numDir * batch * H);
+        var Yh = TensorArena.AllocSpan((long)numDir * batch * H); var Yc = TensorArena.AllocSpan((long)numDir * batch * H);
         int wDS = 4 * H * inp, rDS = 4 * H * H, bDS = 8 * H;
         for (int d = 0; d < numDir; d++)
         {
             bool rev = dir == "reverse" || (dir == "bidirectional" && d == 1);
             var h = new float[batch * H]; var c = new float[batch * H];
-            if (initH != null) Array.Copy(initH, (long)d * batch * H, h, 0, batch * H);
-            if (initC != null) Array.Copy(initC, (long)d * batch * H, c, 0, batch * H);
+            if (initH != null) initH.Slice((int)((long)d * batch * H), batch * H).CopyTo(h);
+            if (initC != null) initC.Slice((int)((long)d * batch * H), batch * H).CopyTo(c);
             var gate = new float[4 * H];
             for (int ti = 0; ti < seq; ti++)
             {
@@ -706,10 +1258,10 @@ public class Interp
                     for (int row = 0; row < 4 * H; row++)
                     {
                         float v = 0; long wb = (long)d * wDS + (long)row * inp; long xb = ((long)t * batch + b) * inp;
-                        for (int k = 0; k < inp; k++) v += Wf[wb + k] * X[xb + k];
+                        for (int k = 0; k < inp; k++) v += Wf[(int)(wb + k)] * X[(int)(xb + k)];
                         long rb = (long)d * rDS + (long)row * H; long hb = (long)b * H;
-                        for (int k = 0; k < H; k++) v += Rf[rb + k] * h[hb + k];
-                        if (Bf != null) v += Bf[(long)d * bDS + row] + Bf[(long)d * bDS + 4 * H + row];
+                        for (int k = 0; k < H; k++) v += Rf[(int)(rb + k)] * h[(int)(hb + k)];
+                        if (Bf != null) v += Bf[(int)((long)d * bDS + row)] + Bf[(int)((long)d * bDS + 4 * H + row)];
                         gate[row] = v;
                     }
                     for (int j = 0; j < H; j++)
@@ -717,17 +1269,17 @@ public class Interp
                         float it = Sig(gate[j]), ot = Sig(gate[H + j]), ft = Sig(gate[2 * H + j]), ctil = MathF.Tanh(gate[3 * H + j]);
                         int ci = b * H + j; float ct = ft * c[ci] + it * ctil; c[ci] = ct;
                         float ht = ot * MathF.Tanh(ct); h[ci] = ht;
-                        Y[(((long)t * numDir + d) * batch + b) * H + j] = ht;
+                        Y[(int)((((long)t * numDir + d) * batch + b) * H + j)] = ht;
                     }
                 }
             }
-            Array.Copy(h, 0, Yh, (long)d * batch * H, batch * H);
-            Array.Copy(c, 0, Yc, (long)d * batch * H, batch * H);
+            h.CopyTo(Yh.Slice((int)((long)d * batch * H), batch * H));
+            c.CopyTo(Yc.Slice((int)((long)d * batch * H), batch * H));
         }
         return new[] { Tensor.F(Y, seq, numDir, batch, H), Tensor.F(Yh, numDir, batch, H), Tensor.F(Yc, numDir, batch, H) };
     }
 
-    static Tensor Conv(Tensor[] x, NodeProto n)
+    static unsafe Tensor Conv(Tensor[] x, NodeProto n)
     {
         var X = x[0]; var W = x[1]; var bf = (x.Length > 2 && x[2] != null) ? x[2].AsF() : null;
         var xf = X.AsF(); var wf = W.AsF();
@@ -745,7 +1297,7 @@ public class Interp
         else if (ap == "VALID") for (int i = 0; i < sp; i++) { pads[i] = 0; pads[sp + i] = 0; }
         int[] osz = new int[sp]; for (int i = 0; i < sp; i++) { int eff = (ksh[i] - 1) * dil[i] + 1; osz[i] = (isz[i] + pads[i] + pads[sp + i] - eff) / strides[i] + 1; }
         var outShape = new int[rank]; outShape[0] = N; outShape[1] = M; for (int i = 0; i < sp; i++) outShape[2 + i] = osz[i];
-        long outN = 1; foreach (var d in outShape) outN *= d; var o = new float[outN];
+        long outN = 1; foreach (var d in outShape) outN *= d; var o = TensorArena.AllocSpan(outN);
         var xStr = ContigStrides(X.Shape);
         int mPerG = M / group;
         long spatial = 1; foreach (var s in osz) spatial *= s;
@@ -756,36 +1308,50 @@ public class Interp
         for (int nn = 0; nn < N; nn++)
             for (int g = 0; g < group; g++)
             {
-                var col = new float[(long)K * spatial];
-                System.Threading.Tasks.Parallel.For(0, K, ck =>
+                var col = TensorArena.AllocSpan((long)K * spatial);
+                fixed (float* p_col = col)
+                fixed (float* p_xf = xf)
                 {
-                    int c = ck / (int)kcount, kk = ck % (int)kcount, cin = g * CinG + c;
-                    long xBaseC = (long)nn * xStr[0] + (long)cin * xStr[1];
-                    var kpos = new int[sp]; { long t = kk; for (int d = sp - 1; d >= 0; d--) { kpos[d] = (int)(t % ksh[d]); t /= ksh[d]; } }
-                    var pos = new int[sp]; long colBase = (long)ck * spatial;
-                    for (long s = 0; s < spatial; s++)
+                    float* ptr_col = p_col; float* ptr_xf = p_xf;
+                    int colLen = col.Length; int xfLen = xf.Length;
+                    System.Threading.Tasks.Parallel.For(0, K, ck =>
                     {
-                        bool valid = true; long xoff = xBaseC;
-                        for (int d = 0; d < sp; d++) { int ip = pos[d] * strides[d] + kpos[d] * dil[d] - pads[d]; if (ip < 0 || ip >= isz[d]) valid = false; xoff += (long)ip * xStr[2 + d]; }
-                        col[colBase + s] = valid ? xf[xoff] : 0f;
-                        for (int d = sp - 1; d >= 0; d--) { if (++pos[d] < osz[d]) break; pos[d] = 0; }
-                    }
-                });
-                float[] wg; if (group == 1) wg = wf; else { wg = new float[(long)mPerG * K]; Array.Copy(wf, (long)g * mPerG * K, wg, 0, (long)mPerG * K); }
+                        int c = ck / (int)kcount, kk = ck % (int)kcount, cin = g * CinG + c;
+                        long xBaseC = (long)nn * xStr[0] + (long)cin * xStr[1];
+                        var kpos = new int[sp]; { long t = kk; for (int d = sp - 1; d >= 0; d--) { kpos[d] = (int)(t % ksh[d]); t /= ksh[d]; } }
+                        var pos = new int[sp]; long colBase = (long)ck * spatial;
+                        var span_col = new Span<float>(ptr_col, colLen);
+                        var span_xf = new Span<float>(ptr_xf, xfLen);
+                        for (long s = 0; s < spatial; s++)
+                        {
+                            bool valid = true; long xoff = xBaseC;
+                            for (int d = 0; d < sp; d++) { int ip = pos[d] * strides[d] + kpos[d] * dil[d] - pads[d]; if (ip < 0 || ip >= isz[d]) valid = false; xoff += (long)ip * xStr[2 + d]; }
+                            span_col[(int)(colBase + s)] = valid ? span_xf[(int)xoff] : 0f;
+                            for (int d = sp - 1; d >= 0; d--) { if (++pos[d] < osz[d]) break; pos[d] = 0; }
+                        }
+                    });
+                }
+                Span<float> wg;
+                if (group == 1) wg = wf;
+                else
+                {
+                    wg = TensorArena.AllocSpan((long)mPerG * K);
+                    wf.Slice((int)((long)g * mPerG * K), mPerG * K).CopyTo(wg);
+                }
                 var prod = (UseGpuMatMul ? GpuMatMul(Tensor.F(wg, mPerG, K), Tensor.F(col, K, (int)spatial))
-                                         : MatMul(Tensor.F(wg, mPerG, K), Tensor.F(col, K, (int)spatial))).Fp;
+                                         : MatMul(Tensor.F(wg, mPerG, K), Tensor.F(col, K, (int)spatial))).AsF();
                 for (int m = 0; m < mPerG; m++)
                 {
                     int oc = g * mPerG + m; long oBase = ((long)nn * M + oc) * spatial, pBase = (long)m * spatial;
                     float bias = bf != null ? bf[oc] : 0f;
-                    for (long s = 0; s < spatial; s++) o[oBase + s] = prod[pBase + s] + bias;
+                    for (long s = 0; s < spatial; s++) o[(int)(oBase + s)] = prod[(int)(pBase + s)] + bias;
                 }
             }
         return Tensor.F(o, outShape);
     }
 
     // ONNX ConvTranspose (deconv) as scatter-add. X[N,Cin,*isz]; W[Cin,Cout/group,*ksz]; B[Cout].
-    static Tensor ConvTranspose(Tensor[] x, NodeProto n)
+    static unsafe Tensor ConvTranspose(Tensor[] x, NodeProto n)
     {
         var X = x[0]; var W = x[1]; var bf = (x.Length > 2 && x[2] != null) ? x[2].AsF() : null;
         var xf = X.AsF(); var wf = W.AsF();
@@ -815,55 +1381,65 @@ public class Interp
         else for (int i = 0; i < sp; i++) osz[i] = strides[i] * (isz[i] - 1) + outPad[i] + ((ksh[i] - 1) * dil[i] + 1) - pads[i] - pads[sp + i];
 
         var outShape = new int[rank]; outShape[0] = N; outShape[1] = Cout; for (int i = 0; i < sp; i++) outShape[2 + i] = osz[i];
-        long outN = 1; foreach (var d in outShape) outN *= d; var o = new float[outN];
+        long outN = 1; foreach (var d in outShape) outN *= d; var o = TensorArena.AllocSpan(outN);
         var xStr = ContigStrides(X.Shape); var wStr = ContigStrides(W.Shape); var oStr = ContigStrides(outShape);
         long inSpatial = 1; foreach (var s in isz) inSpatial *= s;
         long kcount = 1; foreach (var k in ksh) kcount *= k;
         // parallelize over (batch,group,out-channel) with cinL inner — each out-channel region is written by exactly one task,
         // and the cinL->s->kk accumulation order into each output element is unchanged -> bit-identical, no races.
         int ctTasks = N * group * CoutPerG;
-        System.Threading.Tasks.Parallel.For(0, ctTasks, t =>
+        fixed (float* p_o = o)
+        fixed (float* p_xf = xf)
+        fixed (float* p_wf = wf)
         {
-            int coutL = t % CoutPerG; int g = (t / CoutPerG) % group; int nn = t / (CoutPerG * group);
-            int cout = g * CoutPerG + coutL;
-            long oBaseC = (long)nn * oStr[0] + (long)cout * oStr[1];
-            var ipos = new int[sp]; var kpos = new int[sp];
-            for (int cinL = 0; cinL < CinPerG; cinL++)
+            float* ptr_o = p_o; float* ptr_xf = p_xf; float* ptr_wf = p_wf;
+            int oLen = o.Length; int xfLen = xf.Length; int wfLen = wf.Length;
+            System.Threading.Tasks.Parallel.For(0, ctTasks, t =>
             {
-                int cin = g * CinPerG + cinL;
-                long wBase = (long)cin * wStr[0] + (long)coutL * wStr[1];
-                long xBase = (long)nn * xStr[0] + (long)cin * xStr[1];
-                Array.Clear(ipos, 0, sp);
-                for (long s = 0; s < inSpatial; s++)
+                int coutL = t % CoutPerG; int g = (t / CoutPerG) % group; int nn = t / (CoutPerG * group);
+                int cout = g * CoutPerG + coutL;
+                long oBaseC = (long)nn * oStr[0] + (long)cout * oStr[1];
+                var ipos = new int[sp]; var kpos = new int[sp];
+                var span_o = new Span<float>(ptr_o, oLen);
+                var span_xf = new Span<float>(ptr_xf, xfLen);
+                var span_wf = new Span<float>(ptr_wf, wfLen);
+                for (int cinL = 0; cinL < CinPerG; cinL++)
                 {
-                    long xoff = xBase; for (int d = 0; d < sp; d++) xoff += (long)ipos[d] * xStr[2 + d];
-                    float val = xf[xoff];
-                    if (val != 0)
+                    int cin = g * CinPerG + cinL;
+                    long wBase = (long)cin * wStr[0] + (long)coutL * wStr[1];
+                    long xBase = (long)nn * xStr[0] + (long)cin * xStr[1];
+                    Array.Clear(ipos, 0, sp);
+                    for (long s = 0; s < inSpatial; s++)
                     {
-                        Array.Clear(kpos, 0, sp);
-                        for (long kk = 0; kk < kcount; kk++)
+                        long xoff = xBase; for (int d = 0; d < sp; d++) xoff += (long)ipos[d] * xStr[2 + d];
+                        float val = span_xf[(int)xoff];
+                        if (val != 0)
                         {
-                            bool valid = true; long ooff = oBaseC; long woff = wBase;
-                            for (int d = 0; d < sp; d++)
+                            Array.Clear(kpos, 0, sp);
+                            for (long kk = 0; kk < kcount; kk++)
                             {
-                                int op = ipos[d] * strides[d] + kpos[d] * dil[d] - pads[d];
-                                if (op < 0 || op >= osz[d]) valid = false;
-                                ooff += (long)op * oStr[2 + d]; woff += (long)kpos[d] * wStr[2 + d];
+                                bool valid = true; long ooff = oBaseC; long woff = wBase;
+                                for (int d = 0; d < sp; d++)
+                                {
+                                    int op = ipos[d] * strides[d] + kpos[d] * dil[d] - pads[d];
+                                    if (op < 0 || op >= osz[d]) valid = false;
+                                    ooff += (long)op * oStr[2 + d]; woff += (long)kpos[d] * wStr[2 + d];
+                                }
+                                if (valid) span_o[(int)ooff] += val * span_wf[(int)woff];
+                                for (int d = sp - 1; d >= 0; d--) { if (++kpos[d] < ksh[d]) break; kpos[d] = 0; }
                             }
-                            if (valid) o[ooff] += val * wf[woff];
-                            for (int d = sp - 1; d >= 0; d--) { if (++kpos[d] < ksh[d]) break; kpos[d] = 0; }
                         }
+                        for (int d = sp - 1; d >= 0; d--) { if (++ipos[d] < isz[d]) break; ipos[d] = 0; }
                     }
-                    for (int d = sp - 1; d >= 0; d--) { if (++ipos[d] < isz[d]) break; ipos[d] = 0; }
                 }
-            }
-        });
+            });
+        }
         if (bf != null)
         {
             long spat = 1; foreach (var s in osz) spat *= s;
             for (int nn = 0; nn < N; nn++)
                 for (int cout = 0; cout < Cout; cout++)
-                { long b = (long)nn * oStr[0] + (long)cout * oStr[1]; for (long s = 0; s < spat; s++) o[b + s] += bf[cout]; }
+                { long b = (long)nn * oStr[0] + (long)cout * oStr[1]; for (long s = 0; s < spat; s++) o[(int)(b + s)] += bf[cout]; }
         }
         return Tensor.F(o, outShape);
     }
@@ -874,30 +1450,30 @@ public class Interp
         var xf = X.AsF(); int r = X.Shape.Length; int axis = (int)L(n, "axis", -1); if (axis < 0) axis += r;
         float eps = F(n, "epsilon", 1e-5f);
         long inner = 1; for (int k = axis; k < r; k++) inner *= X.Shape[k];
-        long outer = X.Count / inner; var o = new float[X.Count];
+        long outer = X.Count / inner; var o = TensorArena.AllocSpan(X.Count);
         for (long ob = 0; ob < outer; ob++)
         {
             long baseI = ob * inner;
-            double mean = 0; for (long i = 0; i < inner; i++) mean += xf[baseI + i]; mean /= inner;
-            double var = 0; for (long i = 0; i < inner; i++) { double dd = xf[baseI + i] - mean; var += dd * dd; } var /= inner;
+            double mean = 0; for (long i = 0; i < inner; i++) mean += xf[(int)(baseI + i)]; mean /= inner;
+            double var = 0; for (long i = 0; i < inner; i++) { double dd = xf[(int)(baseI + i)] - mean; var += dd * dd; } var /= inner;
             double inv = 1.0 / Math.Sqrt(var + eps);
             for (long i = 0; i < inner; i++)
-            { float norm = (float)((xf[baseI + i] - mean) * inv); o[baseI + i] = norm * sf[i % sf.Length] + (bf != null ? bf[i % bf.Length] : 0f); }
+            { float norm = (float)((xf[(int)(baseI + i)] - mean) * inv); o[(int)(baseI + i)] = norm * sf[(int)(i % sf.Length)] + (bf != null ? bf[(int)(i % bf.Length)] : 0f); }
         }
         return Tensor.F(o, X.Shape);
     }
 
     static Tensor Softmax(Tensor a, int axis)
     {
-        int r = a.Shape.Length; if (axis < 0) axis += r; var d = a.AsF(); var o = new float[d.Length];
+        int r = a.Shape.Length; if (axis < 0) axis += r; var d = a.AsF(); var o = TensorArena.AllocSpan(d.Length);
         long inner = 1; for (int k = axis + 1; k < r; k++) inner *= a.Shape[k];
         int A = a.Shape[axis]; long outer = 1; for (int k = 0; k < axis; k++) outer *= a.Shape[k];
         for (long ob = 0; ob < outer; ob++) for (long inr = 0; inr < inner; inr++)
         {
             long baseI = ob * A * inner + inr;
-            float mx = float.NegativeInfinity; for (int t = 0; t < A; t++) mx = MathF.Max(mx, d[baseI + (long)t * inner]);
-            double sum = 0; for (int t = 0; t < A; t++) { double e = Math.Exp(d[baseI + (long)t * inner] - mx); o[baseI + (long)t * inner] = (float)e; sum += e; }
-            for (int t = 0; t < A; t++) o[baseI + (long)t * inner] /= (float)sum;
+            float mx = float.NegativeInfinity; for (int t = 0; t < A; t++) mx = MathF.Max(mx, d[(int)(baseI + (long)t * inner)]);
+            double sum = 0; for (int t = 0; t < A; t++) { double e = Math.Exp(d[(int)(baseI + (long)t * inner)] - mx); o[(int)(baseI + (long)t * inner)] = (float)e; sum += e; }
+            for (int t = 0; t < A; t++) o[(int)(baseI + (long)t * inner)] /= (float)sum;
         }
         return Tensor.F(o, a.Shape);
     }
@@ -925,7 +1501,14 @@ public class Interp
             var outShape = (int[])data.Shape.Clone(); outShape[axis] = splitSizes[i];
             long outRow = splitSizes[i] * innerSize; long outSize = blocks * outRow;
             if (isInt) { var o = new long[outSize]; for (long bl = 0; bl < blocks; bl++) Array.Copy(data.Ip, bl * inRow + offAxis * innerSize, o, bl * outRow, outRow); outputs[i] = Tensor.I(o, outShape); }
-            else { var o = new float[outSize]; for (long bl = 0; bl < blocks; bl++) Array.Copy(data.Fp, bl * inRow + offAxis * innerSize, o, bl * outRow, outRow); outputs[i] = Tensor.F(o, outShape); }
+            else
+            {
+                var o = TensorArena.AllocSpan(outSize);
+                var df = data.AsF();
+                for (long bl = 0; bl < blocks; bl++)
+                    df.Slice((int)(bl * inRow + offAxis * innerSize), (int)outRow).CopyTo(o.Slice((int)(bl * outRow), (int)outRow));
+                outputs[i] = Tensor.F(o, outShape);
+            }
             offAxis += splitSizes[i];
         }
         return outputs;
@@ -938,7 +1521,7 @@ public class Interp
         var outShape = new int[r]; for (int i = 0; i < r; i++) outShape[i] = a.Shape[i] * (int)rep[i];
         long outN = 1; foreach (var d in outShape) outN *= d; var inStr = ContigStrides(a.Shape); var idx = new int[r];
         if (a.IsInt) { var d = a.Ip; var o = new long[outN]; for (long lin = 0; lin < outN; lin++) { long src = 0; for (int k = 0; k < r; k++) src += (idx[k] % a.Shape[k]) * inStr[k]; o[lin] = d[src]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < outShape[k]) break; idx[k] = 0; } } return Tensor.I(o, outShape); }
-        else { var d = a.Fp; var o = new float[outN]; for (long lin = 0; lin < outN; lin++) { long src = 0; for (int k = 0; k < r; k++) src += (idx[k] % a.Shape[k]) * inStr[k]; o[lin] = d[src]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < outShape[k]) break; idx[k] = 0; } } return Tensor.F(o, outShape); }
+        else { var d = a.AsF(); var o = TensorArena.AllocSpan(outN); for (long lin = 0; lin < outN; lin++) { long src = 0; for (int k = 0; k < r; k++) src += (idx[k] % a.Shape[k]) * inStr[k]; o[(int)lin] = d[(int)src]; for (int k = r - 1; k >= 0; k--) { if (++idx[k] < outShape[k]) break; idx[k] = 0; } } return Tensor.F(o, outShape); }
     }
 
     // ONNX GroupNormalization — normalize over groups of channels + spatial, per-channel affine. [drafted by Antigravity #3, reviewed]
@@ -949,17 +1532,17 @@ public class Interp
         long H = 1; for (int k = 2; k < r; k++) H *= X.Shape[k];
         int num = (int)L(n, "num_groups", -1); if (num <= 0) throw new ArgumentException("GroupNormalization: num_groups");
         float eps = F(n, "epsilon", 1e-5f); int G = C / num; long groupElements = (long)G * H;
-        var o = new float[X.Count];
+        var o = TensorArena.AllocSpan(X.Count);
         for (int nn = 0; nn < N; nn++)
             for (int g = 0; g < num; g++)
             {
                 double sum = 0;
-                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; for (long h = 0; h < H; h++) sum += xf[b + h]; }
+                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; for (long h = 0; h < H; h++) sum += xf[(int)(b + h)]; }
                 double mean = sum / groupElements;
                 double sumSq = 0;
-                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; for (long h = 0; h < H; h++) { double diff = xf[b + h] - mean; sumSq += diff * diff; } }
+                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; for (long h = 0; h < H; h++) { double diff = xf[(int)(b + h)] - mean; sumSq += diff * diff; } }
                 double invStd = 1.0 / Math.Sqrt(sumSq / groupElements + eps);
-                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; float sv = sf[c], bv = bf[c]; for (long h = 0; h < H; h++) o[b + h] = (float)((xf[b + h] - mean) * invStd * sv + bv); }
+                for (int c = g * G; c < (g + 1) * G; c++) { long b = ((long)nn * C + c) * H; float sv = sf[c], bv = bf[c]; for (long h = 0; h < H; h++) o[(int)(b + h)] = (float)((xf[(int)(b + h)] - mean) * invStd * sv + bv); }
             }
         return Tensor.F(o, X.Shape);
     }
@@ -972,17 +1555,17 @@ public class Interp
         int r = X.Shape.Length, N = X.Shape[0], C = X.Shape[1];
         long H = 1; for (int k = 2; k < r; k++) H *= X.Shape[k];
         float eps = F(n, "epsilon", 1e-5f);
-        var o = new float[X.Count];
+        var o = TensorArena.AllocSpan(X.Count);
         for (int nn = 0; nn < N; nn++)
             for (int c = 0; c < C; c++)
             {
                 long b = ((long)nn * C + c) * H;
-                double sum = 0; for (long h = 0; h < H; h++) sum += xf[b + h];
+                double sum = 0; for (long h = 0; h < H; h++) sum += xf[(int)(b + h)];
                 double mean = sum / H;
-                double sumSq = 0; for (long h = 0; h < H; h++) { double diff = xf[b + h] - mean; sumSq += diff * diff; }
+                double sumSq = 0; for (long h = 0; h < H; h++) { double diff = xf[(int)(b + h)] - mean; sumSq += diff * diff; }
                 double invStd = 1.0 / Math.Sqrt(sumSq / H + eps);
                 float sv = sf[c], bv = bf[c];
-                for (long h = 0; h < H; h++) o[b + h] = (float)((xf[b + h] - mean) * invStd * sv + bv);
+                for (long h = 0; h < H; h++) o[(int)(b + h)] = (float)((xf[(int)(b + h)] - mean) * invStd * sv + bv);
             }
         return Tensor.F(o, X.Shape);
     }
@@ -1013,8 +1596,8 @@ public class Interp
             return Tensor.I(acc, oshA);
         }
         var d = a.AsF(); var accF = new double[outN]; for (long i = 0; i < outN; i++) accF[i] = 1.0;
-        for (long lin = 0; lin < d.Length; lin++) { accF[OutIndex()] *= d[lin]; Step(); }
-        var o = new float[outN]; for (long i = 0; i < outN; i++) o[i] = (float)accF[i];
+        for (long lin = 0; lin < d.Length; lin++) { accF[OutIndex()] *= d[(int)lin]; Step(); }
+        var o = TensorArena.AllocSpan(outN); for (long i = 0; i < outN; i++) o[(int)i] = (float)accF[i];
         return Tensor.F(o, oshA);
     }
 
@@ -1030,33 +1613,36 @@ public class Interp
         var oStr = ContigStrides(oshA);
         long sliceN = 1; foreach (var dd in oshA) sliceN *= dd;
         bool isInt = a.IsInt;
-        var di = isInt ? null : a.AsF(); var ip = isInt ? a.Ip : null;
-        var bufF = isInt ? null : new float[num][]; var bufI = isInt ? new long[num][] : null;
-        for (int s = 0; s < num; s++) { if (isInt) bufI[s] = new long[sliceN]; else bufF[s] = new float[sliceN]; }
+        var di = isInt ? (Span<float>)default : a.AsF(); var ip = isInt ? a.Ip : null;
+        var res = new Tensor[num];
+        for (int s = 0; s < num; s++) res[s] = isInt ? Tensor.I(new long[sliceN], oshA) : Tensor.F(TensorArena.AllocSpan(sliceN), oshA);
         var idx = new int[r];
-        long len = isInt ? ip.LongLength : di.LongLength;
+        long len = isInt ? ip.LongLength : di.Length;
         for (long lin = 0; lin < len; lin++)
         {
             int s = idx[axis];
             long oi = 0; int od = 0;
             for (int k = 0; k < r; k++) { if (k == axis) continue; oi += (long)idx[k] * oStr[od]; od++; }
-            if (isInt) bufI[s][oi] = ip[lin]; else bufF[s][oi] = di[lin];
+            if (isInt) res[s].Ip[oi] = ip[lin]; else res[s].AsF()[(int)oi] = di[(int)lin];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
         }
-        var res = new Tensor[num];
-        for (int s = 0; s < num; s++) res[s] = isInt ? Tensor.I(bufI[s], oshA) : Tensor.F(bufF[s], oshA);
         return res;
     }
 
     // StableHLO DYNAMIC_UPDATE_SLICE — (operand, update, start_0..start_{r-1}) -> operand with `update`
     // written at the clamped start position. The KV-cache write (a new token's K/V overlaid into the cache).
-    static Tensor DynamicUpdateSliceOp(Tensor[] x, NodeProto n)
+    static unsafe Tensor DynamicUpdateSliceOp(Tensor[] x, NodeProto n)
     {
         var operand = x[0]; var update = x[1]; int r = operand.Shape.Length;
         var starts = new int[r];
+        // The cache-update composite's DYNAMIC_UPDATE_SLICE passes ALL start indices as ONE 1D tensor in x[2]
+        // (e.g. [0,0,pos,0]); the StableHLO/scalar variant passes start_k as separate inputs x[2+k]. Handle both —
+        // reading only x[2][0] before zeroed every write to position 0, corrupting the KV cache (the babble).
+        long[] startIndices = (x.Length == 3 && x[2] != null && x[2].Count >= r) ? x[2].AsI() : null;
         for (int k = 0; k < r; k++)
         {
-            int si = (x.Length > 2 + k && x[2 + k] != null) ? (int)x[2 + k].AsI()[0] : 0;
+            int si = startIndices != null ? (int)startIndices[k]
+                   : (x.Length > 2 + k && x[2 + k] != null) ? (int)x[2 + k].AsI()[0] : 0;
             starts[k] = Math.Max(0, Math.Min(si, operand.Shape[k] - update.Shape[k]));
         }
         var oStr = ContigStrides(operand.Shape);
@@ -1074,14 +1660,29 @@ public class Interp
         }
         else
         {
-            var o = (float[])operand.AsF().Clone(); var u = update.AsF();
-            for (long lin = 0; lin < u.LongLength; lin++)
+            if (operand.NativePtr != null)
             {
-                long oi = 0; for (int k = 0; k < r; k++) oi += (long)(starts[k] + idx[k]) * oStr[k];
-                o[oi] = u[lin];
-                for (int k = r - 1; k >= 0; k--) { if (++idx[k] < update.Shape[k]) break; idx[k] = 0; }
+                var u = update.AsF();
+                var dst = operand.AsF();
+                for (long lin = 0; lin < u.Length; lin++)
+                {
+                    long oi = 0; for (int k = 0; k < r; k++) oi += (long)(starts[k] + idx[k]) * oStr[k];
+                    dst[(int)oi] = u[(int)lin];
+                    for (int k = r - 1; k >= 0; k--) { if (++idx[k] < update.Shape[k]) break; idx[k] = 0; }
+                }
+                return operand;
             }
-            return Tensor.F(o, operand.Shape);
+            else
+            {
+                var o = operand.AsF().ToArray(); var u = update.AsF();
+                for (long lin = 0; lin < u.Length; lin++)
+                {
+                    long oi = 0; for (int k = 0; k < r; k++) oi += (long)(starts[k] + idx[k]) * oStr[k];
+                    o[(int)oi] = u[(int)lin];
+                    for (int k = r - 1; k >= 0; k--) { if (++idx[k] < update.Shape[k]) break; idx[k] = 0; }
+                }
+                return Tensor.F(o, operand.Shape);
+            }
         }
     }
 
@@ -1095,18 +1696,20 @@ public class Interp
         int[] oshA = osh.ToArray(); long outN = 1; foreach (var dd in oshA) outN *= dd;
         var oStr = ContigStrides(oshA);
         bool isInt = first.IsInt;
-        var of = isInt ? null : new float[outN]; var oiArr = isInt ? new long[outN] : null;
+        var of = isInt ? (Span<float>)default : TensorArena.AllocSpan(outN); var oiArr = isInt ? new long[outN] : null;
         for (int s = 0; s < num; s++)
         {
             var t = x[s];
-            var td = isInt ? null : t.AsF(); var ti = isInt ? t.Ip : null;
+            // robust to mixed payloads: a shape-vector pack can mix an int const with a float-promoted dim
+            // (Max/Sub/Add on int dims widen to float) — convert per-input, never read a null raw payload.
+            var td = isInt ? (Span<float>)default : t.AsF(); var ti = isInt ? t.AsI() : null;
             var idx = new int[r];
-            long len = isInt ? ti.LongLength : td.LongLength;
+            long len = isInt ? ti.LongLength : td.Length;
             for (long lin = 0; lin < len; lin++)
             {
                 long pos = 0; int id = 0;
                 for (int k = 0; k <= r; k++) { int c = (k == axis) ? s : idx[id++]; pos += (long)c * oStr[k]; }
-                if (isInt) oiArr[pos] = ti[lin]; else of[pos] = td[lin];
+                if (isInt) oiArr[pos] = ti[lin]; else of[(int)pos] = td[(int)lin];
                 for (int k = r - 1; k >= 0; k--) { if (++idx[k] < t.Shape[k]) break; idx[k] = 0; }
             }
         }
@@ -1179,7 +1782,7 @@ public class Interp
         }
 
         var xf = X.AsF(); var inStr = ContigStrides(X.Shape);
-        long outN = 1; foreach (var d in outDim) outN *= d; var o = new float[outN];
+        long outN = 1; foreach (var d in outDim) outN *= d; var o = TensorArena.AllocSpan(outN);
         var idx = new int[r];
 
         if (mode == "nearest")
@@ -1189,7 +1792,7 @@ public class Interp
             for (long lin = 0; lin < outN; lin++)
             {
                 long si = 0; for (int d = 0; d < r; d++) si += (long)map[d][idx[d]] * inStr[d];
-                o[lin] = xf[si];
+                o[(int)lin] = xf[(int)si];
                 for (int d = r - 1; d >= 0; d--) { if (++idx[d] < outDim[d]) break; idx[d] = 0; }
             }
         }
@@ -1215,9 +1818,9 @@ public class Interp
                         else { wgt *= 1 - w; si += (long)lo0[d][idx[d]] * inStr[d]; }
                         if (wgt == 0) { skip = true; break; }
                     }
-                    if (!skip) acc += wgt * xf[si];
+                    if (!skip) acc += wgt * xf[(int)si];
                 }
-                o[lin] = (float)acc;
+                o[(int)lin] = (float)acc;
                 for (int d = r - 1; d >= 0; d--) { if (++idx[d] < outDim[d]) break; idx[d] = 0; }
             }
         }
@@ -1239,7 +1842,7 @@ public class Interp
     // ONNX STFT (opset 17) as an exact windowed-DFT — sidesteps the surgeon's Conv-basis decomposition.
     // signal[batch, signal_length, 1] (real); frame_step scalar; window[frame_length]; frame_length scalar.
     // out[batch, num_frames, bins, 2] (real,imag); onesided -> bins = frame_length/2+1.
-    static Tensor Stft(Tensor[] x, NodeProto n)
+    static unsafe Tensor Stft(Tensor[] x, NodeProto n)
     {
         var sig = x[0];
         int frameStep = (int)x[1].AsI()[0];
@@ -1252,7 +1855,7 @@ public class Interp
         int batch = sig.Shape[0];
         int sigLen = sig.Shape.Length >= 2 ? sig.Shape[1] : sig.Shape[0];
         var s = sig.AsF();
-        var win = window?.AsF();
+        var win = window != null ? window.AsF() : default;
         int numFrames = (sigLen - frameLength) / frameStep + 1;
         int bins = onesided ? frameLength / 2 + 1 : frameLength;
 
@@ -1262,20 +1865,35 @@ public class Interp
             for (int m = 0; m < frameLength; m++)
             { double ang = -2.0 * Math.PI * k * m / frameLength; cs[k * frameLength + m] = Math.Cos(ang); sn[k * frameLength + m] = Math.Sin(ang); }
 
-        var o = new float[(long)batch * numFrames * bins * 2];
-        System.Threading.Tasks.Parallel.For(0, batch * numFrames, bfi =>
+        var o = TensorArena.AllocSpan((long)batch * numFrames * bins * 2);
+        fixed (float* p_o = o)
+        fixed (float* p_s = s)
+        fixed (float* p_win = win)
         {
-            int b = bfi / numFrames, f = bfi % numFrames;
-            int start = f * frameStep; long sBase = (long)b * sigLen + start;
-            for (int k = 0; k < bins; k++)
+            float* ptr_o = p_o; float* ptr_s = p_s; float* ptr_win = p_win;
+            int oLen = o.Length; int sLen = s.Length; int winLen = win.Length;
+            System.Threading.Tasks.Parallel.For(0, batch * numFrames, bfi =>
             {
-                double re = 0, im = 0; int kb = k * frameLength;
-                for (int m = 0; m < frameLength; m++)
-                { double xv = s[sBase + m]; if (win != null) xv *= win[m]; re += xv * cs[kb + m]; im += xv * sn[kb + m]; }
-                long ob = (((long)b * numFrames + f) * bins + k) * 2;
-                o[ob] = (float)re; o[ob + 1] = (float)im;
-            }
-        });
+                int b = bfi / numFrames, f = bfi % numFrames;
+                int start = f * frameStep; long sBase = (long)b * sigLen + start;
+                var span_o = new Span<float>(ptr_o, oLen);
+                var span_s = new Span<float>(ptr_s, sLen);
+                var span_win = new Span<float>(ptr_win, winLen);
+                bool hasWin = !span_win.IsEmpty;
+                for (int k = 0; k < bins; k++)
+                {
+                    double re = 0, im = 0; int kb = k * frameLength;
+                    for (int m = 0; m < frameLength; m++)
+                    {
+                        double xv = span_s[(int)(sBase + m)];
+                        if (hasWin) xv *= span_win[m];
+                        re += xv * cs[kb + m]; im += xv * sn[kb + m];
+                    }
+                    long ob = (((long)b * numFrames + f) * bins + k) * 2;
+                    span_o[(int)ob] = (float)re; span_o[(int)(ob + 1)] = (float)im;
+                }
+            });
+        }
         return Tensor.F(o, new[] { batch, numFrames, bins, 2 });
     }
 
@@ -1284,9 +1902,10 @@ public class Interp
     {
         int r = a.Shape.Length; long total = a.Count; bool isInt = a.IsInt;
         var coords = new List<int[]>(); var idx = new int[r];
+        var af = isInt ? (Span<float>)default : a.AsF();
         for (long lin = 0; lin < total; lin++)
         {
-            if (isInt ? a.Ip[lin] != 0 : a.Fp[lin] != 0) coords.Add((int[])idx.Clone());
+            if (isInt ? a.Ip[lin] != 0 : af[(int)lin] != 0) coords.Add((int[])idx.Clone());
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
         }
         int K = coords.Count; var o = new long[(long)r * K];
@@ -1305,8 +1924,9 @@ public class Interp
         long sliceSize = 1; for (int k = q; k < r; k++) sliceSize *= data.Shape[k];
         var dataStr = ContigStrides(data.Shape); var ix = indices.AsI();
         bool isInt = data.IsInt;
-        var of = isInt ? null : (float[])data.AsF().Clone(); var oi = isInt ? (long[])data.AsI().Clone() : null;
-        var uf = isInt ? null : updates.AsF(); var ui = isInt ? updates.AsI() : null;
+        var of = isInt ? (Span<float>)default : TensorArena.AllocSpan(data.AsF().Length); if (!isInt) data.AsF().CopyTo(of);
+        var oi = isInt ? (long[])data.AsI().Clone() : null;
+        var uf = isInt ? (Span<float>)default : updates.AsF(); var ui = isInt ? updates.AsI() : null;
         for (long u = 0; u < numUpdates; u++)
         {
             long baseOff = 0;
@@ -1316,7 +1936,7 @@ public class Interp
             {
                 long dpos = baseOff + sIdx;
                 if (isInt) { long v = ui[uBase + sIdx]; oi[dpos] = red == "add" ? oi[dpos] + v : red == "mul" ? oi[dpos] * v : red == "max" ? Math.Max(oi[dpos], v) : red == "min" ? Math.Min(oi[dpos], v) : v; }
-                else { float v = uf[uBase + sIdx]; of[dpos] = red == "add" ? of[dpos] + v : red == "mul" ? of[dpos] * v : red == "max" ? MathF.Max(of[dpos], v) : red == "min" ? MathF.Min(of[dpos], v) : v; }
+                else { float v = uf[(int)(uBase + sIdx)]; of[(int)dpos] = red == "add" ? of[(int)dpos] + v : red == "mul" ? of[(int)dpos] * v : red == "max" ? MathF.Max(of[(int)dpos], v) : red == "min" ? MathF.Min(of[(int)dpos], v) : v; }
             }
         }
         return isInt ? Tensor.I(oi, data.Shape) : Tensor.F(of, data.Shape);
@@ -1353,11 +1973,41 @@ public class Interp
             // 4.48 GB PLE still exceeds the float[] / 2 GB cap here — that's gap #2 (lazy region gather).
             case 16: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = BitConverter.Int32BitsToSingle((int)((uint)(ushort)(raw[2 * k] | (raw[2 * k + 1] << 8)) << 16)); return Tensor.F(f, dims); } // BFLOAT16
             case 10: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = (float)BitConverter.UInt16BitsToHalf((ushort)(raw[2 * k] | (raw[2 * k + 1] << 8))); return Tensor.F(f, dims); } // FLOAT16
+            case 2: case 3: return new Tensor { Rawb = t.RawData.Span.ToArray(), Shape = dims };   // UINT8/INT8 weight bytes, un-widened — block-q4 ops (MatMulNBits / GatherBlockQuantized) read the nibbles
             default: throw new NotImplementedException($"initializer dtype {t.DataType} ({t.Name})");
         }
     }
     static T[] Cast<T>(ReadOnlySpan<byte> b, int n) where T : struct
     { var o = new T[n]; MemoryMarshal.Cast<byte, T>(b).Slice(0, n).CopyTo(o); return o; }
+
+    // A weight stays packed iff it has a sibling _scale AND its bytes:elements ratio is a sub-byte/byte quant
+    // width (2/4/8 bit). That self-validating check sidesteps the tflite-vs-ONNX DataType-code collision
+    // (tflite INT8=9 == ONNX BOOL=9) — we never trust the code, only the geometry.
+    static bool IsPackedQuant(TensorProto w, TensorProto scale)
+    {
+        if (scale == null) return false;
+        long n = 1; foreach (var d in w.Dims) n *= d; if (n <= 0) return false;
+        long bits = (long)w.RawData.Span.Length * 8 / n;
+        return bits == 2 || bits == 4 || bits == 8;
+    }
+    static float[] ReadFloats(TensorProto t)
+        => t.FloatData.Count > 0 ? t.FloatData.ToArray() : MemoryMarshal.Cast<byte, float>(t.RawData.Span).ToArray();
+    static float[] ReadZero(TensorProto t)
+        => t == null ? null
+         : t.Int64Data.Count > 0 ? Array.ConvertAll(t.Int64Data.ToArray(), x => (float)x)
+         : t.RawData.Span.Length > 0 ? Array.ConvertAll(MemoryMarshal.Cast<byte, long>(t.RawData.Span).ToArray(), x => (float)x)
+         : null;
+    // Build a packed quant Tensor: keep the bytes verbatim, derive the bit width from geometry, attach per-row
+    // scale/zp, and set Qaxis = the axis whose dim matches the scale length (axis 0 for gemma's per-out-channel).
+    static Tensor MakeQuant(TensorProto w, TensorProto scale, TensorProto zp)
+    {
+        var dims = w.Dims.Select(d => (int)d).ToArray();
+        long n = 1; foreach (var d in dims) n *= d;
+        int bits = (int)((long)w.RawData.Span.Length * 8 / n);
+        var sc = ReadFloats(scale);
+        int axis = 0; for (int a = 0; a < dims.Length; a++) if (dims[a] == sc.Length) { axis = a; break; }
+        return new Tensor { Qb = w.RawData.Span.ToArray(), Qbits = bits, Qscale = sc, Qzero = ReadZero(zp), Qaxis = axis, Shape = dims };
+    }
 }
 
 // the GPU MOUNT seam: dp-onnx (C#) -> PURE-C# D3D12 (GpuD3D12.cs) or Vulkan (GpuVulkan.cs). NO dpgpu.dll/C++/MSVC.

@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Onnx;
-using DpOnnx;
 using Subsystem.RuntimeBroker;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
@@ -27,7 +26,7 @@ namespace Subsystem.Dpx
 
         private ModelProto? _model;
         private SentencePieceTokenizer? _tokenizer;
-        private DpOnnx.Interp? _interp;
+        private Dp? _interp;
 
         private readonly object _gate = new();
         private readonly SemaphoreSlim _turnGate = new(1, 1);
@@ -44,7 +43,7 @@ namespace Subsystem.Dpx
             _unitId = unitId;
             _maxTokens = maxTokens > 0 ? maxTokens : 4096;
             _backendName = "DP-ONNX";
-            _interp = new DpOnnx.Interp(_model);
+            _interp = new Dp(_model);
             _ready = true;
         }
 
@@ -91,7 +90,7 @@ namespace Subsystem.Dpx
                         _tokenizer = new SentencePieceTokenizer(spm);
                     }
 
-                    _interp = new DpOnnx.Interp(_model);
+                    _interp = new Dp(_model);
                     _backendName = "DPX";
                     _ready = true;
                     return null;
@@ -249,7 +248,7 @@ namespace Subsystem.Dpx
                     throw new KeyNotFoundException($"Graph output not found: {mainOutputName}");
                 }
 
-                float[] logits = logitsTensor.AsF();
+                Span<float> logits = logitsTensor.AsF();
                 int vocabSize = logitsTensor.Shape.Last();
                 int lastTokenIndex = (logitsTensor.Shape.Length > 1) ? (int)(logitsTensor.Count / vocabSize - 1) : 0;
 
@@ -286,7 +285,7 @@ namespace Subsystem.Dpx
                     {
                         string pastName = kvOutput.Replace("present", "past");
                         var tensor = outputs[kvOutput];
-                        float[] fp = tensor.AsF();
+                        float[] fp = tensor.AsF().ToArray();
                         int byteCount = fp.Length * sizeof(float);
 
                         var handle = VomClass.Alloc(owner, byteCount, VomFormat.Float32, type: "TensorRegion");

@@ -14,7 +14,11 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Data.Sqlite;
 using Onnx;
-using DpOnnx;
+using Subsystem.Dpx;
+
+// DPX_BUDGET_MB caps the engine's self-imposed RAM budget (simulate an 8GB phone on a big box; the Android
+// head sets DpxMem.BudgetOverride from ActivityManager instead). 0/unset => derive from the device.
+if (long.TryParse(Environment.GetEnvironmentVariable("DPX_BUDGET_MB"), out var _bmb) && _bmb > 0) DpxMem.BudgetOverride = _bmb << 20;
 
 return args.Length == 0 ? Usage()
      : args[0] == "selftest" ? SelfTest()
@@ -32,6 +36,11 @@ return args.Length == 0 ? Usage()
      : args[0] == "gpu-bench" ? GpuBench(args)
      : args[0] == "db" ? ToDb(args)
      : args[0] == "db-stats" ? DbStats(args)
+     : args[0] == "dumpsg" ? DumpSg(args)
+     : args[0] == "loaddb" ? LoadDbTest(args)
+     : args[0] == "generate" ? Generate(args)
+     : args[0] == "gen-onnx" ? GenOnnx(args)
+     : args[0] == "tokenize" ? Tokenize(args)
      : Usage();
 
 // surgery: expose EVERY node output as a graph output (no type -> ORT infers) for a full divergence map
@@ -76,26 +85,64 @@ static int NodeInfo(string[] args)
     return 0;
 }
 
-// db: compile the ONNX graph into a queryable SQLite model store (the 6-table schema). The graph becomes
-// rows — op triage ("which ops can't run on a backend?") is a SELECT, and per-op backend routing is the
-// `backend` column. Weights are raw-byte BLOBs (dtype + dims carried). The model becomes a Cm-projectable
-// capability instead of an opaque protobuf blob (CRQ143).
+// db: compile a model into a queryable SQLite model store. The graph becomes rows — op triage ("which ops
+// can't run on a backend?") is a SELECT, per-op backend routing is the `backend` column, and weights are
+// raw-byte BLOBs (dtype + dims). The model becomes a Cm-projectable capability instead of an opaque
+// protobuf/flatbuffer blob (CRQ143/158). Sources: an ONNX graph (one signature), or a .litertlm — every
+// TFLiteModel section becomes a `signature` row (the container is multi-signature: embed / PLE / vision /
+// decoder / MTP …), translated through the sovereign tflite reader (Tflite.ToModelProto, nativeQuant) so
+// weights are stored PACKED — the quantized truth-at-rest the VOM gather feeds, never fp32-expanded.
+// `--section N` writes just that section. Signatures are built+written one at a time so only one graph is
+// resident (the 818MB decoder must not co-reside with the 1.28GB PLE).
 static int ToDb(string[] args)
 {
-    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx db <model.onnx> <out.db>"); return 1; }
-    var g = ModelProto.Parser.ParseFrom(File.ReadAllBytes(args[1])).Graph;
-    var dbPath = args[2];
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx db <model.onnx|.litertlm> <out.db> [--section <N>]"); return 1; }
+    string srcPath = args[1], dbPath = args[2];
+    int section = -1;
+    for (int i = 3; i < args.Length - 1; i++) if (args[i] == "--section") int.TryParse(args[i + 1], out section);
+
+    if (srcPath.EndsWith(".litertlm", StringComparison.OrdinalIgnoreCase))
+    {
+        var secs = LiteRtLm.ReadSections(srcPath);
+        var pick = new List<int>();
+        if (section >= 0)
+        {
+            if (section >= secs.Count || secs[section].DataType != 3) { Console.Error.WriteLine($"section [{section}] is not a TFLiteModel"); return 1; }
+            pick.Add(section);
+        }
+        else for (int i = 0; i < secs.Count; i++) if (secs[i].DataType == 3) pick.Add(i);
+
+        IEnumerable<(int sig, string role, GraphProto g)> Sigs()
+        {
+            foreach (int i in pick)
+            {
+                var g = Tflite.ToModelProto(LiteRtLm.ReadSectionBytes(srcPath, secs[i]), 0, out string summary, nativeQuant: true, lenient: true).Graph;
+                Console.Error.WriteLine($"[{i}] {summary.Split('\n')[0].Trim()}");
+                yield return (i, $"section{i}", g);
+            }
+        }
+        return WriteModelDb(dbPath, Sigs());
+    }
+    return WriteModelDb(dbPath, new[] { (0, "onnx", ModelProto.Parser.ParseFrom(File.ReadAllBytes(srcPath)).Graph) });
+}
+
+// Write one or more signatures (sig, role, graph) into the SQLite model store. One writer for the ONNX and
+// litertlm paths (invariant 9). node/tensor ids are GLOBAL across signatures so node_attr.tensor_id stays
+// unique; the `signature` table is the section index. `sigs` is streamed — each graph is written then dropped.
+static int WriteModelDb(string dbPath, IEnumerable<(int sig, string role, GraphProto g)> sigs)
+{
     if (File.Exists(dbPath)) File.Delete(dbPath);
     using var c = new SqliteConnection($"Data Source={dbPath}");
     c.Open();
     using (var ddl = c.CreateCommand())
     {
         ddl.CommandText = @"
-CREATE TABLE graph_io(kind TEXT, name TEXT, elem_type INTEGER, shape TEXT);
-CREATE TABLE node(id INTEGER PRIMARY KEY, ord INTEGER, op_type TEXT, name TEXT, backend TEXT);
+CREATE TABLE signature(sig INTEGER PRIMARY KEY, role TEXT, nodes INTEGER, tensors INTEGER, inputs INTEGER, outputs INTEGER);
+CREATE TABLE graph_io(sig INTEGER, kind TEXT, name TEXT, elem_type INTEGER, shape TEXT);
+CREATE TABLE node(id INTEGER PRIMARY KEY, sig INTEGER, ord INTEGER, op_type TEXT, name TEXT, backend TEXT);
 CREATE TABLE node_io(node_id INTEGER, slot INTEGER, kind TEXT, value_name TEXT);
 CREATE TABLE node_attr(node_id INTEGER, name TEXT, type INTEGER, i INTEGER, f REAL, s TEXT, ints TEXT, floats TEXT, tensor_id INTEGER);
-CREATE TABLE tensor(id INTEGER PRIMARY KEY, name TEXT, dtype INTEGER, dims TEXT, data BLOB);";
+CREATE TABLE tensor(id INTEGER PRIMARY KEY, sig INTEGER, name TEXT, dtype INTEGER, dims TEXT, data BLOB);";
         ddl.ExecuteNonQuery();
     }
     using var tx = c.BeginTransaction();
@@ -105,37 +152,148 @@ CREATE TABLE tensor(id INTEGER PRIMARY KEY, name TEXT, dtype INTEGER, dims TEXT,
         foreach (var (k, v) in ps) cmd.Parameters.AddWithValue(k, v ?? DBNull.Value);
         return cmd;
     }
-    int tid = 0;
-    int WriteTensor(TensorProto t)
+    const long BlobCap = 1_000_000_000;   // SQLite default SQLITE_MAX_LENGTH; a larger native tensor is stored NULL + warned (chunked-BLOB is a later slice)
+    int tid = 0, nid = 0, sigCount = 0, totalNodes = 0;
+    int WriteTensor(int sig, TensorProto t)
     {
         int id = tid++;
         byte[] data = t.RawData != null && t.RawData.Length > 0 ? t.RawData.ToByteArray() : TypedBytes(t);
-        using var cmd = P("INSERT INTO tensor(id,name,dtype,dims,data) VALUES($id,$n,$dt,$dm,$d)",
-            ("$id", id), ("$n", t.Name ?? ""), ("$dt", t.DataType), ("$dm", string.Join(",", t.Dims)), ("$d", data));
+        if (data != null && data.LongLength >= BlobCap) { Console.Error.WriteLine($"  WARN tensor '{t.Name}' {data.LongLength}B >= blob cap — stored NULL (needs chunked BLOB)"); data = null; }
+        using var cmd = P("INSERT INTO tensor(id,sig,name,dtype,dims,data) VALUES($id,$sig,$n,$dt,$dm,$d)",
+            ("$id", id), ("$sig", sig), ("$n", t.Name ?? ""), ("$dt", t.DataType), ("$dm", string.Join(",", t.Dims)), ("$d", (object?)data));
         cmd.ExecuteNonQuery();
         return id;
     }
-    foreach (var t in g.Initializer) WriteTensor(t);
-    foreach (var vi in g.Input)  using (var cmd = P("INSERT INTO graph_io(kind,name,elem_type,shape) VALUES('in',$n,$e,$s)",  ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
-    foreach (var vi in g.Output) using (var cmd = P("INSERT INTO graph_io(kind,name,elem_type,shape) VALUES('out',$n,$e,$s)", ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
-    int nid = 0;
-    foreach (var nd in g.Node)
+    foreach (var (sig, role, g) in sigs)
     {
-        int id = nid++;
-        using (var cmd = P("INSERT INTO node(id,ord,op_type,name,backend) VALUES($id,$o,$op,$n,NULL)", ("$id", id), ("$o", id), ("$op", nd.OpType ?? ""), ("$n", nd.Name ?? ""))) cmd.ExecuteNonQuery();
-        for (int k = 0; k < nd.Input.Count; k++)  using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'in',$v)",  ("$id", id), ("$s", k), ("$v", nd.Input[k] ?? ""))) cmd.ExecuteNonQuery();
-        for (int k = 0; k < nd.Output.Count; k++) using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'out',$v)", ("$id", id), ("$s", k), ("$v", nd.Output[k] ?? ""))) cmd.ExecuteNonQuery();
-        foreach (var a in nd.Attribute)
+        sigCount++;
+        foreach (var t in g.Initializer) WriteTensor(sig, t);
+        foreach (var vi in g.Input)  using (var cmd = P("INSERT INTO graph_io(sig,kind,name,elem_type,shape) VALUES($sig,'in',$n,$e,$s)",  ("$sig", sig), ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
+        foreach (var vi in g.Output) using (var cmd = P("INSERT INTO graph_io(sig,kind,name,elem_type,shape) VALUES($sig,'out',$n,$e,$s)", ("$sig", sig), ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
+        int sigNodes = 0;
+        foreach (var nd in g.Node)
         {
-            object? aTid = a.T != null ? WriteTensor(a.T) : null;
-            using var cmd = P("INSERT INTO node_attr(node_id,name,type,i,f,s,ints,floats,tensor_id) VALUES($id,$n,$t,$i,$f,$s,$ii,$ff,$tt)",
-                ("$id", id), ("$n", a.Name ?? ""), ("$t", (int)a.Type), ("$i", a.I), ("$f", a.F),
-                ("$s", a.S != null ? a.S.ToStringUtf8() : null), ("$ii", string.Join(",", a.Ints)), ("$ff", string.Join(",", a.Floats)), ("$tt", aTid));
-            cmd.ExecuteNonQuery();
+            int id = nid++;
+            using (var cmd = P("INSERT INTO node(id,sig,ord,op_type,name,backend) VALUES($id,$sig,$o,$op,$n,NULL)", ("$id", id), ("$sig", sig), ("$o", id), ("$op", nd.OpType ?? ""), ("$n", nd.Name ?? ""))) cmd.ExecuteNonQuery();
+            for (int k = 0; k < nd.Input.Count; k++)  using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'in',$v)",  ("$id", id), ("$s", k), ("$v", nd.Input[k] ?? ""))) cmd.ExecuteNonQuery();
+            for (int k = 0; k < nd.Output.Count; k++) using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'out',$v)", ("$id", id), ("$s", k), ("$v", nd.Output[k] ?? ""))) cmd.ExecuteNonQuery();
+            foreach (var a in nd.Attribute)
+            {
+                object? aTid = a.T != null ? WriteTensor(sig, a.T) : null;
+                using var cmd = P("INSERT INTO node_attr(node_id,name,type,i,f,s,ints,floats,tensor_id) VALUES($id,$n,$t,$i,$f,$s,$ii,$ff,$tt)",
+                    ("$id", id), ("$n", a.Name ?? ""), ("$t", (int)a.Type), ("$i", a.I), ("$f", a.F),
+                    ("$s", a.S != null ? a.S.ToStringUtf8() : null), ("$ii", string.Join(",", a.Ints)), ("$ff", string.Join(",", a.Floats)), ("$tt", aTid));
+                cmd.ExecuteNonQuery();
+            }
+            sigNodes++;
         }
+        using (var cmd = P("INSERT INTO signature(sig,role,nodes,tensors,inputs,outputs) VALUES($sig,$r,$n,$t,$i,$o)",
+            ("$sig", sig), ("$r", role), ("$n", sigNodes), ("$t", g.Initializer.Count), ("$i", g.Input.Count), ("$o", g.Output.Count))) cmd.ExecuteNonQuery();
+        totalNodes += sigNodes;
     }
     tx.Commit();
-    Console.WriteLine($"wrote {dbPath}  nodes={nid} tensors={tid} inputs={g.Input.Count} outputs={g.Output.Count}");
+    Console.WriteLine($"wrote {dbPath}  signatures={sigCount} nodes={totalNodes} tensors={tid}");
+    return 0;
+}
+
+// Reverse of WriteModelDb: rebuild a runnable ModelProto from the SQLite model store (one signature).
+// Lets the engine RUN a graph that exists only as a .db (the ONNX q4 export) — no .onnx/.onnx_data on disk.
+// Tensors referenced by node_attr.tensor_id are attribute tensors; every other tensor row is a graph initializer.
+static ModelProto LoadGraphFromDb(int sig, string dbPath)
+{
+    using var c = new SqliteConnection($"Data Source={dbPath}");
+    c.Open();
+    SqliteCommand Q(string sql, params (string, object)[] ps)
+    { var cmd = c.CreateCommand(); cmd.CommandText = sql; foreach (var (k, v) in ps) cmd.Parameters.AddWithValue(k, v); return cmd; }
+    long[] Dims(string s) => string.IsNullOrEmpty(s) ? System.Array.Empty<long>()
+        : s.Split(',').Where(x => x.Length > 0).Select(long.Parse).ToArray();
+    bool HasCol(string tbl, string col)
+    { using var cmd = c.CreateCommand(); cmd.CommandText = $"PRAGMA table_info({tbl})"; using var r = cmd.ExecuteReader();
+      while (r.Read()) if (string.Equals(r.GetString(1), col, StringComparison.OrdinalIgnoreCase)) return true; return false; }
+    bool HasTable(string tbl)
+    { using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$n"; cmd.Parameters.AddWithValue("$n", tbl); return cmd.ExecuteScalar() != null; }
+    bool ms = HasCol("node", "sig");                 // litert store filters by sig; the ONNX store is single-graph (no sig column)
+    bool hasBlob = HasTable("tensor_blob");
+    string W = ms ? " WHERE sig=$s" : "";
+    (string, object)[] S = ms ? new (string, object)[] { ("$s", sig) } : System.Array.Empty<(string, object)>();
+    byte[] Blob(long id)
+    { if (!hasBlob) return null; using var r = Q("SELECT data FROM tensor_blob WHERE tensor_id=$id ORDER BY ord", ("$id", id)).ExecuteReader();
+      using var buf = new System.IO.MemoryStream(); while (r.Read()) if (!r.IsDBNull(0)) { var b = (byte[])r.GetValue(0); buf.Write(b, 0, b.Length); } return buf.Length > 0 ? buf.ToArray() : null; }
+
+    var attrTids = new HashSet<long>();
+    using (var r = Q("SELECT tensor_id FROM node_attr WHERE tensor_id IS NOT NULL").ExecuteReader())
+        while (r.Read()) attrTids.Add(r.GetInt64(0));
+
+    var g = new GraphProto();
+    var tById = new Dictionary<long, TensorProto>();
+    int nullBlobs = 0;
+    using (var r = Q($"SELECT id,name,dtype,dims,data FROM tensor{W}", S).ExecuteReader())
+        while (r.Read())
+        {
+            long id = r.GetInt64(0);
+            var t = new TensorProto { Name = r.IsDBNull(1) ? "" : r.GetString(1), DataType = r.GetInt32(2) };
+            foreach (var d in Dims(r.IsDBNull(3) ? "" : r.GetString(3))) t.Dims.Add(d);
+            byte[] data = r.IsDBNull(4) ? Blob(id) : (byte[])r.GetValue(4);
+            if (data == null || data.Length == 0) nullBlobs++; else t.RawData = new ByteString(data);
+            tById[id] = t;
+            if (!attrTids.Contains(id)) g.Initializer.Add(t);
+        }
+    if (nullBlobs > 0) Console.Error.WriteLine($"  WARN: {nullBlobs} tensor(s) had no data in {dbPath}");
+
+    using (var r = Q($"SELECT kind,name,elem_type,shape FROM graph_io{W}", S).ExecuteReader())
+        while (r.Read())
+        {
+            var sh = new TensorShapeProto();
+            var shape = r.IsDBNull(3) ? "" : r.GetString(3);
+            if (shape.Length > 0) foreach (var d in shape.Split(','))
+                sh.Dim.Add(long.TryParse(d, out var dv)
+                    ? new TensorShapeProto.Dimension { DimValue = dv }
+                    : new TensorShapeProto.Dimension { DimParam = d });
+            var vi = new ValueInfoProto { Name = r.IsDBNull(1) ? "" : r.GetString(1),
+                Type = new TypeProto { TensorType = new TypeProto.Types.Tensor { ElemType = r.GetInt32(2), Shape = sh } } };
+            if (r.GetString(0) == "in") g.Input.Add(vi); else g.Output.Add(vi);
+        }
+
+    var nodeIds = new List<(long id, string op, string name)>();
+    using (var r = Q($"SELECT id,op_type,name FROM node{W} ORDER BY ord", S).ExecuteReader())
+        while (r.Read()) nodeIds.Add((r.GetInt64(0), r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2)));
+    foreach (var (id, op, name) in nodeIds)
+    {
+        var nd = new NodeProto { OpType = op, Name = name };
+        var ins = new SortedDictionary<int, string>(); var outs = new SortedDictionary<int, string>();
+        using (var r = Q("SELECT slot,kind,value_name FROM node_io WHERE node_id=$id", ("$id", id)).ExecuteReader())
+            while (r.Read()) { var d = r.GetString(1) == "in" ? ins : outs; d[r.GetInt32(0)] = r.IsDBNull(2) ? "" : r.GetString(2); }
+        foreach (var kv in ins) nd.Input.Add(kv.Value);
+        foreach (var kv in outs) nd.Output.Add(kv.Value);
+        using (var r = Q("SELECT name,type,i,f,s,ints,floats,tensor_id FROM node_attr WHERE node_id=$id", ("$id", id)).ExecuteReader())
+            while (r.Read())
+            {
+                var a = new AttributeProto { Name = r.IsDBNull(0) ? "" : r.GetString(0), Type = (AttributeProto.Types.AttributeType)r.GetInt32(1) };
+                if (!r.IsDBNull(2)) a.I = r.GetInt64(2);
+                if (!r.IsDBNull(3)) a.F = (float)r.GetDouble(3);
+                if (!r.IsDBNull(4)) a.S = new ByteString(System.Text.Encoding.UTF8.GetBytes(r.GetString(4)));
+                if (!r.IsDBNull(5)) foreach (var x in r.GetString(5).Split(',')) if (x.Length > 0) a.Ints.Add(long.Parse(x));
+                if (!r.IsDBNull(6)) foreach (var x in r.GetString(6).Split(',')) if (x.Length > 0) a.Floats.Add(float.Parse(x));
+                if (!r.IsDBNull(7) && tById.TryGetValue(r.GetInt64(7), out var at)) a.T = at;
+                nd.Attribute.Add(a);
+            }
+        g.Node.Add(nd);
+    }
+    Console.Error.WriteLine($"loaded sig{sig} from {dbPath}: {g.Node.Count} nodes, {g.Initializer.Count} initializers, {g.Input.Count} inputs, {g.Output.Count} outputs");
+    return new ModelProto { Graph = g };
+}
+
+// loaddb <model.db> [sig] — verify the db->GraphProto loader reconstructs the graph (op histogram + data presence).
+static int LoadDbTest(string[] args)
+{
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx loaddb <model.db> [sig]"); return 1; }
+    int sig = args.Length > 2 ? int.Parse(args[2]) : 0;
+    var m = LoadGraphFromDb(sig, args[1]);
+    Console.WriteLine($"nodes={m.Graph.Node.Count} inits={m.Graph.Initializer.Count} in={m.Graph.Input.Count} out={m.Graph.Output.Count}");
+    foreach (var grp in m.Graph.Node.GroupBy(nd => nd.OpType).OrderByDescending(grp => grp.Count()))
+        Console.WriteLine($"  {grp.Key,-28} {grp.Count()}");
+    int noData = m.Graph.Initializer.Count(t => t.RawData == null || t.RawData.Length == 0);
+    Console.WriteLine($"initializers with empty data: {noData}");
     return 0;
 }
 
@@ -157,6 +315,204 @@ static string ShapeStr(ValueInfoProto vi)
 
 // db-stats: op triage straight off the .db — the op histogram + the backend-unfriendly ops, as queries.
 // (analyze_onnx.py / trace_node.py collapse to SELECTs once the model is rows; per-op routing is node.backend.)
+// generate <model.litertlm> <tokenizer.spm> "<prompt>" [maxNewTokens] — sovereign autoregressive decode on the
+// dpx engine: tokenize -> per token (sig2 embed + sig3 PLE) -> sig10 decoder(+KV) -> logits -> argmax -> loop.
+// KV fed at the baked 32003 capacity; param_tensor carries the position (the per-layer sliding-window math is
+// baked into the graph). No ORT, no litert lib — gemma talking on our own interpreter, on the VOM.
+static int Generate(string[] args)
+{
+    if (args.Length < 4) { Console.Error.WriteLine("usage: dp-onnx generate <model.litertlm> <tokenizer.spm> \"<prompt>\" [maxNewTokens]"); return 1; }
+    string path = args[1], spmPath = args[2], prompt = args[3];
+    int maxNew = args.Length > 4 && int.TryParse(args[4], out var mn) ? mn : 32;
+
+    var secs = LiteRtLm.ReadSections(path);
+    Console.Error.WriteLine("loading sig2 embed / sig3 PLE / sig10 decoder (packed q2/q4/q8 — dequant deferred to kernel)…");
+    var embed = new Dp(Tflite.ToModelProto(LiteRtLm.ReadSectionBytes(path, secs[2]), 0, out _, true, true));
+    var ple   = new Dp(Tflite.ToModelProto(LiteRtLm.ReadSectionBytes(path, secs[3]), 0, out _, true, true));
+    var dec   = new Dp(Tflite.ToModelProto(LiteRtLm.ReadSectionBytes(path, secs[10]), 0, out _, true, true));
+    var tok   = new SentencePieceTokenizer(SpModelProto.Parse(File.ReadAllBytes(spmPath)));
+
+    int bos = tok.FindPieceId("<bos>"); if (bos < 0) bos = 2;
+    int eos = tok.FindPieceId("<eos>"); if (eos < 0) eos = 1;
+    int eot = tok.FindPieceId("<end_of_turn>");
+    bool rawMode = prompt.StartsWith("raw:", StringComparison.Ordinal);   // raw: skip the chat template (fast completion)
+    string text = rawMode ? prompt.Substring(4) : $"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n";
+    var promptIds = new List<int> { bos };
+    promptIds.AddRange(tok.Encode(text));
+    Console.Error.WriteLine($"prompt = {promptIds.Count} tokens (raw={rawMode}); bos={bos} eos={eos} eot={eot}");
+
+    // Initialize Native TensorArena for activations
+    TensorArena.Initialize(1536L * 1024 * 1024);
+    TensorArena.Active = true;
+
+    const int KVCAP = 32003;
+    int Dim(int l) => (l == 4 || l == 9 || l == 14) ? 512 : 256;   // global layers carry head_dim 512
+    var kv = new Dictionary<string, Tensor>();
+    for (int l = 0; l < 15; l++)
+    {
+        kv[$"decode_kv_cache_k_{l}:0"] = Tensor.AllocNative(1, 1, KVCAP, Dim(l));
+        kv[$"decode_kv_cache_v_{l}:0"] = Tensor.AllocNative(1, 1, Dim(l), KVCAP);
+    }
+    // output:N -> the kv cache it updates (traced from the graph; lexicographic layer order)
+    int[] kOrder = { 0, 1, 10, 11, 12, 13, 14, 2, 3, 4, 5, 6, 7, 8, 9 };
+    var outToKv = new Dictionary<string, string>();
+    for (int i = 0; i < 15; i++) { outToKv[$"StatefulPartitionedCall:{i + 1}"] = $"decode_kv_cache_k_{kOrder[i]}:0"; outToKv[$"StatefulPartitionedCall:{i + 16}"] = $"decode_kv_cache_v_{kOrder[i]}:0"; }
+
+    var seq = new List<int>(promptIds);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    Console.WriteLine($"\n>>> {prompt}\n");
+    for (int pos = 0; pos < promptIds.Count + maxNew; pos++)
+    {
+        long tid = seq[pos];
+        if (pos < promptIds.Count) Console.Error.Write($"\rprefill {pos + 1}/{promptIds.Count}  ({DpxMem.WorkingSet / 1e9:F1}GB)    ");
+        var emb = embed.Run(new() { ["embedder_token_ids:0"] = Tensor.I(new[] { tid }, 1, 1) })["StatefulPartitionedCall:0"];
+        var pl  = ple.Run(new()   { ["per_layer_embedder_token_ids:0"] = Tensor.I(new[] { tid }, 1, 1) })["StatefulPartitionedCall:0"];
+        var mask = TensorArena.AllocSpan(KVCAP); for (int j = 0; j < KVCAP; j++) mask[j] = (j <= pos) ? 1f : 0f;   // decode_mask is BOOL (sig10 type=6): 1=true=attend (0..pos), 0=false=masked. NOT additive.
+        var feed = new Dictionary<string, Tensor>(kv)
+        {
+            ["decode_embeddings:0"] = emb,
+            ["decode_per_layer_embeddings:0"] = pl,
+            ["decode_input_pos:0"] = Tensor.I(new long[] { pos }, 1),
+            ["decode_mask:0"] = Tensor.F(mask, 1, 1, 1, KVCAP),
+            ["decode_param_tensor:0"] = Tensor.I(new long[] { pos, pos + 1, pos + 1, 0, 0, 0, 0 }, 1, 1, 1, 7),   // {start_index, end_index, end_index} KV-cache write-range (litert FillSingleBufferCacheParamTensor); NOT positions
+        };
+        var o = dec.Run(feed);
+        foreach (var kvp in outToKv) kv[kvp.Value] = o[kvp.Key];   // carry the updated caches forward
+
+        if (pos >= promptIds.Count - 1)   // past prefill: sample + emit
+        {
+            var logits = o["StatefulPartitionedCall:31"].AsF();
+            int next = 0; float best = float.NegativeInfinity;
+            for (int v = 0; v < logits.Length; v++) if (logits[v] > best) { best = logits[v]; next = v; }
+            if (next == eos || next == eot) { Console.Error.WriteLine(" [end]"); break; }
+            Console.Write(tok.Detokenize(new[] { next })); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
+            seq.Add(next);
+        }
+        emb.FreeNative();
+        pl.FreeNative();
+        feed["decode_mask:0"].FreeNative();
+        var cacheOuts = new HashSet<string>(outToKv.Keys);
+        foreach (var kvp in o)
+        {
+            if (!cacheOuts.Contains(kvp.Key))
+            {
+                kvp.Value?.FreeNative();
+            }
+        }
+        TensorArena.Reset();
+    }
+    sw.Stop();
+    Console.WriteLine($"\n\n-- {seq.Count - promptIds.Count} tokens / {sw.Elapsed.TotalSeconds:F1}s · {DpxMem.Snapshot()} --");
+    Console.WriteLine($"Peak activation memory: {TensorArena.PeakOffset / 1e6:F2} MB");
+
+    foreach (var kvp in kv.Values)
+    {
+        kvp.FreeNative();
+    }
+    TensorArena.Active = false;
+    TensorArena.Release();
+
+    return 0;
+}
+
+// gen-onnx <embed.db> <decoder.db> <tokenizer.spm> "<prompt>" [maxNew] — sovereign Gemma-4 E2B decode straight off
+// the q4 ONNX export, no ORT/litert: embed(input_ids) -> inputs_embeds + per_layer_inputs; decoder(+position/mask/
+// past_kv) -> logits + present_kv; greedy argmax; carry present.N -> past_key_values.N (DYNAMIC cache, no baked cap).
+// This is the de-obfuscated KV contract litert hides behind a fixed 32003-slot buffer: 15 caches shared across 35L.
+static int GenOnnx(string[] args)
+{
+    if (args.Length < 5) { Console.Error.WriteLine("usage: dp-onnx gen-onnx <embed.db> <decoder.db> <tokenizer.spm> \"<prompt>\" [maxNew]"); return 1; }
+    string embDb = args[1], decDb = args[2], spmPath = args[3], prompt = args[4];
+    int maxNew = args.Length > 5 && int.TryParse(args[5], out var mn) ? mn : 64;
+
+    Console.Error.WriteLine("loading embed + decoder graphs from .db (q4, dequant deferred to the kernel)…");
+    TensorArena.Active = true;   // activations on the native off-GC arena (the proto-Sub-VOM); real Vom.Alloc-region + Spawn-SubGraph ownership port follows the correctness proof
+    var embed = new Dp(LoadGraphFromDb(0, embDb));
+    var dec   = new Dp(LoadGraphFromDb(0, decDb));
+    var tok   = new SentencePieceTokenizer(SpModelProto.Parse(File.ReadAllBytes(spmPath)));
+
+    int bos = tok.FindPieceId("<bos>"); if (bos < 0) bos = 2;
+    int eos = tok.FindPieceId("<eos>"); if (eos < 0) eos = 1;
+    int eot = tok.FindPieceId("<end_of_turn>");
+    bool raw = prompt.StartsWith("raw:", StringComparison.Ordinal);
+    string text = raw ? prompt.Substring(4) : $"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n";
+    var ids = new List<int> { bos }; ids.AddRange(tok.Encode(text));
+    Console.Error.WriteLine($"prompt = {ids.Count} tokens (raw={raw}); bos={bos} eos={eos} eot={eot}");
+
+    const int L = 15;                                              // cached KV layers (past_key_values.0..14); 15..34 share them in-graph
+    int KvDim(int l) => (l == 4 || l == 9 || l == 14) ? 512 : 256; // global layers carry head_dim 512
+    var past = new Dictionary<string, Tensor>();
+    for (int l = 0; l < L; l++)
+    { past[$"past_key_values.{l}.key"]   = Tensor.F(Array.Empty<float>(), 1, 1, 0, KvDim(l));
+      past[$"past_key_values.{l}.value"] = Tensor.F(Array.Empty<float>(), 1, 1, 0, KvDim(l)); }
+
+    var seq = new List<int>(ids); int pastLen = 0;
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    Console.WriteLine($"\n>>> {prompt}\n");
+    for (int step = 0; step < maxNew; step++)
+    {
+        int[] cur = step == 0 ? seq.ToArray() : new[] { seq[^1] };   // prefill all tokens, then one per step
+        int S = cur.Length, totalSeq = pastLen + S;
+        var e = embed.Run(new() { ["input_ids"] = Tensor.I(Array.ConvertAll(cur, t => (long)t), 1, S) });
+        var posArr = new long[S]; for (int i = 0; i < S; i++) posArr[i] = pastLen + i;
+        var amask = new long[totalSeq]; for (int i = 0; i < totalSeq; i++) amask[i] = 1;
+        var feed = new Dictionary<string, Tensor>(past)
+        {
+            ["inputs_embeds"]     = e["inputs_embeds"],
+            ["per_layer_inputs"]  = e["per_layer_inputs"],
+            ["position_ids"]      = Tensor.I(posArr, 1, S),
+            ["attention_mask"]    = Tensor.I(amask, 1, totalSeq),
+            ["num_logits_to_keep"]= Tensor.I(new long[] { 1 }),
+        };
+        var o = dec.Run(feed);
+        for (int l = 0; l < L; l++)
+        { past[$"past_key_values.{l}.key"]   = o[$"present.{l}.key"];
+          past[$"past_key_values.{l}.value"] = o[$"present.{l}.value"]; }
+        pastLen = totalSeq;
+        if (step == 0) Console.Error.Write($"prefill {S} tok ({DpxMem.WorkingSet / 1e9:F1}GB)  ");
+
+        var logits = o["logits"]; var lf = logits.AsF(); int V = logits.Shape[^1]; int last = (int)(logits.Count / V) - 1;
+        int next = 0; float best = float.NegativeInfinity;
+        for (int v = 0; v < V; v++) { float val = lf[last * V + v]; if (val > best) { best = val; next = v; } }
+        if (next == eos || next == eot) { Console.Error.WriteLine(" [end]"); break; }
+        Console.Write(tok.Detokenize(new[] { next })); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
+        seq.Add(next);
+    }
+    sw.Stop();
+    Console.WriteLine($"\n\n-- {seq.Count - ids.Count} tokens / {sw.Elapsed.TotalSeconds:F1}s · {DpxMem.Snapshot()} · arena peak {TensorArena.PeakOffset / 1e6:F0}MB --");
+    TensorArena.Active = false;
+    return 0;
+}
+
+// tokenize <spm> "<text>" — diagnose the SentencePiece tokenizer (piece scores, segmentation) without a model.
+static int Tokenize(string[] args)
+{
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx tokenize <spm> \"<text>\""); return 1; }
+    var spm = SpModelProto.Parse(File.ReadAllBytes(args[1]));
+    Console.WriteLine($"pieces={spm.Pieces.Count}");
+    for (int i = 0; i < 6 && i < spm.Pieces.Count; i++)
+        Console.WriteLine($"  piece[{i}] \"{spm.Pieces[i].Piece}\" score={spm.Pieces[i].Score} type={spm.Pieces[i].Type}");
+    var tok = new SentencePieceTokenizer(spm);
+    foreach (var id in new[] { 7001, 506, 1000, 50000, 200000 })
+        if (id < spm.Pieces.Count) Console.WriteLine($"  REAL piece[{id}] \"{spm.Pieces[id].Piece}\" score={spm.Pieces[id].Score} type={spm.Pieces[id].Type}");
+    Console.WriteLine($"  id('▁France')={tok.FindPieceId("▁France")}  id('France')={tok.FindPieceId("France")}  id('▁the')={tok.FindPieceId("▁the")}");
+    var ids = tok.Encode(args[2]);
+    Console.WriteLine($"text=\"{args[2]}\" -> {ids.Count} tokens:");
+    foreach (var id in ids) Console.Write($"[{id}:{tok.Detokenize(new[] { id })}]");
+    Console.WriteLine();
+    return 0;
+}
+
+// dumpsg <model.litertlm> <section> <subgraph> — raw subgraph structure for composite-recursion debugging.
+static int DumpSg(string[] args)
+{
+    if (args.Length < 4) { Console.Error.WriteLine("usage: dp-onnx dumpsg <model.litertlm> <section> <subgraph>"); return 1; }
+    var secs = LiteRtLm.ReadSections(args[1]);
+    int sec = int.Parse(args[2]), sgix = int.Parse(args[3]);
+    Tflite.DumpSubgraph(LiteRtLm.ReadSectionBytes(args[1], secs[sec]), sgix);
+    return 0;
+}
+
 static int DbStats(string[] args)
 {
     if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx db-stats <model.db>"); return 1; }
@@ -173,11 +529,11 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx> <out.db> | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
-//  - calls Interp.Dispatch per node  -> covers all 53 ops for free (no partial per-op switch);
+//  - calls Dp.Dispatch per node  -> covers all 53 ops for free (no partial per-op switch);
 //  - binds ALL node outputs          -> multi-output ops (LSTM x3, Split xN) work;
 //  - bakes each node by base64'ing its NodeProto -> robust attrs incl. tensor attrs (Constant), no per-type code;
 //  - weights come from an Init(weights) dict, NOT inlined C# literals -> no multi-GB .cs (82M params).
@@ -190,12 +546,12 @@ static int Emit(string[] args)
     var inits = new HashSet<string>(g.Initializer.Select(i => i.Name));
     var nodes = g.Node;
     var sb = new System.Text.StringBuilder();
-    sb.AppendLine("// AUTO-EMITTED by `dp-onnx emit` — Tier-1 straight-line forward pass (calls Interp.Dispatch).");
+    sb.AppendLine("// AUTO-EMITTED by `dp-onnx emit` — Tier-1 straight-line forward pass (calls Dp.Dispatch).");
     sb.AppendLine("using System;");
     sb.AppendLine("using System.Collections.Generic;");
     sb.AppendLine("using Onnx;");
-    sb.AppendLine("using DpOnnx;");
-    sb.AppendLine("namespace DpOnnx.Compiled {");
+    sb.AppendLine("using Subsystem.Dpx;");
+    sb.AppendLine("namespace Subsystem.Dpx.Compiled {");
     sb.AppendLine("  public static class ModelInstance {");
     sb.AppendLine("    static Dictionary<string,Tensor> W = new();");
     sb.AppendLine("    public static void Init(Dictionary<string,Tensor> weights) { W = weights; }");
@@ -209,7 +565,7 @@ static int Emit(string[] args)
     {
         var nd = nodes[i];
         string ins = string.Join(", ", nd.Input.Select(x => string.IsNullOrEmpty(x) ? "null" : $"G(e,{Q(x)})"));
-        sb.AppendLine($"      {{ var o = Interp.Dispatch(n{i}, new Tensor[]{{ {ins} }});");
+        sb.AppendLine($"      {{ var o = Dp.Dispatch(n{i}, new Tensor[]{{ {ins} }});");
         for (int k = 0; k < nd.Output.Count; k++) if (!string.IsNullOrEmpty(nd.Output[k])) sb.AppendLine($"        e[{Q(nd.Output[k])}] = o[{k}];");
         sb.AppendLine("      }");
     }
@@ -237,9 +593,9 @@ static int GpuTest(string[] args)
     byte[] dxil = File.ReadAllBytes(dxilPath);
     int rc = Gpu.dpgpu_gemm(A, B, C, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
     if (rc != 0) { Console.WriteLine($"dpgpu_gemm failed rc={rc}"); return 1; }
-    var cpu = Interp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, M, K), Tensor.F(B, K, N) })[0].Fp;
+    var cpu = Dp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, M, K), Tensor.F(B, K, N) })[0].Fp;
     double maxd = 0; for (int i = 0; i < C.Length; i++) maxd = Math.Max(maxd, Math.Abs(C[i] - cpu[i]));
-    Console.WriteLine($"dp-onnx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Interp.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dp-onnx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
+    Console.WriteLine($"dp-onnx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Dp.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dp-onnx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
     return maxd < 1e-3 ? 0 : 2;
 }
 
@@ -259,7 +615,7 @@ static int GpuBench(string[] args)
     Console.WriteLine($"  device: {Gpu.DeviceName()}");
     double gpu = 1e9;
     for (int r = 0; r < 5; r++) { sw.Restart(); Gpu.dpgpu_gemm(A, B, C, (uint)S, (uint)S, (uint)S, dxil, (uint)dxil.Length); sw.Stop(); gpu = Math.Min(gpu, sw.Elapsed.TotalSeconds); }
-    sw.Restart(); var cpu = Interp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, S, S), Tensor.F(B, S, S) })[0].Fp; sw.Stop(); double cpus = sw.Elapsed.TotalSeconds;
+    sw.Restart(); var cpu = Dp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, S, S), Tensor.F(B, S, S) })[0].Fp; sw.Stop(); double cpus = sw.Elapsed.TotalSeconds;
     double maxd = 0; for (int i = 0; i < C.Length; i++) maxd = Math.Max(maxd, Math.Abs(C[i] - cpu[i]));
     Console.WriteLine($"GEMM {S}x{S}x{S}  ({gflop:F2} GFLOP)   max|diff|={maxd:E2}");
     Console.WriteLine($"  one-time device init (first call) : {init * 1000,8:F1} ms");
@@ -271,20 +627,20 @@ static int GpuBench(string[] args)
 
 // run-compiled <model_dll> <model.onnx> --inputs <dir> [--out wav]: reflection-load the emitted ModelInstance,
 // inject weights (the model's initializers — the sidecar loader is a later optimization), run Forward, validate.
-// Tier-1 reuses Interp's kernels, so this MUST match `run` bit-for-bit — the parity proof for the compile path.
-static int RunCompiled(string[] args)
+// Tier-1 reuses Dp's kernels, so this MUST match `run` bit-for-bit — the parity proof for the compile path.
+int RunCompiled(string[] args)
 {
     if (args.Length < 3) return Usage();
     string dll = args[1], onnx = args[2], inputsDir = null, outPath = null;
     for (int i = 3; i < args.Length; i++) switch (args[i]) { case "--inputs": inputsDir = args[++i]; break; case "--out": outPath = args[++i]; break; }
     var g = ModelProto.Parser.ParseFrom(File.ReadAllBytes(onnx)).Graph;
     var W = new Dictionary<string, Tensor>();
-    foreach (var init in g.Initializer) W[init.Name] = Interp.FromProto(init);
+    foreach (var init in g.Initializer) W[init.Name] = Dp.FromProto(init);
     var feed = new Dictionary<string, Tensor>();
     foreach (var vi in g.Input) { if (g.Initializer.Any(i => i.Name == vi.Name)) continue; feed[vi.Name] = LoadBin(Path.Combine(inputsDir, vi.Name + ".bin")); }
 
     var asm = System.Reflection.Assembly.LoadFrom(Path.GetFullPath(dll));
-    var t = asm.GetType("DpOnnx.Compiled.ModelInstance") ?? throw new Exception("ModelInstance type not found in " + dll);
+    var t = asm.GetType("Subsystem.Dpx.Compiled.ModelInstance") ?? throw new Exception("ModelInstance type not found in " + dll);
     t.GetMethod("Init").Invoke(null, new object[] { W });
     var sw = System.Diagnostics.Stopwatch.StartNew();
     var outs = (Dictionary<string, Tensor>)t.GetMethod("Forward").Invoke(null, new object[] { feed });
@@ -329,7 +685,7 @@ static int SelfTest()
     var model = new ModelProto { Graph = g };
 
     var X = Tensor.F(new[] { 1f, 2, 3, 4, 5, 6 }, 2, 3);          // [[1,2,3],[4,5,6]]
-    var outs = new Interp(model).Run(new() { ["X"] = X });
+    var outs = new Dp(model).Run(new() { ["X"] = X });
     var Y = outs["Y"];
     // expected: X@W = [[1+3,2+3],[4+6,5+6]] = [[4,5],[10,11]]; +B = [[4.5,-5],[10.5,1]]; relu => [[4.5,0],[10.5,1]]
     var exp = new[] { 4.5f, 0f, 10.5f, 1f };
@@ -362,7 +718,7 @@ static int ProbeLiteRtLm(string path)
     return 0;
 }
 
-// Translate ONE .litertlm TFLiteModel section into Onnx.ModelProto and RUN it through Interp, off a synthesized
+// Translate ONE .litertlm TFLiteModel section into Onnx.ModelProto and RUN it through Dp, off a synthesized
 // feed (the probe->executable proof: the sovereign tflite reader produces a graph the dp-onnx engine executes).
 static int RunSection(string path, int sectionIx)
 {
@@ -393,7 +749,7 @@ static int RunSection(string path, int sectionIx)
     }
 
     int ran = 0; Dictionary<string, Tensor> outs = null; string err = null;
-    try { outs = new Interp(model).Run(feed, onNode: (_, __, ___) => ran++); }
+    try { outs = new Dp(model).Run(feed, onNode: (_, __, ___) => ran++); }
     catch (Exception ex) { err = $"[{ex.GetType().Name}] {ex.Message}"; }
     if (err != null) { Console.WriteLine($"[{sectionIx}] FAILED after {ran}/{g.Node.Count} nodes: {err}"); return 1; }
 
@@ -405,6 +761,7 @@ static int RunSection(string path, int sectionIx)
     }
     Console.WriteLine($"[{sectionIx}] RAN nodes={ran} inputs={g.Input.Count} outputs={outs.Count} finite={finite}");
     Console.WriteLine($"  outputs: {string.Join("  ", shapes)}");
+    Console.WriteLine($"  mem: {DpxMem.Snapshot()}");
     return 0;
 }
 
@@ -412,12 +769,12 @@ static void ProbeTfliteBytes(byte[] tfl, string label)
 {
     var (hist, subgraphs, tensors, ops) = Tflite.OpHistogram(tfl);
     int distinct = hist.Count;
-    int impl = hist.Keys.Count(k => { var o = Tflite.MapToOnnx(k); return o != null && Interp.Implemented.Contains(o); });
+    int impl = hist.Keys.Count(k => { var o = Tflite.MapToOnnx(k); return o != null && Dp.Implemented.Contains(o); });
     Console.WriteLine($"  {label}  {tfl.Length / 1e6:F1} MB  subgraphs={subgraphs} tensors={tensors} ops={ops} distinct={distinct}  mapped-types={impl}/{distinct}");
     foreach (var kv in hist.OrderByDescending(k => k.Value))
     {
         var o = Tflite.MapToOnnx(kv.Key);
-        bool ok = o != null && Interp.Implemented.Contains(o);
+        bool ok = o != null && Dp.Implemented.Contains(o);
         Console.WriteLine($"    {kv.Value,5}  {kv.Key,-24} {(o == null ? "—" : "-> " + o),-18} {(ok ? "" : "MISSING")}");
     }
 }
@@ -432,7 +789,7 @@ static int Probe(string path, bool stopOnMissing = true)
     // op histogram
     var hist = new Dictionary<string, int>();
     foreach (var n in g.Node) hist[n.OpType] = hist.GetValueOrDefault(n.OpType) + 1;
-    var impl = Interp.Implemented;
+    var impl = Dp.Implemented;
     int haveTypes = hist.Keys.Count(k => impl.Contains(k));
     Console.WriteLine($"{path}");
     Console.WriteLine($"nodes={g.Node.Count}  distinct ops={hist.Count}  implemented op-types={haveTypes}/{hist.Count}");
@@ -451,7 +808,7 @@ static int Probe(string path, bool stopOnMissing = true)
     }
 
     int ran = 0; string stoppedAt = null;
-    try { new Interp(model).Run(feed, onNode: (_, __, ___) => ran++); }
+    try { new Dp(model).Run(feed, onNode: (_, __, ___) => ran++); }
     catch (NotImplementedException ex) { stoppedAt = ex.Message; }
     catch (Exception ex) { stoppedAt = $"[{ex.GetType().Name}] {ex.Message}"; }
     Console.WriteLine(stoppedAt == null
@@ -462,13 +819,13 @@ static int Probe(string path, bool stopOnMissing = true)
 
 // ----- run with real inputs (the validation pivot: load kokoro-tts's dumped tensors, run to
 //       completion, diff the waveform against ORT's oracle.bin) -----
-static int Run(string[] args)
+int Run(string[] args)
 {
     string path = null, inputsDir = null, outPath = null, dumpNode = null, compareDir = null, injectNode = null; bool trace = false; int stopAfter = 0; int sectionIx = -1;
     for (int i = 1; i < args.Length; i++)
         switch (args[i])
         {
-            case "--section": sectionIx = int.Parse(args[++i]); break;   // translate+run one .litertlm TFLiteModel section through Interp
+            case "--section": sectionIx = int.Parse(args[++i]); break;   // translate+run one .litertlm TFLiteModel section through Dp
             case "--inputs": inputsDir = args[++i]; break;
             case "--out": outPath = args[++i]; break;
             case "--trace": trace = true; break;
@@ -476,14 +833,14 @@ static int Run(string[] args)
             case "--dump-node": dumpNode = args[++i]; break;
             case "--compare": compareDir = args[++i]; break;
             case "--inject": injectNode = args[++i]; break;   // replace matching nodes' output w/ oracle (needs --compare <dir>)
-            case "--gpu-matmul": Interp.UseGpuMatMul = true; break;   // offload every MatMul to dpgpu.dll (D3D12); CPU fallback on mount failure
-            case "--prof": Interp.Profile = true; break;   // per-op-type wall-time breakdown
-            case "--drop": Interp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
-            case "--drop-scope": Interp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")
+            case "--gpu-matmul": Dp.UseGpuMatMul = true; break;   // offload every MatMul to dpgpu.dll (D3D12); CPU fallback on mount failure
+            case "--prof": Dp.Profile = true; break;   // per-op-type wall-time breakdown
+            case "--drop": Dp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
+            case "--drop-scope": Dp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")
             default: if (path == null) path = args[i]; break;
         }
     if (path == null) return Usage();
-    if (sectionIx >= 0) return RunSection(path, sectionIx);             // sovereign tflite-section -> ModelProto -> Interp
+    if (sectionIx >= 0) return RunSection(path, sectionIx);             // sovereign tflite-section -> ModelProto -> Dp
     if (inputsDir == null) return Probe(path, stopOnMissing: false);   // legacy zero-feed
 
     var model = ModelProto.Parser.ParseFrom(File.ReadAllBytes(path));
@@ -510,8 +867,8 @@ static int Run(string[] args)
         {
             string shp = t0 != null ? string.Join(",", t0.Shape) : "";
             string rms = "";
-            if (t0 != null && t0.Count <= 4000000) { var f = t0.AsF(); double a = 0; for (long i = 0; i < f.Length; i++) a += (double)f[i] * f[i]; rms = $" rms={(f.Length > 0 ? Math.Sqrt(a / f.Length) : 0):F4}"; }
-            string vals = (t0 != null && t0.Count <= 64) ? "  = [" + (t0.IsInt ? string.Join(",", t0.Ip) : string.Join(",", Array.ConvertAll(t0.Fp, v => v.ToString("F3")))) + "]" : "";
+            if (t0 != null && t0.Count <= 4000000) { var f = t0.AsF(); double a = 0; for (long i = 0; i < f.Length; i++) a += (double)f[(int)i] * f[(int)i]; rms = $" rms={(f.Length > 0 ? Math.Sqrt(a / f.Length) : 0):F4}"; }
+            string vals = (t0 != null && t0.Count <= 64) ? "  = [" + (t0.IsInt ? string.Join(",", t0.Ip) : string.Join(",", Array.ConvertAll(t0.AsF().ToArray(), v => v.ToString("F3")))) + "]" : "";
             traceW.WriteLine($"{ran}: {nd.OpType} {nd.Name} -> [{shp}]{rms}{vals}");
         }
         if (dumpNode != null && t0 != null)
@@ -542,18 +899,18 @@ static int Run(string[] args)
         if (stopAfter > 0 && ran >= stopAfter) throw new Exception($"stop-after {stopAfter}");
     };
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    try { outs = new Interp(model).Run(feed, onNode: cb); }
+    try { outs = new Dp(model).Run(feed, onNode: cb); }
     catch (NotImplementedException ex) { stoppedAt = ex.Message; }
     catch (Exception ex) { stoppedAt = $"[{ex.GetType().Name}] {ex.Message}"; }
     sw.Stop();
 
     if (stoppedAt != null) { Console.WriteLine($"ran {ran}/{g.Node.Count} nodes, stopped at: {stoppedAt}"); return 1; }
     Console.WriteLine($"RAN ALL {ran} nodes ✓  ({sw.Elapsed.TotalSeconds:F2}s)");
-    if (Interp.Profile)
+    if (Dp.Profile)
     {
-        double tot = 0; foreach (var kv in Interp.Prof) tot += kv.Value.ms;
+        double tot = 0; foreach (var kv in Dp.Prof) tot += kv.Value.ms;
         Console.WriteLine($"\nPER-OP PROFILE (wall, {tot:F0} ms total dispatch):");
-        foreach (var kv in Interp.Prof.OrderByDescending(k => k.Value.ms))
+        foreach (var kv in Dp.Prof.OrderByDescending(k => k.Value.ms))
             Console.WriteLine($"  {kv.Value.ms,9:F1} ms  {100 * kv.Value.ms / tot,5:F1}%  {kv.Value.n,5}x  {kv.Key}");
     }
     if (injectNode != null) Console.WriteLine($"INJECTED {injected} oracle tensors (matching: {injectNode})");
@@ -573,7 +930,7 @@ static int Run(string[] args)
     var y = outs.Values.First(); var wav = y.AsF();
     Console.WriteLine($"output [{string.Join(",", y.Shape)}]  samples={wav.Length}  ({wav.Length / 24000.0:F2}s)  rms={Rms(wav):F5}  peak={Peak(wav):F5}");
     { long nan = 0; foreach (var f in wav) if (float.IsNaN(f) || float.IsInfinity(f)) nan++;
-      if (Interp.DropP > 0 || nan > 0) Console.WriteLine($"  STALE-READ TEST: dropped {Interp.Dropped} residual merges (--drop {Interp.DropP});  NaN/Inf samples: {nan}/{wav.Length}"); }
+      if (Dp.DropP > 0 || nan > 0) Console.WriteLine($"  STALE-READ TEST: dropped {Dp.Dropped} residual merges (--drop {Dp.DropP});  NaN/Inf samples: {nan}/{wav.Length}"); }
     if (outPath != null) { WriteWav(outPath, wav, 24000); Console.WriteLine($"wrote {outPath}"); }
 
     string oracle = Path.Combine(inputsDir, "oracle.bin");
@@ -594,7 +951,7 @@ static int Run(string[] args)
 // graph, and overlap-add stitches. Proves the two load-bearing claims: streaming latency (first audio after
 // chunk 0, not the whole utterance) and click-free seams. Grounded sizes: ~13 kokoro tokens ~= 1.6s, so a
 // 2.5-3.5s breath group ~= 25-40 tokens (dp-onnx-receipts + breath-group prosody).
-static int Stream(string[] args)
+int Stream(string[] args)
 {
     string model = null, phonemes = null, phonemesFile = null, outPath = "stream.wav", voice = "af_heart";
     string configPath = @"S:\reference\Kokoro-82M\config.json", voicesDir = @"S:\reference\Kokoro-82M\voices";
@@ -627,7 +984,7 @@ static int Stream(string[] args)
 
     var swP = System.Diagnostics.Stopwatch.StartNew();
     var mp = ModelProto.Parser.ParseFrom(File.ReadAllBytes(model));
-    var interp = new Interp(mp);
+    var interp = new Dp(mp);
     swP.Stop();
     Console.WriteLine($"parsed {mp.Graph.Node.Count}-node graph ({new FileInfo(model).Length / 1e6:F0} MB) in {swP.Elapsed.TotalSeconds:F2}s\n");
 
@@ -654,7 +1011,7 @@ static int Stream(string[] args)
         if (c == 0) firstChunk = sw.Elapsed.TotalSeconds;
         totalCompute += sw.Elapsed.TotalSeconds;
         long nan = 0; foreach (var f in wav) if (float.IsNaN(f) || float.IsInfinity(f)) nan++; totalNan += nan;
-        pieces.Add(wav);
+        pieces.Add(wav.ToArray());
         Console.WriteLine($"  chunk {c,2}: {realCount,3} tok -> {wav.Length,7} samp ({wav.Length / (double)SR,5:F2}s)  compute={sw.Elapsed.TotalSeconds,5:F2}s  rms={Rms(wav):F4}  nan={nan}  \"{Trunc(ph, 30)}\"");
     }
 
@@ -698,7 +1055,7 @@ static int Fold(string[] args)
     var seen = new HashSet<string>();
     try
     {
-        new Interp(model).Run(feed, onNode: (nd, outs, env) =>
+        new Dp(model).Run(feed, onNode: (nd, outs, env) =>
         {
             if (outs.Length > 0 && outs[0] != null && nd.Output.Count > 0 && !string.IsNullOrEmpty(nd.Output[0]) && !seen.Contains(nd.Name))
                 foreach (var s in subs) if (nd.Name.Contains(s)) { frozen.Add((nd, outs[0])); seen.Add(nd.Name); break; }
@@ -810,7 +1167,7 @@ static Tensor LoadBin(string path)
     var fd = new float[n]; for (long i = 0; i < n; i++) fd[i] = br.ReadSingle(); return Tensor.F(fd, shape);
 }
 
-static void WriteWav(string path, float[] s, int sr)
+static void WriteWav(string path, ReadOnlySpan<float> s, int sr)
 {
     using var bw = new BinaryWriter(File.Create(path));
     int dataBytes = s.Length * 2;
@@ -821,8 +1178,8 @@ static void WriteWav(string path, float[] s, int sr)
     foreach (var f in s) bw.Write((short)Math.Round(Math.Clamp(f, -1f, 1f) * 32767));
 }
 
-static double Rms(float[] s) { double a = 0; foreach (var f in s) a += (double)f * f; return s.Length > 0 ? Math.Sqrt(a / s.Length) : 0; }
-static double Peak(float[] s) { double p = 0; foreach (var f in s) p = Math.Max(p, Math.Abs(f)); return p; }
+static double Rms(ReadOnlySpan<float> s) { double a = 0; foreach (var f in s) a += (double)f * f; return s.Length > 0 ? Math.Sqrt(a / s.Length) : 0; }
+static double Peak(ReadOnlySpan<float> s) { double p = 0; foreach (var f in s) p = Math.Max(p, Math.Abs(f)); return p; }
 
 // ----- specdiff: the PERCEPTUAL validator. Compares two wavs in the MAGNITUDE-spectrogram domain
 //   (multi-resolution STFT loss — exactly how these vocoders are trained), gain-aligned so a pure

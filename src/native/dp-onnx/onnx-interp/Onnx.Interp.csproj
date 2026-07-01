@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- dp-onnx: native .NET ONNX interpreter over Onnx.dll (protobuf decomposition of the
-       ONNX schema). NO onnxruntime. Vendored into subsystem (CRQ143 P0): onnxnet is a sibling
-       ProjectReference, not a HintPath'd DLL — the repo's Directory.Build.props redirects build
-       output to a build/ sibling, so a fixed bin\ HintPath cannot resolve; the project graph can.
+  <!-- dp-onnx: the standalone CLI dev tool for the dp-onnx engine, which now lives in-tree at
+       src/runspace/Dpx (Subsystem.Dpx namespace — ambient VOM-facing math, no boundary; it moved out
+       from under src/native/dp-onnx, which is for actual native/foreign boundaries). This csproj stays
+       here (it's a separate exe from the main Subsystem build) but compiles its sources via relative
+       <Compile Include> against the new location — no more onnxnet ProjectReference (that project's
+       .cs files moved too; Onnx.csproj is now schema-reference-only, see onnxnet/Onnx.csproj).
        EnableDefaultCompileItems stays false so emitted/scratch .cs (io\*.cs) are never swept in. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -11,16 +13,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>dp-onnx</AssemblyName>
-    <!-- single-file project: compile ONLY Program.cs so emitted/scratch .cs (io\*.cs, _emittest\**) under the tree are never swept in -->
+    <!-- single-file project: compile ONLY the dp-onnx engine set so emitted/scratch .cs (io\*.cs, _emittest\**) under the tree are never swept in -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs" />
-    <Compile Include="Interp.cs" />
-    <Compile Include="GpuD3D12.cs" />
-    <Compile Include="GpuVulkan.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\Program.cs" Link="Program.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\Dp.cs" Link="Dp.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\MemGovernor.cs" Link="MemGovernor.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\GpuD3D12.cs" Link="GpuD3D12.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\GpuVulkan.cs" Link="GpuVulkan.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\OnnxProto.cs" Link="OnnxProto.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\LiteRt.cs" Link="LiteRt.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\SentencePiece.cs" Link="SentencePiece.cs" />
     <Content Include="gemm.spv" CopyToOutputDirectory="PreserveNewest" />
-    <ProjectReference Include="..\onnxnet\Onnx.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>
 </Project>

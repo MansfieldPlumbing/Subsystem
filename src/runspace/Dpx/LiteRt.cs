@@ -3,7 +3,7 @@
 //
 // Why: the only Gemma weights on the box are gemma-4-E2B-it.litertlm (a LITERTLM container of
 // .tflite FlatBuffers). Rather than a second engine, we TRANSLATE a .tflite subgraph into the SAME
-// Onnx.ModelProto IR so Interp + probe run unchanged. Coverage = the BuiltinOperator -> OpType map
+// Onnx.ModelProto IR so Dp + probe run unchanged. Coverage = the BuiltinOperator -> OpType map
 // (what `dp-onnx probe <file>.litertlm` prints). No FlatBuffers lib, no LiteRT lib.
 
 using System;
@@ -209,6 +209,48 @@ public static class Tflite
 
     public static string MapToOnnx(string tfliteName) => ToOnnx.TryGetValue(tfliteName, out var v) ? v : null;
 
+    // Debug: dump one subgraph's raw structure (tensors / inputs / outputs / ops with tensor indices) — the
+    // empirical lens for composite-recursion wiring bugs (a value consumed but never produced).
+    public static void DumpSubgraph(byte[] tfl, int sgIx)
+    {
+        var fr = new FlatReader(tfl);
+        int model = fr.Root;
+        var (ocStart, ocCount) = fr.Vector(fr.Field(model, 1));
+        var opNames = new string[ocCount];
+        for (int i = 0; i < ocCount; i++)
+        {
+            int oc = fr.Deref(ocStart + i * 4);
+            int code = Math.Max(fr.FieldU8(oc, 0), fr.FieldI32(oc, 3));
+            opNames[i] = code == 32 ? "CUSTOM:" + (fr.Str(fr.Field(oc, 1)) ?? "?") : (Builtin.TryGetValue(code, out var nm) ? nm : "OP_" + code);
+        }
+        var (sgStart, sgCount) = fr.Vector(fr.Field(model, 2));
+        int sg = fr.Deref(sgStart + sgIx * 4);
+        var (tStart, tCount) = fr.Vector(fr.Field(sg, 0));
+        var (bufStart, bufCount) = fr.Vector(fr.Field(model, 4));
+        Console.WriteLine($"subgraph[{sgIx}] of {sgCount}: {tCount} tensors");
+        for (int i = 0; i < tCount; i++)
+        {
+            int tn = fr.Deref(tStart + i * 4);
+            string name = fr.Str(fr.Field(tn, 3)) ?? $"t{i}";
+            int type = fr.FieldU8(tn, 1);
+            int bufIx = (int)fr.FieldU32(tn, 2);
+            bool hasData = false;
+            if (bufIx > 0 && bufIx < bufCount) { int buf = fr.Deref(bufStart + bufIx * 4); hasData = fr.Field(buf, 0) != 0; }
+            int[] shape = fr.VecI32(fr.Field(tn, 0));
+            Console.WriteLine($"  t[{i,3}] {name,-44} type={type} buf={bufIx}{(hasData ? "(const)" : "")} shape=[{string.Join(",", shape)}]");
+        }
+        Console.WriteLine($"  INPUTS:  [{string.Join(",", fr.VecI32(fr.Field(sg, 1)))}]");
+        Console.WriteLine($"  OUTPUTS: [{string.Join(",", fr.VecI32(fr.Field(sg, 2)))}]");
+        var (opStart, opCount) = fr.Vector(fr.Field(sg, 3));
+        for (int o = 0; o < opCount; o++)
+        {
+            int op = fr.Deref(opStart + o * 4);
+            int ocix = (int)fr.FieldU32(op, 0);
+            string tf = (ocix >= 0 && ocix < opNames.Length) ? opNames[ocix] : "OP_?";
+            Console.WriteLine($"  op[{o,3}] {tf,-22} in[{string.Join(",", fr.VecI32(fr.Field(op, 1)))}] out[{string.Join(",", fr.VecI32(fr.Field(op, 2)))}]");
+        }
+    }
+
     public static (Dictionary<string, int> hist, int subgraphs, int tensors, int ops) OpHistogram(byte[] tfl)
     {
         var fr = new FlatReader(tfl);
@@ -244,16 +286,16 @@ public static class Tflite
         return (hist, subgraphs, tensors, ops);
     }
 
-    // ── probe -> executable: translate ONE .tflite SubGraph into the same Onnx.ModelProto IR that Interp runs. ──
+    // ── probe -> executable: translate ONE .tflite SubGraph into the same Onnx.ModelProto IR that Dp runs. ──
     // Field indices are positional vtable order from schema.fbs (extends the comment at the top of this class):
     //   Tensor{ shape[0]:[int], type[1]:byte(TensorType), buffer[2]:uint, name[3]:string, quantization[4]:QuantizationParameters }
     //   Buffer{ data[0]:[ubyte] }   (Model.buffers[4]; Tensor.buffer indexes it; buffer 0 = the empty/no-data buffer)
     //   QuantizationParameters{ min[0], max[1], scale[2]:[float], zero_point[3]:[long], details[4], quantized_dimension[5]:int }
     //   Operator (union): opcode_index[0], inputs[1]:[int], outputs[2]:[int], builtin_options_type[3]:byte, builtin_options[4]:table
     //   ReshapeOptions{ new_shape[0]:[int] }   GatherOptions{ axis[0]:int, batch_dims[1]:int }
-    // Weights are inlined into TensorProto (Interp.FromProto has no external-data path). Interp.FromProto can't load
+    // Weights are inlined into TensorProto (Dp.FromProto has no external-data path). Dp.FromProto can't load
     // int8/uint8/int16 initializers, so those are widened to INT32 here; quantized weights then flow through a
-    // synthesized DequantizeLinear (per the verified Interp contract: scale@input1, zero_point@input2, per-tensor
+    // synthesized DequantizeLinear (per the verified Dp contract: scale@input1, zero_point@input2, per-tensor
     // when scale is scalar). One op convention differs from ONNX and is fixed here: tflite EMBEDDING_LOOKUP is
     // (indices, table) but ONNX Gather is (data=table, indices) -> the two inputs are swapped.
 
@@ -264,7 +306,7 @@ public static class Tflite
     static int OnnxElem(int tfliteType) => tfliteType switch
     {
         0 => 1, 1 => 10, 2 => 6, 4 => 7, 6 => 9, 10 => 11, 18 => 16,   // direct
-        3 or 9 or 7 or 16 => 6,                                        // uint8/int8/int16/uint16 -> INT32 (Interp can't load these)
+        3 or 9 or 7 or 16 => 6,                                        // uint8/int8/int16/uint16 -> INT32 (Dp can't load these)
         15 or 12 => 7,                                                 // uint32/uint64 -> INT64
         17 or 19 => 1,                                                 // int4 (17) / packed-4bit (19) -> dequantized to FLOAT
         _ => throw new NotImplementedException($"tflite TensorType {tfliteType}")
@@ -274,7 +316,7 @@ public static class Tflite
     // The bit width is derived from the buffer (gemma's tied embedding table [262144,1536] packs at 2 bits/elem =
     // 384 bytes/row). Layout assumed: little-endian sub-elements (low bits first), signed (q -= 2^bits when the top
     // bit is set), per-row scale along quantized_dimension 0 (zero_point 0). value = (q - zero) * scale[row].
-    // Interp has no sub-byte tensor, so the table is materialized as float here (lazy-gather is a later slice);
+    // Dp has no sub-byte tensor, so the table is materialized as float here (lazy-gather is a later slice);
     // exact numerical parity vs the litert oracle is verified in a later milestone — this is the executability path.
     static TensorProto DequantSubByte(string name, int[] shape, byte[] packed, float[] scale, long[] zero, int qdim)
     {
@@ -397,9 +439,9 @@ public static class Tflite
     // outputs -> parentOuts (positional); every other value/initializer name is prefixed `pfx` to stay
     // unique across the many composite expansions. ToModelProto allocates the child fresh, so we consume
     // (rename + move) its nodes/initializers -- no clone. Recursive: a decomposition may itself hold composites.
-    static void SpawnSubGraph(byte[] tfl, int sgIx, List<string> parentIns, List<string> parentOuts, GraphProto g, string pfx)
+    static void SpawnSubGraph(byte[] tfl, int sgIx, List<string> parentIns, List<string> parentOuts, GraphProto g, string pfx, bool nativeQuant, bool lenient)
     {
-        var cg = ToModelProto(tfl, sgIx, out _).Graph;
+        var cg = ToModelProto(tfl, sgIx, out _, nativeQuant, lenient).Graph;
         // Inner graph-inputs -> parent operands (positional); every other value/init name -> prefixed (unique).
         var rename = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < cg.Input.Count && i < parentIns.Count; i++) rename[cg.Input[i].Name] = parentIns[i];
@@ -425,8 +467,34 @@ public static class Tflite
         }
     }
 
+    // Store a constant tensor in its NATIVE tflite form (no widening, no dequant) for the model.db truth-at-rest
+    // path: the packed/quantized bytes verbatim + sibling scale/zp initializers. Keeps each BLOB ~model-size
+    // (a 2-bit [262144,1536] table is 100MB packed vs 1.6GB as fp32) and is the quantized data plane the VOM
+    // gather feeds; dequant is deferred to the kernel. `dtype` carries the tflite TensorType code (not the ONNX
+    // enum) so the litertlm db is a faithful projection of the source — DequantizeLinear is NOT synthesized here.
+    static void EmitNativeQuant(GraphProto g, string name, int[] shape, int tfliteType, byte[] data, float[] scale, long[] zero)
+    {
+        var t = new TensorProto { Name = name, DataType = tfliteType, RawData = new ByteString(data) };
+        foreach (var d in shape) t.Dims.Add((long)d);
+        g.Initializer.Add(t);
+        if (scale != null && scale.Length > 0)
+        {
+            var sc = new TensorProto { Name = name + "_scale", DataType = 1 };
+            sc.Dims.Add(scale.Length); sc.FloatData.Add(scale);
+            g.Initializer.Add(sc);
+        }
+        if (zero != null && zero.Length > 0)
+        {
+            var zp = new TensorProto { Name = name + "_zp", DataType = 7 };
+            zp.Dims.Add(zero.Length); zp.Int64Data.Add(zero);
+            g.Initializer.Add(zp);
+        }
+    }
+
     // Translate subgraph `sgIx` of a .tflite model to ModelProto. `summary` carries a structural digest for the receipt.
-    public static ModelProto ToModelProto(byte[] tfl, int sgIx, out string summary)
+    // nativeQuant=true keeps constant weights in their packed/quantized tflite form (the model.db storage path);
+    // false (default) is the executable path that widens/dequantizes to dtypes the Dp kernels can load.
+    public static ModelProto ToModelProto(byte[] tfl, int sgIx, out string summary, bool nativeQuant = false, bool lenient = false)
     {
         var fr = new FlatReader(tfl);
         int model = fr.Root;
@@ -463,19 +531,24 @@ public static class Tflite
             int q = fr.Sub(fr.Field(tn, 4));
             if (q != 0) { info.QScale = fr.VecF32(fr.Field(q, 2)); info.QZero = fr.VecI64(fr.Field(q, 3)); info.QDim = fr.FieldI32(q, 5); }
             byte[] data = null;
+            bool isConst = false;
             if (bufIx > 0 && bufIx < bufCount)
             {
                 int buf = fr.Deref(bufStart + bufIx * 4);
                 int dataField = fr.Field(buf, 0);
-                if (dataField != 0) data = fr.VecBytes(dataField);
+                if (dataField != 0) { data = fr.VecBytes(dataField); isConst = true; }   // a present data buffer IS a constant — even 0-length (a reshape-to-scalar [] shape vector)
                 else if (fr.Field(buf, 1) != 0) extWeightTensors++;   // offset/size external buffer (not inline) — unsupported here
             }
-            if (data != null && data.Length > 0)
+            if (isConst)
             {
                 info.Const = true;
-                g.Initializer.Add(info.Type is 17 or 19
-                    ? DequantSubByte(info.Name, info.Shape, data, info.QScale, info.QZero, info.QDim)
-                    : MakeInit(info.Name, info.Shape, info.Type, data));
+                data ??= Array.Empty<byte>();
+                if (nativeQuant && info.QScale != null && info.QScale.Length > 0)
+                    EmitNativeQuant(g, info.Name, info.Shape, info.Type, data, info.QScale, info.QZero);   // keep ONLY real quantized weights packed (the rest are plain consts)
+                else if (info.Type is 17 or 19 && data.Length > 0)
+                    g.Initializer.Add(DequantSubByte(info.Name, info.Shape, data, info.QScale, info.QZero, info.QDim));
+                else
+                    g.Initializer.Add(MakeInit(info.Name, info.Shape, info.Type, data));   // non-quant constants -> ONNX dtypes (incl. the empty [] shape const)
                 initCount++;
             }
             ts[i] = info;
@@ -505,6 +578,8 @@ public static class Tflite
             int[] inIx = fr.VecI32(fr.Field(op, 1));
             int[] outIx = fr.VecI32(fr.Field(op, 2));
 
+            try
+            {
             // Spawn-SubGraph (CRQ144): a STABLEHLO_COMPOSITE carries a decomposition_subgraph_index in
             // builtin_options_2; spawn that subgraph as a child and splice it inline (no node for the
             // composite itself). The Sub-VOM-is-a-VOM move applied to the graph: recursion, not a fused kernel.
@@ -516,7 +591,7 @@ public static class Tflite
                     throw new NotImplementedException($"op[{o}] STABLEHLO_COMPOSITE: bad decomposition_subgraph_index={decompIx} (sgCount={sgCount})");
                 var pins = new List<string>(); foreach (var ix in inIx) pins.Add(TName(ix));
                 var pouts = new List<string>(); foreach (var ix in outIx) pouts.Add(TName(ix));
-                SpawnSubGraph(tfl, decompIx, pins, pouts, g, $"c{sgIx}_{o}_");
+                SpawnSubGraph(tfl, decompIx, pins, pouts, g, $"c{sgIx}_{o}_", nativeQuant, lenient);
                 sb.Append($"  op[{o,3}] STABLEHLO_COMPOSITE -> Spawn-SubGraph[{decompIx}] in[{string.Join(",", inIx)}] out[{string.Join(",", outIx)}]\n");
                 continue;
             }
@@ -623,6 +698,17 @@ public static class Tflite
             foreach (var s in outs) node.Output.Add(s);
             g.Node.Add(node);
             sb.Append($"  op[{o,3}] {tf,-18} -> {onnx,-16} in[{string.Join(",", inIx)}] out[{string.Join(",", outIx)}]\n");
+            }
+            catch (Exception ex) when (lenient)
+            {
+                // db/triage path: record the op as an unmapped placeholder node (op_type = the tflite name,
+                // no backend) so "which ops can't run" stays a SELECT — never abort the whole projection.
+                var ph = new NodeProto { OpType = tf, Name = $"{tf}_{o}_unmapped" };
+                foreach (var ix in inIx) ph.Input.Add(TName(ix));
+                foreach (var ix in outIx) ph.Output.Add(TName(ix));
+                g.Node.Add(ph);
+                sb.Append($"  op[{o,3}] {tf,-18} -> UNMAPPED ({ex.GetType().Name})\n");
+            }
         }
 
         summary = $"subgraph[{sgIx}] tensors={tCount} ops={opCount} initializers={initCount} inputs={g.Input.Count} outputs={g.Output.Count}"
