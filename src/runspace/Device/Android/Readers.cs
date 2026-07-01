@@ -1,6 +1,9 @@
 using System;
+using Subsystem.Vom;
 
 namespace Subsystem.Device;
+
+
 
 // \Device\Android\* introspection drivers — decomposed VERBATIM from the VirtualObjectManager god-object
 // (VOM-SPEC §1: device capabilities are drivers, not kernel/host methods). Bodies are unchanged; only the
@@ -9,117 +12,126 @@ namespace Subsystem.Device;
 // \Device\Android\Power
 public static class Power
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetBatteryStatus()
+    public static BatteryStatusRecord GetBatteryStatus()
     {
-        var dict = new System.Collections.Generic.Dictionary<string, object>();
+        int level = 0;
+        bool isCharging = false;
+        double temp = 0.0;
+        int volt = 0;
+        string tech = "Unknown";
         try {
             var ctx = Android.App.Application.Context;
             using var bm = (Android.OS.BatteryManager?)ctx.GetSystemService(Android.Content.Context.BatteryService);
             if (bm != null) {
-                dict["Level"] = bm.GetIntProperty((int)Android.OS.BatteryProperty.Capacity);
+                level = bm.GetIntProperty((int)Android.OS.BatteryProperty.Capacity);
 
                 using var filter = new Android.Content.IntentFilter(Android.Content.Intent.ActionBatteryChanged);
                 using var batteryStatus = ctx.RegisterReceiver(null, filter);
                 if (batteryStatus != null) {
                     int status = batteryStatus.GetIntExtra(Android.OS.BatteryManager.ExtraStatus, -1);
-                    bool isCharging = status == (int)Android.OS.BatteryStatus.Charging || status == (int)Android.OS.BatteryStatus.Full;
-                    dict["IsCharging"] = isCharging;
-                    dict["Temperature"] = batteryStatus.GetIntExtra(Android.OS.BatteryManager.ExtraTemperature, 0) / 10.0;
-                    dict["Voltage"] = batteryStatus.GetIntExtra(Android.OS.BatteryManager.ExtraVoltage, 0);
-                    dict["Technology"] = batteryStatus.GetStringExtra(Android.OS.BatteryManager.ExtraTechnology) ?? "Unknown";
+                    isCharging = status == (int)Android.OS.BatteryStatus.Charging || status == (int)Android.OS.BatteryStatus.Full;
+                    temp = batteryStatus.GetIntExtra(Android.OS.BatteryManager.ExtraTemperature, 0) / 10.0;
+                    volt = batteryStatus.GetIntExtra(Android.OS.BatteryManager.ExtraVoltage, 0);
+                    tech = batteryStatus.GetStringExtra(Android.OS.BatteryManager.ExtraTechnology) ?? "Unknown";
                 }
             }
         } catch (Exception ex) { Dg.Warn("power", ex); }
-        return dict;
+        return new BatteryStatusRecord(level, isCharging, temp, volt, tech);
     }
 }
 
 // \Device\Android\Info
 public static class Info
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetDeviceInfo()
+    public static DeviceInfoRecord GetDeviceInfo()
     {
-        return new System.Collections.Generic.Dictionary<string, object>
-        {
-            ["Model"] = Android.OS.Build.Model ?? "Unknown",
-            ["Manufacturer"] = Android.OS.Build.Manufacturer ?? "Unknown",
-            ["Device"] = Android.OS.Build.Device ?? "Unknown",
-            ["Board"] = Android.OS.Build.Board ?? "Unknown",
-            ["Hardware"] = Android.OS.Build.Hardware ?? "Unknown",
-            ["OSVersion"] = Android.OS.Build.VERSION.Release ?? "Unknown",
-            ["SdkInt"] = (int)Android.OS.Build.VERSION.SdkInt,
-            ["IsEmulator"] = Android.OS.Build.Fingerprint?.Contains("generic") ?? false
-        };
+        return new DeviceInfoRecord(
+            Android.OS.Build.Model ?? "Unknown",
+            Android.OS.Build.Manufacturer ?? "Unknown",
+            Android.OS.Build.Device ?? "Unknown",
+            Android.OS.Build.Board ?? "Unknown",
+            Android.OS.Build.Hardware ?? "Unknown",
+            Android.OS.Build.VERSION.Release ?? "Unknown",
+            (int)Android.OS.Build.VERSION.SdkInt,
+            Android.OS.Build.Fingerprint?.Contains("generic") ?? false
+        );
     }
 }
 
 // \Device\Android\Storage
 public static class Storage
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetStorageInfo()
+    public static StorageInfoRecord GetStorageInfo()
     {
-        var dict = new System.Collections.Generic.Dictionary<string, object>();
+        long total = 0;
+        long free = 0;
+        long used = 0;
+        double totalGB = 0.0;
+        double freeGB = 0.0;
         try {
             using var dataDir = Android.OS.Environment.DataDirectory;
             var path = dataDir?.Path ?? "/data";
             using var stat = new Android.OS.StatFs(path);
             long blockSize = stat.BlockSizeLong;
-            long total = stat.BlockCountLong * blockSize;
-            long free = stat.AvailableBlocksLong * blockSize;
-            dict["TotalBytes"] = total;
-            dict["FreeBytes"] = free;
-            dict["UsedBytes"] = total - free;
-            dict["TotalGB"] = System.Math.Round(total / 1073741824.0, 2);
-            dict["FreeGB"] = System.Math.Round(free / 1073741824.0, 2);
+            total = stat.BlockCountLong * blockSize;
+            free = stat.AvailableBlocksLong * blockSize;
+            used = total - free;
+            totalGB = System.Math.Round(total / 1073741824.0, 2);
+            freeGB = System.Math.Round(free / 1073741824.0, 2);
         } catch (Exception ex) { Dg.Warn("storage", ex); }
-        return dict;
+        return new StorageInfoRecord(total, free, used, totalGB, freeGB);
     }
 }
 
 // \Device\Android\Memory
 public static class Memory
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetMemoryInfo()
+    public static MemoryInfoRecord GetMemoryInfo()
     {
-        var dict = new System.Collections.Generic.Dictionary<string, object>();
+        long total = 0;
+        long available = 0;
+        long used = 0;
+        bool lowMemory = false;
+        long threshold = 0;
+        double totalGB = 0.0;
         try {
             var ctx = Android.App.Application.Context;
             using var am = (Android.App.ActivityManager?)ctx.GetSystemService(Android.Content.Context.ActivityService);
             if (am != null) {
                 using var mi = new Android.App.ActivityManager.MemoryInfo();
                 am.GetMemoryInfo(mi);
-                dict["TotalBytes"] = mi.TotalMem;
-                dict["AvailableBytes"] = mi.AvailMem;
-                dict["UsedBytes"] = mi.TotalMem - mi.AvailMem;
-                dict["LowMemory"] = mi.LowMemory;
-                dict["ThresholdBytes"] = mi.Threshold;
-                dict["TotalGB"] = System.Math.Round(mi.TotalMem / 1073741824.0, 2);
+                total = mi.TotalMem;
+                available = mi.AvailMem;
+                used = mi.TotalMem - mi.AvailMem;
+                lowMemory = mi.LowMemory;
+                threshold = mi.Threshold;
+                totalGB = System.Math.Round(mi.TotalMem / 1073741824.0, 2);
             }
         } catch (Exception ex) { Dg.Warn("memory", ex); }
-        return dict;
+        return new MemoryInfoRecord(total, available, used, lowMemory, threshold, totalGB);
     }
 }
 
 // \Device\Android\Sensors
 public static class Sensors
 {
-    public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> GetSensors()
+    public static System.Collections.Generic.List<SensorRecord> GetSensors()
     {
-        var list = new System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>();
+        var list = new System.Collections.Generic.List<SensorRecord>();
         try {
             var ctx = Android.App.Application.Context;
             using var sm = (Android.Hardware.SensorManager?)ctx.GetSystemService(Android.Content.Context.SensorService);
             var sensors = sm?.GetSensorList(Android.Hardware.SensorType.All);
             if (sensors != null) {
                 foreach (var s in sensors) {
-                    var d = new System.Collections.Generic.Dictionary<string, object>();
-                    d["Name"] = s.Name ?? "";
-                    d["Type"] = s.Type.ToString();
-                    d["Vendor"] = s.Vendor ?? "";
-                    d["Version"] = s.Version;
-                    d["Power"] = s.Power;
-                    d["MaximumRange"] = s.MaximumRange;
-                    list.Add(d);
+                    list.Add(new SensorRecord(
+                        s.Name ?? "",
+                        s.Type.ToString(),
+                        s.Vendor ?? "",
+                        s.Version,
+                        s.Power,
+                        s.MaximumRange
+                    ));
                     s.Dispose(); // Dispose the individual sensor wrappers
                 }
             }
@@ -131,23 +143,28 @@ public static class Sensors
 // \Device\Android\Network
 public static class Network
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetNetworkInfo() {
-        var d = new System.Collections.Generic.Dictionary<string, object>();
+    public static NetworkInfoRecord GetNetworkInfo() {
+        bool isConnected = false;
+        bool hasWiFi = false;
+        bool hasCellular = false;
+        bool hasVpn = false;
+        int downKbps = 0;
+        int upKbps = 0;
         try {
             var ctx = Android.App.Application.Context;
             var cm = (Android.Net.ConnectivityManager?)ctx.GetSystemService(Android.Content.Context.ConnectivityService);
             if (cm != null) {
                 var nc = cm.GetNetworkCapabilities(cm.ActiveNetwork);
-                d["IsConnected"] = nc != null;
+                isConnected = nc != null;
                 if (nc != null) {
-                    d["HasWiFi"] = nc.HasTransport(Android.Net.TransportType.Wifi);
-                    d["HasCellular"] = nc.HasTransport(Android.Net.TransportType.Cellular);
-                    d["HasVpn"] = nc.HasTransport(Android.Net.TransportType.Vpn);
-                    d["DownstreamKbps"] = nc.LinkDownstreamBandwidthKbps;
-                    d["UpstreamKbps"] = nc.LinkUpstreamBandwidthKbps;
+                    hasWiFi = nc.HasTransport(Android.Net.TransportType.Wifi);
+                    hasCellular = nc.HasTransport(Android.Net.TransportType.Cellular);
+                    hasVpn = nc.HasTransport(Android.Net.TransportType.Vpn);
+                    downKbps = nc.LinkDownstreamBandwidthKbps;
+                    upKbps = nc.LinkUpstreamBandwidthKbps;
                 }
             }
         } catch (Exception ex) { Dg.Warn("network", ex); }
-        return d;
+        return new NetworkInfoRecord(isConnected, hasWiFi, hasCellular, hasVpn, downKbps, upKbps);
     }
 }

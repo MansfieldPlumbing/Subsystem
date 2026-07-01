@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Management.Automation;
+using Subsystem.Vom;
 
 namespace Subsystem.Pwsh.Cmdlets;
 
@@ -90,8 +91,8 @@ public sealed class GetAgentSessionCmdlet : WrapperCmdlet
     [Parameter(Position = 0)] public string? Id { get; set; }
     protected override void ProcessRecord()
         => Emit(string.IsNullOrEmpty(Id)
-            ? Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries()
-            : Subsystem.RuntimeBroker.AgentSessionTable.LoadJson(Id));
+            ? (object)Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries()
+            : Subsystem.RuntimeBroker.AgentSessionTable.Load(Id));
 }
 
 [Cmdlet(VerbsCommon.New, "AgentSession")]

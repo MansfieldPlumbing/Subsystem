@@ -1,6 +1,9 @@
 using System;
+using Subsystem.Vom;
 
 namespace Subsystem.Device;
+
+
 
 // \Device\Android\* surface drivers — decomposed from VirtualObjectManager (VOM-SPEC §1). Verbatim except
 // host-bound members resolve via MainActivity.Instance (the dropped Host mapping).
@@ -48,29 +51,35 @@ public static class Clipboard
 // \Device\Android\Display
 public static class Display
 {
-    public static System.Collections.Generic.Dictionary<string, object> GetDisplayInfo()
+    public static DisplayInfoRecord GetDisplayInfo()
     {
-        var dict = new System.Collections.Generic.Dictionary<string, object>();
+        int width = 0;
+        int height = 0;
+        int densityDpi = 0;
+        float density = 0f;
+        float xdpi = 0f;
+        float ydpi = 0f;
+        double refreshRate = 0.0;
         try {
             var ctx = Android.App.Application.Context;
             using var res = ctx.Resources;
             using var dm = res?.DisplayMetrics;
             if (dm != null) {
-                dict["WidthPixels"] = dm.WidthPixels;
-                dict["HeightPixels"] = dm.HeightPixels;
-                dict["DensityDpi"] = (int)dm.DensityDpi;
-                dict["Density"] = dm.Density;
-                dict["XDpi"] = dm.Xdpi;
-                dict["YDpi"] = dm.Ydpi;
+                width = dm.WidthPixels;
+                height = dm.HeightPixels;
+                densityDpi = (int)dm.DensityDpi;
+                density = dm.Density;
+                xdpi = dm.Xdpi;
+                ydpi = dm.Ydpi;
             }
             try {
                 using var wm = Subsystem.MainActivity.Instance?.WindowManager;
                 using var display = wm?.DefaultDisplay;
                 var rr = display?.RefreshRate;
-                if (rr.HasValue) dict["RefreshRate"] = System.Math.Round(rr.Value, 2);
+                if (rr.HasValue) refreshRate = System.Math.Round(rr.Value, 2);
             } catch { }
         } catch { }
-        return dict;
+        return new DisplayInfoRecord(width, height, densityDpi, density, xdpi, ydpi, refreshRate);
     }
 
     public static string GetScreenshot()
@@ -86,25 +95,26 @@ public static class Display
 // \Device\Android\Notifications
 public static class Notifications
 {
-    public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> GetAndroidMessages()
+    public static System.Collections.Generic.List<NotificationMessageRecord> GetAndroidMessages()
     {
-        var list = new System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>();
+        var list = new System.Collections.Generic.List<NotificationMessageRecord>();
         if (Subsystem.MainActivity.Instance == null) return list;
 
         foreach (var kvp in NotificationService.Notifications) {
             var sbn = kvp.Value;
-            var dict = new System.Collections.Generic.Dictionary<string, object>();
-            dict["Package"] = sbn.PackageName ?? "";
-            dict["PostTime"] = sbn.PostTime;
-            dict["IsClearable"] = sbn.IsClearable;
+            var pkg = sbn.PackageName ?? "";
+            var postTime = sbn.PostTime;
+            var isClearable = sbn.IsClearable;
+            var title = "";
+            var text = "";
 
             using var notification = sbn.Notification;
             using var extras = notification?.Extras;
             if (extras != null) {
-                dict["Title"] = extras.GetCharSequence(Android.App.Notification.ExtraTitle) ?? "";
-                dict["Text"] = extras.GetCharSequence(Android.App.Notification.ExtraText) ?? "";
+                title = extras.GetCharSequence(Android.App.Notification.ExtraTitle)?.ToString() ?? "";
+                text = extras.GetCharSequence(Android.App.Notification.ExtraText)?.ToString() ?? "";
             }
-            list.Add(dict);
+            list.Add(new NotificationMessageRecord(pkg, postTime, isClearable, title, text));
         }
         return list;
     }
@@ -165,9 +175,9 @@ public static class Notifications
 // \Device\Android\Apps
 public static class Apps
 {
-    public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> GetInstalledApps(bool includeSystem = false)
+    public static System.Collections.Generic.List<InstalledAppRecord> GetInstalledApps(bool includeSystem = false)
     {
-        var list = new System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>();
+        var list = new System.Collections.Generic.List<InstalledAppRecord>();
         try {
             var ctx = Android.App.Application.Context;
             using var pm = ctx.PackageManager;
@@ -180,16 +190,12 @@ public static class Apps
                         app.Dispose();
                         continue;
                     }
-                    var d = new System.Collections.Generic.Dictionary<string, object>();
-                    d["Package"] = app.PackageName ?? "";
-
+                    var pkg = app.PackageName ?? "";
                     var labelCharSeq = app.LoadLabel(pm);
-                    d["Label"] = labelCharSeq?.ToString() ?? app.PackageName ?? "";
+                    var label = labelCharSeq?.ToString() ?? app.PackageName ?? "";
+                    var enabled = app.Enabled;
 
-                    d["Enabled"] = app.Enabled;
-                    d["IsSystem"] = isSystem;
-                    list.Add(d);
-
+                    list.Add(new InstalledAppRecord(pkg, label, enabled, isSystem));
                     app.Dispose(); // Dispose the individual AppInfo wrappers
                 }
             }

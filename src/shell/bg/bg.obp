@@ -565,8 +565,13 @@
       if (!ctx.innerHTML || ctx.style.display !== 'block') return;   // user dismissed while loading
       ctx.innerHTML = '';
       const cur = res.ok && res.data ? res.data : null;
-      if (!cur || !cur.Available) {
+      if (!cur || (Array.isArray(cur) && cur.length === 0) || (!Array.isArray(cur) && !cur.Available)) {
         item('·', 'Catalog unavailable (on-device only)', null);
+      } else if (Array.isArray(cur)) {
+        cur.forEach(w => item(w.Active ? '✓' : '·', w.Name || w.Id,
+          () => runPS("Set-SystemWallpaper '" + w.Id.replace(/[^a-z0-9-]/gi, '') + "'")));
+        const sep = document.createElement('div'); sep.className = 'sep'; ctx.appendChild(sep);
+        item('🖼', 'Set as device wallpaper…', () => runPS('Start-SystemWallpaperPicker'));
       } else {
         const ids = cur.Available, names = cur.AvailableNames || ids;
         ids.forEach((id, i) => item(id === cur.Playlist ? '✓' : '·', names[i] || id,

@@ -632,16 +632,25 @@ parent=Settings.About
       (async () => {
         const cur = await wpExec('Get-SystemWallpaper');
         if (!el.isConnected) return;
-        if (!cur || !cur.Available) {
+        let ids = [], names = [], activePlaylist = "";
+        if (cur && Array.isArray(cur)) {
+          ids = cur.map(w => w.Id);
+          names = cur.map(w => w.Name || w.Id);
+          const activeWp = cur.find(w => w.Active);
+          activePlaylist = activeWp ? activeWp.Id : "";
+        } else if (cur && cur.Available) {
+          ids = cur.Available;
+          names = cur.AvailableNames || ids;
+          activePlaylist = cur.Playlist || "";
+        } else {
           el.innerHTML = '<div class="ctrl-caption" style="padding:20px;">Shader catalog unavailable — backend offline.</div>';
           return;
         }
-        const ids = cur.Available, names = cur.AvailableNames || ids;
         el.innerHTML = `<div class="surface">
           <div class="ctrl-row"><div class="label" style="font-weight:600;">Shader playlist</div>
             <div class="ctrl-caption">Rendered live on the home screen by the system wallpaper engine.</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-              ${ids.map((id,i)=>`<button class="action-row" data-wp="${id}" style="justify-content:flex-start;${id===cur.Playlist?'border-color:var(--accent);':''}">${names[i]||id}</button>`).join('')}
+              ${ids.map((id,i)=>`<button class="action-row" data-wp="${id}" style="justify-content:flex-start;${id===activePlaylist?'border-color:var(--accent);':''}">${names[i]||id}</button>`).join('')}
             </div></div>
           <button class="action-row" data-wp-apply style="margin:6px 16px 16px;"><div class="left"><div class="icon">${svg('Image')}</div>
             <div><div class="label">Set as device wallpaper…</div><div class="caption">Opens Android's wallpaper confirm screen</div></div></div></button>

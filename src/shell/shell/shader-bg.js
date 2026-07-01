@@ -90,7 +90,7 @@ export const ShaderBg = {
     if (!pl) {
       try {
         const er = await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'text/plain', 'X-Subsystem-Cap': (window.AndroidBridge?.getCap?.()||window.__ssCap||'') }, body: 'Get-SystemWallpaper' });
-        if (er.ok) { const j = await er.json(); if (j && j.Playlist) pl = j.Playlist; }
+        if (er.ok) { const j = await er.json(); if (j) { if (Array.isArray(j)) { const act = j.find(w => w.Active); if (act) pl = act.Id; } else if (j.Playlist) pl = j.Playlist; } }
       } catch (_) { /* offline/preview — fall to the default playlist */ }
     }
     pl = pl || DEFAULT_PLAYLIST;

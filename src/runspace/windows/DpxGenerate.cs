@@ -18,7 +18,8 @@ namespace Subsystem.Windows
         public static int Run(string[] args)
         {
             bool verbose = args.Contains("--verbose") || args.Contains("-v") || args.Contains("-verbose");
-            var cleanArgs = args.Where(a => a != "--verbose" && a != "-v" && a != "-verbose").ToArray();
+            bool profile = args.Contains("--profile");
+            var cleanArgs = args.Where(a => a != "--verbose" && a != "-v" && a != "-verbose" && a != "--profile").ToArray();
 
             if (cleanArgs.Length == 0)
             {
@@ -59,6 +60,7 @@ namespace Subsystem.Windows
             Console.WriteLine($"[DPX] embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)}");
 
             Dg.ConsoleVerbose = verbose;
+            if (profile) { Dp.Profile = true; Dp.Prof.Clear(); }
             using var decoder = new DpxDecoder(embedDb, decoderDb, spm, unitId, maxTokens: maxNew) { Verbose = verbose };
             var fault = decoder.BringUp();
             if (fault != null)
@@ -75,7 +77,26 @@ namespace Subsystem.Windows
 
             DpxStreamOutput(decoder, prompt, cts.Token);
             Console.WriteLine();
+            if (profile) PrintProfile();
             return 0;
+        }
+
+        // The named-hot-op receipt (CRQ190 step 1): Dp.Prof accumulates (total ms, call count) per ONNX
+        // OpType across every Dispatch call in the run — prefill AND decode. Sorted by total ms so the
+        // hottest op class is the first line, not a guess.
+        private static void PrintProfile()
+        {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("[DPX Op Profile]  (op | total ms | calls | ms/call)");
+            double grandTotal = Dp.Prof.Values.Sum(e => e.ms);
+            foreach (var kv in Dp.Prof.OrderByDescending(e => e.Value.ms))
+            {
+                double pct = grandTotal > 0 ? kv.Value.ms / grandTotal * 100.0 : 0;
+                Console.WriteLine($"  {kv.Key,-24} {kv.Value.ms,10:F1} ms  {kv.Value.n,6} calls  {kv.Value.ms / kv.Value.n,8:F3} ms/call  ({pct:F1}%)");
+            }
+            Console.WriteLine($"  {"TOTAL",-24} {grandTotal,10:F1} ms");
+            Console.ResetColor();
         }
 
         private static void DpxStreamOutput(DpxDecoder decoder, string prompt, CancellationToken ct)

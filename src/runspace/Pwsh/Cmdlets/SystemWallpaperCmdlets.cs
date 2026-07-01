@@ -2,8 +2,11 @@ using System;
 using System.Linq;
 using System.Management.Automation;
 using System.Text.Json;
+using Subsystem.Vom;
 
 namespace Subsystem.Pwsh.Cmdlets;
+
+
 
 // The Wp control plane — the system wallpaper is driven through the registry, never a private
 // setting: \Shell\SystemWallpaper names the active Shader playlist; \Capability\Shader\* is the
@@ -33,12 +36,16 @@ public sealed class GetSystemWallpaperCmdlet : WrapperCmdlet
             .ToArray();
         var available = shaders.Select(r => r.Name).ToArray();
         var ids = shaders.Select(r => r.Path.Substring(r.Path.LastIndexOf('\\') + 1)).ToArray();
-        Emit(new System.Collections.Generic.Dictionary<string, object>
+        
+        var results = new System.Collections.Generic.List<WallpaperRecord>();
+        for (int i = 0; i < shaders.Length; i++)
         {
-            ["Playlist"] = playlist,
-            ["Available"] = ids,
-            ["AvailableNames"] = available,
-        });
+            var id = ids[i];
+            var name = available[i];
+            var active = string.Equals(id, playlist, StringComparison.OrdinalIgnoreCase);
+            results.Add(new WallpaperRecord(id, name, active));
+        }
+        Emit(results.ToArray());
     }
 }
 

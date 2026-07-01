@@ -333,7 +333,10 @@ public class Dp
                         double dt = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                         var e = Prof.GetValueOrDefault(node.OpType); Prof[node.OpType] = (e.ms + dt, e.n + 1);
                     }
-                    outs = Dispatch(node, ins);
+                    else
+                    {
+                        outs = Dispatch(node, ins);
+                    }
                 }
                 catch (Exception ex)
                 {

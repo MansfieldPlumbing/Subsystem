@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Subsystem.Cm;
+using Subsystem.Vom;
 
 namespace Subsystem.RuntimeBroker
 {
@@ -16,14 +17,14 @@ namespace Subsystem.RuntimeBroker
         private const string Prefix = "\\Agent\\Session\\";
         private const int MaxTurns = 400;   // bound the manifest; a phone chat doesn't need infinite scrollback
 
-        public sealed class Turn
+        public record Turn
         {
             [JsonPropertyName("role")] public string Role { get; set; } = "user";   // user | assistant
             [JsonPropertyName("text")] public string Text { get; set; } = "";
             [JsonPropertyName("ts")]   public string Ts   { get; set; } = "";
         }
 
-        public sealed class Session
+        public record Session
         {
             [JsonPropertyName("id")]      public string Id      { get; set; } = "";
             [JsonPropertyName("title")]   public string Title   { get; set; } = "New chat";
@@ -76,10 +77,17 @@ namespace Subsystem.RuntimeBroker
             s.Updated = DateTime.UtcNow.ToString("o"); Persist(s); return true;
         }
 
+        public record AgentChatSummary(
+            [property: JsonPropertyName("id")] string Id,
+            [property: JsonPropertyName("title")] string Title,
+            [property: JsonPropertyName("updated")] string Updated,
+            [property: JsonPropertyName("turns")] int Turns
+        );
+
         // Lightweight list for the chat drawer: newest first, no transcript bodies.
-        public static object[] ListSummaries()
+        public static AgentChatSummary[] ListSummaries()
         {
-            var list = new List<(string updated, object row)>();
+            var list = new List<(string updated, AgentChatSummary row)>();
             foreach (var rec in Cm.Cm.List())
             {
                 if (rec.Type != "Session" || !rec.Path.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) || rec.ManifestJson == null) continue;
@@ -87,7 +95,7 @@ namespace Subsystem.RuntimeBroker
                 {
                     var s = JsonSerializer.Deserialize<Session>(rec.ManifestJson, Opt);
                     if (s == null) continue;
-                    list.Add((s.Updated, new { id = s.Id, title = s.Title, updated = s.Updated, turns = s.Turns.Count }));
+                    list.Add((s.Updated, new AgentChatSummary(s.Id, s.Title, s.Updated, s.Turns.Count)));
                 }
                 catch { }
             }

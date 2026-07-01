@@ -1,4 +1,5 @@
 using System;
+using Subsystem.Vom;
 
 namespace Subsystem.RuntimeBroker
 {
@@ -23,29 +24,22 @@ namespace Subsystem.RuntimeBroker
             try
             {
                 var b = Subsystem.Device.Power.GetBatteryStatus();
-                if (b.TryGetValue("Level", out var lvl))
-                {
-                    sb.Append(" | batt ").Append(lvl).Append('%');
-                    if (b.TryGetValue("IsCharging", out var c) && c is bool cb && cb) sb.Append(" charging");
-                }
+                sb.Append(" | batt ").Append(b.Level).Append('%');
+                if (b.IsCharging) sb.Append(" charging");
             }
             catch { }
             try
             {
                 var n = Subsystem.Device.Network.GetNetworkInfo();
-                bool wifi = n.TryGetValue("HasWiFi", out var w) && w is bool wb && wb;
-                bool cell = n.TryGetValue("HasCellular", out var ce) && ce is bool eb && eb;
-                bool conn = n.TryGetValue("IsConnected", out var ic) && ic is bool icb && icb;
-                sb.Append(" | net ").Append(wifi ? "wifi" : cell ? "cellular" : conn ? "connected" : "offline");
+                sb.Append(" | net ").Append(n.HasWiFi ? "wifi" : n.HasCellular ? "cellular" : n.IsConnected ? "connected" : "offline");
             }
             catch { }
             try
             {
                 var m = Subsystem.Device.Memory.GetMemoryInfo();
-                if (m.TryGetValue("AvailableBytes", out var av) && m.TryGetValue("TotalBytes", out var tt))
-                    sb.Append(" | mem ")
-                      .Append(Math.Round(Convert.ToInt64(av) / 1073741824.0, 1)).Append('/')
-                      .Append(Math.Round(Convert.ToInt64(tt) / 1073741824.0, 1)).Append("GB free");
+                sb.Append(" | mem ")
+                  .Append(Math.Round(m.AvailableBytes / 1073741824.0, 1)).Append('/')
+                  .Append(Math.Round(m.TotalBytes / 1073741824.0, 1)).Append("GB free");
             }
             catch { }
             if (!string.IsNullOrEmpty(model)) sb.Append(" | model ").Append(model).Append('/').Append(backend);
