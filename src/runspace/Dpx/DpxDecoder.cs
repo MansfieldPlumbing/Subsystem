@@ -334,7 +334,14 @@ namespace Subsystem.Dpx
 
         public void Dispose()
         {
-            // Transient runtime references are GC managed.
+            // Weight storage is VOM-native (CRQ164): the Dp instance lazily owns a Weights owner (its
+            // packed q4 tensors), scoped to its OWN lifetime, not any single turn's owner - a turn's
+            // owner gets Terminated on cancellation, but weights persist across turns (Dp.Run's _winit
+            // cache is decoded once and reused), so this cannot be wired to the per-turn Terminate above.
+            if (_interp?.WeightsOwner is Owner weightsOwner)
+            {
+                try { VomClass.Terminate(weightsOwner); } catch (Exception ex) { Dg.Log("rb", $"Terminate weights owner failed: {ex.Message}"); }
+            }
         }
     }
 }

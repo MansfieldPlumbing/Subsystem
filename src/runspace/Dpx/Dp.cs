@@ -7,6 +7,8 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Onnx;
+using Subsystem.Vom;
+using VomClass = Subsystem.Vom.Vom;
 
 namespace Subsystem.Dpx;
 
@@ -131,6 +133,13 @@ public class Tensor
     public int Qaxis;      // quantized dimension (axis 0 for gemma's per-output-channel weights)
     public byte[] Rawb;    // raw integer-weight bytes (UINT8/INT8), un-widened — the block-q4 contrib ops
                            // (MatMulNBits / GatherBlockQuantized) read the packed nibbles straight from here.
+                           // null when NativeRawb is set (VOM-region-backed weight load, CRQ164).
+    private unsafe byte* _nativeRawb;
+    private int _nativeRawbLen;
+    public unsafe void SetNativeRawb(byte* ptr, int len) { _nativeRawb = ptr; _nativeRawbLen = len; }
+    // ReadRawb: the packed-byte accessor kernels pin via `fixed` (the SAME statement transparently pins a
+    // managed array OR is a no-op over already-stable native memory — no kernel code branches on which).
+    public unsafe Span<byte> ReadRawb() => _nativeRawb != null ? new Span<byte>(_nativeRawb, _nativeRawbLen) : Rawb;
     public bool IsQuant => Qb != null;
     public bool IsInt => Ip != null;
     public long Count { get { long n = 1; foreach (var d in Shape) n *= d; return n; } }
@@ -230,7 +239,14 @@ public class Tensor
 public class Dp
 {
     readonly ModelProto _m;
-    public Dp(ModelProto m) => _m = m;
+    // Owner for weight storage (CRQ164): a caller that already has one (e.g. DpxDecoder's agent owner)
+    // should pass it so weights cascade-terminate with the rest of that agent's handles; otherwise one
+    // is created lazily on first use, scoped to this Dp instance's own lifetime.
+    Owner _owner;
+    public Dp(ModelProto m, Owner owner = null) { _m = m; _owner = owner; }
+    // Exposed so a caller that didn't supply an owner (weights got a lazily-created one, scoped to this
+    // Dp instance) can Terminate it when this Dp is no longer needed - null if Run() was never called.
+    public Owner WeightsOwner => _owner;
 
     public static readonly HashSet<string> Implemented = new()
     {
@@ -260,6 +276,10 @@ public class Dp
             // weight's source bytes AS it is decoded — so the ModelProto fp32 bytes and the _winit copy never
             // both pile up (keeps the fp32-path transient near steady, not 2x). Periodic reclaim of the freed LOH.
             _winit = new Dictionary<string, Tensor>();
+            // Weight storage is VOM-native (CRQ164): the packed block-q4 bytes (Rawb) go into a real VOM
+            // handle, not a GC array, so a ~1GB weight blob doesn't sit on the managed heap. Lazily own one
+            // if the caller didn't supply theirs.
+            _owner ??= VomClass.CreateOwner($"\\Agent\\Dpx\\Weights\\{Guid.NewGuid():N}");
             // Index initializers by name so a packed weight can find its sibling "<name>_scale"/"<name>_zp"
             // (EmitNativeQuant emits the three separately). A weight with a _scale sibling and a 2/4/8-bit
             // byte:element ratio stays PACKED (a quant Tensor); everything else widens via FromProto as before.
@@ -272,7 +292,7 @@ public class Dp
                 if (IsPackedQuant(init, scP))
                     _winit[init.Name] = MakeQuant(init, scP, byName.GetValueOrDefault(init.Name + "_zp"));
                 else
-                    _winit[init.Name] = FromProto(init);
+                    _winit[init.Name] = FromProto(init, _owner);
                 init.RawData = new ByteString(System.Array.Empty<byte>());   // source bytes consumed; free them now
                 if ((++k & 63) == 0) GC.Collect();
             }
@@ -766,7 +786,7 @@ public class Dp
     // zero-point — distinct from QGemm's per-row SIGNED packing. Contracts read straight off the q4 .db export. =====
 
     // one 4-bit nibble at logical index `idx` in a packed row starting at byte `rowOff` (low nibble = even idx).
-    static int Nib4(byte[] buf, int rowOff, int idx) => (buf[rowOff + (idx >> 1)] >> ((idx & 1) << 2)) & 0xF;
+    static unsafe int Nib4(byte* buf, int rowOff, int idx) => (buf[rowOff + (idx >> 1)] >> ((idx & 1) << 2)) & 0xF;
 
     // MatMulNBits: Y = A @ dequant(B)^T. B is uint8 [N, K/bs, bs*bits/8] (k-major nibbles, byte=k/2). scale/zp are
     // per (output-row n, block b=k/bs); 4-bit unsigned, dequant = (q - zp)·scale. zp defaults to 2^(bits-1) when absent.
@@ -775,11 +795,16 @@ public class Dp
         int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
-        byte[] B = x[1].Rawb; byte[] zpb = x.Length > 3 && x[3] != null ? x[3].Rawb : null;
+        var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
         var y = TensorArena.AllocSpan((long)M * N);
-        fixed (float* p_y = y) fixed (float* p_a = a) fixed (float* p_sc = scsp)   // pin: Span can't cross the lambda boundary (CS8175)
+        // pin: Span can't cross the lambda boundary (CS8175) - `fixed` transparently pins a managed
+        // array OR no-ops over already-stable VOM-region memory, so B/zp being weight-load-time VOM
+        // handles or legacy GC arrays needs no branch here (CRQ164 handle-indirection payoff).
+        fixed (float* p_y = y) fixed (float* p_a = a) fixed (float* p_sc = scsp)
+        fixed (byte* p_b = bSpan) fixed (byte* p_zp = zpSpan)
         {
             float* py = p_y; float* pa = p_a; float* psc = p_sc; int yl = y.Length, al = a.Length;
+            byte* pB = p_b; byte* pZp = p_zp;
             System.Threading.Tasks.Parallel.For(0, N, nn =>
             {
                 var sy = new Span<float>(py, yl); var sa = new Span<float>(pa, al); var sc = new Span<float>(psc, scLen);
@@ -789,10 +814,10 @@ public class Dp
                     int ao = m * K; float acc = 0f;
                     for (int b = 0; b < nBlk; b++)
                     {
-                        float s = sc[nn * nBlk + b]; int zp = zpb != null ? Nib4(zpb, zb, b) : defZp;
+                        float s = sc[nn * nBlk + b]; int zp = pZp != null ? Nib4(pZp, zb, b) : defZp;
                         float aq = 0f, asum = 0f; int k0 = b * bs;
                         for (int i = 0; i < bs; i++)
-                        { int k = k0 + i; int q = (B[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF; float av = sa[ao + k]; aq += av * q; asum += av; }
+                        { int k = k0 + i; int q = (pB[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF; float av = sa[ao + k]; aq += av * q; asum += av; }
                         acc += s * (aq - zp * asum);   // int-domain accumulate, lift to real units at the block boundary
                     }
                     sy[m * N + nn] = acc;
@@ -805,23 +830,30 @@ public class Dp
 
     // GatherBlockQuantized: gather rows of a block-q4 table by indices, dequant inline (gemma embed: data uint8
     // [V, H·bits/8], quantize_axis=1 along H, gather_axis=0). out = dequant(data[indices]) -> [*indices.shape, H].
-    static Tensor GatherBlockQuantized(Tensor[] x, NodeProto n)
+    static unsafe Tensor GatherBlockQuantized(Tensor[] x, NodeProto n)
     {
         int bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
         int gAxis = (int)L(n, "gather_axis", 0), qAxis = (int)L(n, "quantize_axis", 1);
         if (gAxis != 0 || qAxis != 1) throw new NotImplementedException($"GatherBlockQuantized gather_axis={gAxis} quantize_axis={qAxis} (only 0/1 wired)");
-        byte[] data = x[0].Rawb; var idx = x[1].AsI(); var sc = x[2].AsF(); byte[] zpb = x.Length > 3 && x[3] != null ? x[3].Rawb : null;
+        var dataSpan = x[0].ReadRawb(); var idx = x[1].AsI(); var sc = x[2].AsF();
+        bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
         int V = x[0].Shape[0]; int rowBytes = 1; for (int k = 1; k < x[0].Shape.Length; k++) rowBytes *= x[0].Shape[k];
         int H = rowBytes * 8 / bits, nBlk = H / bs, zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         long outN = (long)idx.Length * H; var o = TensorArena.AllocSpan(outN);
-        for (int t = 0; t < idx.Length; t++)
+        // fixed transparently pins a managed array OR no-ops over already-stable VOM-region memory (same
+        // reasoning as MatMulNBits) - no branch on whether the embedding table loaded via DpTensor/VOM.
+        fixed (byte* p_data = dataSpan) fixed (byte* p_zp = zpSpan)
         {
-            long r = idx[t]; if (r < 0) r += V; int rb = (int)r * rowBytes, zb = (int)r * zpRowBytes, sb = (int)r * nBlk; long ob = (long)t * H;
-            for (int k = 0; k < H; k++)
+            byte* data = p_data; byte* zpb = p_zp;
+            for (int t = 0; t < idx.Length; t++)
             {
-                int b = k / bs; int q = (data[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF;
-                int zp = zpb != null ? Nib4(zpb, zb, b) : defZp;
-                o[(int)(ob + k)] = (q - zp) * sc[sb + b];
+                long r = idx[t]; if (r < 0) r += V; int rb = (int)r * rowBytes, zb = (int)r * zpRowBytes, sb = (int)r * nBlk; long ob = (long)t * H;
+                for (int k = 0; k < H; k++)
+                {
+                    int b = k / bs; int q = (data[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF;
+                    int zp = zpb != null ? Nib4(zpb, zb, b) : defZp;
+                    o[(int)(ob + k)] = (q - zp) * sc[sb + b];
+                }
             }
         }
         var outShape = new List<int>(x[1].Shape) { H };
@@ -1957,7 +1989,7 @@ public class Dp
     static float F(NodeProto n, string name, float def) { foreach (var a in n.Attribute) if (a.Name == name) return a.F; return def; }
     static int[] Ints(NodeProto n, string name) { foreach (var a in n.Attribute) if (a.Name == name) return a.Ints.Select(v => (int)v).ToArray(); return Array.Empty<int>(); }
 
-    public static Tensor FromProto(TensorProto t)
+    public static unsafe Tensor FromProto(TensorProto t, Owner owner = null)
     {
         var dims = t.Dims.Select(d => (int)d).ToArray();
         long n = 1; foreach (var d in dims) n *= d;
@@ -1973,7 +2005,24 @@ public class Dp
             // 4.48 GB PLE still exceeds the float[] / 2 GB cap here — that's gap #2 (lazy region gather).
             case 16: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = BitConverter.Int32BitsToSingle((int)((uint)(ushort)(raw[2 * k] | (raw[2 * k + 1] << 8)) << 16)); return Tensor.F(f, dims); } // BFLOAT16
             case 10: { var raw = t.RawData.Span; var f = new float[n]; for (int k = 0; k < n; k++) f[k] = (float)BitConverter.UInt16BitsToHalf((ushort)(raw[2 * k] | (raw[2 * k + 1] << 8))); return Tensor.F(f, dims); } // FLOAT16
-            case 2: case 3: return new Tensor { Rawb = t.RawData.Span.ToArray(), Shape = dims };   // UINT8/INT8 weight bytes, un-widened — block-q4 ops (MatMulNBits / GatherBlockQuantized) read the nibbles
+            // UINT8/INT8 weight bytes, un-widened - block-q4 ops (MatMulNBits / GatherBlockQuantized) read
+            // the nibbles straight from here. VOM-region-backed (CRQ164) when an owner is supplied - the
+            // packed q4 embed/lm-head tables run into the hundreds of MB, off the GC entirely; falls back
+            // to a GC array only for the owner-less call sites (Constant/attribute folding, small tensors).
+            case 2: case 3:
+            {
+                int byteLen = t.RawData.Span.Length;
+                if (owner != null)
+                {
+                    var dt = DpTensor.Alloc(owner, dims, VomFormat.Bytes, subdir: "Weights",
+                                             name: string.IsNullOrEmpty(t.Name) ? null : t.Name);
+                    t.RawData.Span.CopyTo(dt.ReadBytes());
+                    var rt = new Tensor { Shape = dims };
+                    rt.SetNativeRawb((byte*)dt.Data.Resource, byteLen);
+                    return rt;
+                }
+                return new Tensor { Rawb = t.RawData.Span.ToArray(), Shape = dims };
+            }
             default: throw new NotImplementedException($"initializer dtype {t.DataType} ({t.Name})");
         }
     }
