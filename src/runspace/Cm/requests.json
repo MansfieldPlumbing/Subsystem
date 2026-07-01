@@ -2310,6 +2310,18 @@
         "Noted": 1782946707,
         "Disposition": "design",
         "Body": "STRATEGY (Fable, from a 3-agent survey that READ every zoo script + every compiled cmdlet family + VomDrive.cs, and VERIFIED failures by reproduction). THE GRADE: the zoo does NOT suck as a design - whoever said so graded the wrong axis. Design B+ (tested ConvertFrom-* parser core, thin Get-* wrappers over the elevated adb channel, typed RequestRecord/CapabilityRecord, the vom: provider is genuinely excellent). SHIPPING DISCIPLINE: D - (1) 11 of 20 zoo scripts are provably broken ON-DEVICE: they invoke siblings as files via & $PSScriptRoot\\X.ps1, but zoo scripts load as asset-backed functions where that path is NULL (verified by reproduction); (2) 9 pipe Invoke-AdbShell's single blob string into line-oriented parsers (garbage parse); (3) Get-AndroidCpu.ps1 assigns the READ-ONLY automatic $pid, silently substituting the HOST process id into every row (verified) - wrong data, worse than an error; (4) all 8 zoo/cs compiled twins are permanently SHADOWED dead code (function wins over cmdlet at resolution) and have already drifted from their .ps1 canon; (5) across ~90 total cmdlets, NOT ONE Stop/Remove/Set/Close binds the handle its own Get/Start sibling emits - zero ValueFromPipelineByPropertyName welds anywhere; (6) the write/lifecycle plane talks to Host.UI in colored text instead of emitting records (New-Session returns NOTHING, errors as red text not ErrorRecords, Start-AndroidScreenStream emits its handle as a STDERR scrape-line). THE DOCTRINE (6 principles): 1. THE WELD RULE - every handle a Get/Start emits binds into its Stop/Remove/Set/Close sibling ByPropertyName, same property name. 2. Objects-never-strings means TYPED RECORDS, not Dictionary/hashtable rows (those break dot-binding - strings with extra steps). 3. Host.UI is presentation, NEVER a return channel; errors are ErrorRecords. 4. The vom: provider is the spine - idiomatic faces (Remove-Item vom:\\... IS Stop-VomThread) before any new verb. 5. Chainability IS CRQ179 compliance - stable PascalCase property names; every weld is an intent join for e2b. 6. Parsers are library (pure, pipeline-fed, blob-safe), wrappers are welds (call functions by NAME, never by file). ORDERED MOVES (owner): M1 delete the 8 shadowed cs/ twins [S, SCOTT ruling]; M2 the weld pass - one-line ByPropertyName retrofits across ~10 named Get|Stop/Close/Set pairs incl. Close-Request.Id + Add-EosLog.Id [S, SONNET]; M3 fix the zoo's two mechanical killers: function-name calls + parsers split blobs in process{} [M, SONNET]; M4 point-fix $pid corruption + Get-AndroidSetting naked string [S, SONNET]; M5 evict non-animals (Test-Parsers' bare exit can tear down the runspace; Test-BinderSurface dead-on-arrival; Invoke-RdConsult permanent stub) [S, SCOTT ruling]; M6 records-not-hashtables retrofit on DeviceReader/Surface/Wallpaper/AgentSession [M, SONNET]; M7 unbreak the lifecycle console-talkers (Session family emits records, Detach->Disconnect approved verb) [M, FABLE]; M8 de-stringify the perception plane: Get-AndroidScreen parsed frame object, Invoke-Agent emits a turn record by default with -Stream as the host opt-in [M, FABLE]; M9 zoo record-extraction for the 6 amorphous-tree emitters (Thermal/Alarm/Job/DeviceIdle/Gfx/Netstat -> flat typed records, -Raw keeps the tree) [L, FABLE spec + SONNET impl]; M10 ship the actuation verbs (Set-AndroidSetting, Stop/Start-AndroidApp, Push/Receive-AndroidFile, Get-AndroidLog streaming logcat records - the zoo is 100% read-only today, a Get-only catalog gives the pipe nothing to chain INTO) [M, FABLE]; M11 coverage backfill (~10 lookalike dumps) ONLY after the pattern is fixed [L, SONNET]; M12 grow vom: into the spine (RemoveItem face, GetContentReader, fix the O(N^2) rebuild, wildcards) [M, FABLE]; M13 the WinDirStat hook (CRQ186): ONE Show-Treemap presenter cmdlet taking ANY record stream + -Weight/-Kind/-Label - Get-ChildItem vom:\\Sessions -Recurse | Show-Treemap -Weight Bytes -Kind Type - buildable only after the record discipline lands [L, FABLE]; M14 ratify or alias the Remedy verb [S, SCOTT ruling]. Net: about two weeks of mostly one-line and pattern-per-file fixes turns \"emits objects\" into \"composes\" - which is also exactly what makes e2b's intent set composable."
+      },
+      {
+        "Request": 187,
+        "Noted": 1782948364,
+        "Disposition": "claim",
+        "Body": "Antigravity: M2/M3/M4/M6"
+      },
+      {
+        "Request": 187,
+        "Noted": 1782948371,
+        "Disposition": "claim",
+        "Body": "Antigravity: M2/M3/M4/M6"
       }
     ],
     "Ref": "CRQ000000000187"
@@ -2352,8 +2364,42 @@
         "Noted": 1782948248,
         "Disposition": "assignment",
         "Body": "AI STUDIO / GEMINI ASSIGNMENT (spec-only, NO repo access; deliverable = one markdown table document). Produce the WINDOWS PARITY MAP for Subsystem: every native-awareness capability the Android head has (Device/Readers.cs: battery, sensors, network; Actuators; Light; Surfaces; thermal via dumpsys; the Get-Android* zoo) mapped to its Windows implementation, fortified EXCLUSIVELY from Microsoft Learn. One row per capability, columns: | Capability | Android-head implementation (file/cmdlet) | Windows API (exact Microsoft Learn page title + URL) | Proposed surface (Device driver VOM leaf + Verb-Noun cmdlet, verbs ONLY from: Create Open Close Query Set Enumerate Parse Read Write Register Unregister Reference Dereference Alloc Free Spawn Terminate Signal Wait Initialize Load Rehydrate Project Mount Bind Grant Revoke Resolve Extract Apply Remedy) | Typed record shape it emits | Capability-gate needed (default-deny y/n) | Effort S/M/L |. ALSO include Windows-only fortifications the Android head cannot have, each with its Learn citation: CIM/WMI as the Windows dumpsys-zoo equivalent (name the specific CIM classes per row), ETW as a Dg diagnostic sink, SCM service install for the CRQ188 kernel (opt-in only), Job Objects as process-carrier containment under a VOM Owner, DXGI adapter/memory queries for the Dpx GPU path. RULES: objects never strings (every row emits a typed record, never text); no async (the fence idiom is the house sync); nothing hardcoded; every claim cites a live Learn page; if an API is deprecated on Learn, say so and name the replacement. The doc must stand alone - a grunt implements a row without asking you anything. Return as one self-contained markdown block so the courier session can file it via Add-EosLog onto this Request."
+      },
+      {
+        "Request": 189,
+        "Noted": 1782948468,
+        "Disposition": "design",
+        "Body": "SCOPE WIDENED - head parity is the law, not a wishlist. Scott 2026-07-01 verbatim: \"a lot of the android/windows head stuff is a false dichotemy we should make android/windows almost have complete parity\". The rule that keeps it true: a capability lands as ONE core seam + N thin per-head drivers (invariant 9 - one concept, one name, N rungs), never as a head-exclusive feature. Parity is BIDIRECTIONAL: Windows gains the Device-driver family this CRQ maps from Learn; Android gains self-build/one-stop (CRQ180), MCP serving, and the gateway presence. The parity MATRIX (capability x head, green/red per cell) becomes a tracked projection the binary can print - and a windirstat treemap mount (CRQ186) so the gap is visible at a glance. The AI Studio parity-map deliverable on this CRQ is the seed of that matrix."
       }
     ],
     "Ref": "CRQ000000000189"
+  },
+  {
+    "Id": 190,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "DPX AS CHIMERA - the runtime thesis, settled. Scott 2026-07-01 verbatim: \"can dpx be more than onnxruntime? can it be a chimera of all the best parts of ggml/qnn/trt even?\". The fight DPX wins is NOT the kernel race against ORT - it is the substrate race nobody else is running: (1) model.db is queryable/mutable TRUTH (graph=rows, tensors=BLOB, CRQ144/158/162) where every other runtime has an opaque artifact; (2) memory is VOM-owned and deterministic (DpTensor q4 off the GC, quota, cascade-kill, CRQ164); (3) the data plane IS DirectPort - a tensor is a fenced shareable region, so cross-process/cross-device placement is a property of the type, not a feature bolted on; (4) sovereign and auditable end to end (trusting-trust, CRQ180). ORGAN THEFTS, in order: FROM GGML - the q4 SIMD dot-kernel discipline (AVX2/NEON) for the CPU hot loop; the 0.5 tok/s decode is a kernel-quality gap, not an architecture gap. FROM TRT - ahead-of-time cooked plans: fused op chains + chosen tactics persisted INTO model.db as rows (a plans table beside the tensors - the db makes TRT's engine-blob pattern natural, and the proven model.db->HTP context-binary (CRQ158) already IS this pattern for the NPU; extend it to DXIL/SPIR-V for the GPU). FROM QNN - the Hexagon door Scott personally opened (own blob format, HMX swizzle decoded); per-op CPU/GPU/NPU placement rides the same cooked-plan rows. ORT - stays OUTSIDE as the offline parity oracle (CRQ121 doctrine), demoted from runtime to referee; every kernel tournament and cooked plan must beat/match the oracle numerically in its receipt. KERNEL TOURNAMENT (the acquisition mechanism): Scott grabbed remix_-spinnerevolve (Downloads) - an LLM-mutation evolutionary loop (progenitor code -> model mutates -> render -> fitness -> select). Same primitive over kernels: mutate gemm.hlsl/gemm.comp variants (tile/workgroup/unroll), run each against a fixed workload on the REAL adapter, fitness = measured ms + oracle parity, winner cooked into model.db per (op-shape, device). e2b/Gemini is the mutator, exactly as in the grabbed app. TRT tactic selection, rebuilt as the shader tournament.",
+    "RelatedFiles": [],
+    "Severity": 1,
+    "Status": "Open",
+    "Created": 1782948468,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000190"
+  },
+  {
+    "Id": 191,
+    "Kind": "Change",
+    "Category": "Rb",
+    "Summary": "ONE MODEL, ONE DB - consolidate the gemma4-e2b face files into a single gemma4-e2b.db. Scott 2026-07-01 verbatim: \"shouldnt we consolidate those separate db files into a single gemma4-e2b-onnx.db?\". Today S:\\modeldb carries embed-q4 (1.76GB) + decoder-q4 (1.87GB) + vision-fp16 + audio-fp16 as separate dbs plus a loose gemma-4-e2b.spm. Consolidate: one db, FACES as named graphs in rows (embed/decoder/vision/audio), the .spm tokenizer as a blob table (self-describing model - no loose sidecar), a manifest table (hashes, quant, provenance), per-tensor format columns as today. The reason is not tidiness: ROWS, not files, are the streaming unit - the federated mesh (CRQ173) and the UDP courier (CRQ169) pull tensors/experts selectively over DirectPort, so file boundaries stop mattering the moment the faces share one db; and cooked plans (chimera CRQ) land beside the tensors they compile. DEADPOOL FLAG (Scott decides): gemma4-e2b-litert.db (2.56GB) is the retired LiteRT lane (CRQ170) - delete once ONNX-lane parity is receipted.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782948468,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [],
+    "Ref": "CRQ000000000191"
   }
 ]

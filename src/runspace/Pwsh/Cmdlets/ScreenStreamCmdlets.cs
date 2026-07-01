@@ -337,7 +337,7 @@ internal static class ScreenYuv
 [OutputType(typeof(bool))]
 public sealed class StopAndroidScreenStreamCmdlet : WrapperCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public string SessionId { get; set; } = string.Empty;
 
     protected override void ProcessRecord()

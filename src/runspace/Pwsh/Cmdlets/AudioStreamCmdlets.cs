@@ -311,7 +311,7 @@ public sealed class StartAndroidAudioStreamCmdlet : WrapperCmdlet
 [OutputType(typeof(bool))]
 public sealed class StopAndroidAudioStreamCmdlet : WrapperCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public string SessionId { get; set; } = string.Empty;
 
     protected override void ProcessRecord()

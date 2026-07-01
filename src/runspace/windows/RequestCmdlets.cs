@@ -116,7 +116,7 @@ public sealed class GetRequestCmdlet : PSCmdlet
 [OutputType(typeof(RequestRecord))]
 public sealed class CloseRequestCmdlet : PSCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public long Id { get; set; }
 
     [Parameter(Mandatory = true, Position = 1)]
@@ -142,7 +142,7 @@ public sealed class CloseRequestCmdlet : PSCmdlet
 [OutputType(typeof(EosLogEntry))]
 public sealed class AddEosLogCmdlet : PSCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public long Id { get; set; }
 
     [Parameter(Mandatory = true, Position = 1)]

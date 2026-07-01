@@ -182,7 +182,7 @@ public sealed class GetPsrpSessionCmdlet : WrapperCmdlet
 [Cmdlet(VerbsCommon.Remove, "PsrpSession")]
 public sealed class RemovePsrpSessionCmdlet : WrapperCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public string Id { get; set; } = string.Empty;
 
     protected override void ProcessRecord()
@@ -201,7 +201,7 @@ public sealed class RemovePsrpSessionCmdlet : WrapperCmdlet
 [Cmdlet(VerbsCommon.Remove, "Session")]
 public sealed class RemoveSessionCmdlet : WrapperCmdlet
 {
-    [Parameter(Mandatory = true, Position = 0)]
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
     public string Name { get; set; } = string.Empty;
 
     protected override void ProcessRecord()

@@ -29,7 +29,7 @@ internal static class AdbProcessParser
                     int.TryParse(parts[3], out int rss))
                 {
                     var obj = new PSObject();
-                    obj.Properties.Add(new PSNoteProperty("PID", pid));
+                    obj.Properties.Add(new PSNoteProperty("ProcessId", pid));
                     obj.Properties.Add(new PSNoteProperty("PPID", ppid));
                     obj.Properties.Add(new PSNoteProperty("User", parts[2]));
                     obj.Properties.Add(new PSNoteProperty("RSS_KB", rss));
@@ -131,7 +131,7 @@ public sealed class GetAndroidProcessTreeCmdlet : WrapperCmdlet
         foreach (var p in AdbProcessParser.ParsePsOutput(output))
         {
             var treeProc = new PSObject();
-            treeProc.Properties.Add(new PSNoteProperty("id", p.Properties["PID"].Value.ToString()));
+            treeProc.Properties.Add(new PSNoteProperty("id", p.Properties["ProcessId"].Value.ToString()));
             treeProc.Properties.Add(new PSNoteProperty("name", p.Properties["Name"].Value));
             treeProc.Properties.Add(new PSNoteProperty("cpu", 0));
             
@@ -154,7 +154,7 @@ public sealed class GetAndroidProcessTreeCmdlet : WrapperCmdlet
 [Cmdlet(VerbsLifecycle.Stop, "AndroidProcess")]
 public sealed class StopAndroidProcessCmdlet : WrapperCmdlet
 {
-    [Parameter(Mandatory = true)] public int ProcessId { get; set; }
+    [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true)] public int ProcessId { get; set; }
 
     protected override void ProcessRecord()
     {
