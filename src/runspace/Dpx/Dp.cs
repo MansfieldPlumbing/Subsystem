@@ -924,7 +924,7 @@ public class Dp
     // GroupQueryAttention (com.microsoft): grouped MQA with KV-cache append, causal + sliding-window mask, additive
     // attention_bias[10]. do_rotary=0 here (RoPE applied by upstream RotaryEmbedding nodes). q[B,S,Nq·H]; k/v[B,S,Nkv·H];
     // past_k/v[B,Nkv,past,H]. Outputs: attn[B,S,Nq·H], present_k/v[B,Nkv,total,H] (the full cache; window only masks).
-    static Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n)
+    static unsafe Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n)
     {
         int Nq = (int)L(n, "num_heads", 0), Nkv = (int)L(n, "kv_num_heads", 0), win = (int)L(n, "local_window_size", -1);
         float scaleAttr = F(n, "scale", 0f), softcap = F(n, "softcap", 0f);
@@ -945,29 +945,42 @@ public class Dp
             }
         var bias = x.Length > 10 ? x[10] : null; var bf = bias != null && bias.Count > 0 ? bias.AsF() : default; var bsh = bias != null && bias.Count > 0 ? bias.Shape : null;
         int g = Nq / Nkv; var outp = TensorArena.AllocSpan((long)B * S * Nq * H);
-        var scores = new float[total];
-        for (int b = 0; b < B; b++)
-            for (int qh = 0; qh < Nq; qh++)
+        int qfLen = qf.Length, pkLen = pk.Length, pvLen = pv.Length, outpLen = outp.Length, bfLen = bf.Length;
+        bool q4d = x[0].Shape.Length == 4;
+        // Parallel over (batch, query-head): each head's K/V slice is independent, so this is safe with no
+        // shared mutable state - `scores` becomes a per-work-item local (Parallel.For's thread-local state),
+        // not the single shared buffer the sequential version used. During decode (S=1) this is the ONLY
+        // parallelism available in this kernel (Nq heads, e.g. 8, split across cores instead of one thread
+        // walking them one at a time); during prefill (S>1) it's additive to that.
+        fixed (float* p_qf = qf) fixed (float* p_pk = pk) fixed (float* p_pv = pv) fixed (float* p_outp = outp) fixed (float* p_bf = bf)
+        {
+            float* pqf = p_qf; float* ppk = p_pk; float* ppv = p_pv; float* poutp = p_outp; float* pbf = p_bf;
+            System.Threading.Tasks.Parallel.For(0, B * Nq, () => new float[total], (bqh, _, scores) =>
             {
-                int kvh = qh / g;
+                int b = bqh / Nq, qh = bqh % Nq, kvh = qh / g;
+                var qfL = new Span<float>(pqf, qfLen); var pkL = new Span<float>(ppk, pkLen);
+                var pvL = new Span<float>(ppv, pvLen); var outpL = new Span<float>(poutp, outpLen);
+                var bfL = bfLen > 0 ? new Span<float>(pbf, bfLen) : default;
                 for (int qi = 0; qi < S; qi++)
                 {
-                    int qpos = past + qi; long qBase = x[0].Shape.Length == 4 ? (((long)b * Nq + qh) * S + qi) * H : (((long)b * S + qi) * Nq + qh) * H;
+                    int qpos = past + qi; long qBase = q4d ? (((long)b * Nq + qh) * S + qi) * H : (((long)b * S + qi) * Nq + qh) * H;
                     float mx = float.NegativeInfinity;
                     for (int kj = 0; kj < total; kj++)
                     {
                         if (kj > qpos || (win > 0 && qpos - kj >= win)) { scores[kj] = float.NegativeInfinity; continue; }
                         long kBase = (((long)b * Nkv + kvh) * total + kj) * H; float dot = 0f;
-                        for (int e = 0; e < H; e++) dot += qf[(int)(qBase + e)] * pk[(int)(kBase + e)];
+                        for (int e = 0; e < H; e++) dot += qfL[(int)(qBase + e)] * pkL[(int)(kBase + e)];
                         dot *= scale; if (softcap > 0) dot = softcap * MathF.Tanh(dot / softcap);
-                        dot += BiasAt(bf, bsh, b, qh, qi, kj);
+                        dot += BiasAt(bfL, bsh, b, qh, qi, kj);
                         scores[kj] = dot; if (dot > mx) mx = dot;
                     }
                     double sum = 0; for (int kj = 0; kj < total; kj++) { if (float.IsNegativeInfinity(scores[kj])) { scores[kj] = 0f; continue; } float e = MathF.Exp(scores[kj] - mx); scores[kj] = e; sum += e; }
                     float inv = sum > 0 ? (float)(1.0 / sum) : 0f; long oBase = (((long)b * S + qi) * Nq + qh) * H;
-                    for (int e = 0; e < H; e++) { float acc = 0f; for (int kj = 0; kj < total; kj++) if (scores[kj] != 0f) acc += scores[kj] * pv[(int)((((long)b * Nkv + kvh) * total + kj) * H + e)]; outp[(int)(oBase + e)] = acc * inv; }
+                    for (int e = 0; e < H; e++) { float acc = 0f; for (int kj = 0; kj < total; kj++) if (scores[kj] != 0f) acc += scores[kj] * pvL[(int)((((long)b * Nkv + kvh) * total + kj) * H + e)]; outpL[(int)(oBase + e)] = acc * inv; }
                 }
-            }
+                return scores;
+            }, _ => { });
+        }
         return new[] { Tensor.F(outp, B, S, Nq * H), Tensor.F(pk, B, Nkv, total, H), Tensor.F(pv, B, Nkv, total, H) };
     }
 
