@@ -15,7 +15,8 @@
     "Device":  { "name": "Device Drivers",      "dependsOn": ["Vom", "Cm", "Dg"], "note": "hardware/OS interop drivers, each mounted as a VOM leaf (Light, Morse, Surfaces, WebDrive, VomInterop). Registered for the namespace grammar (SS011); FOLDER OMITTED so SS014 DAG attribution stays DEFERRED — these drivers legitimately reach the host (MainActivity) today; their reference cleanup is a separate migration, not this addition." },
     "Pwsh":    { "name": "PowerShell Surface",  "dependsOn": ["Vom", "Cm", "Dg"], "note": "the in-process runspace surface: SessionManager, ReplEngine, Translator, HelpSystem, cmdlet families. Folder omitted — SS014 deferred (same reason as Device)." },
     "Cmdlets": { "name": "Cmdlet Families",      "dependsOn": ["Pwsh"],            "note": "PSCmdlet families under Pwsh (sub-namespace Subsystem.Pwsh.Cmdlets). Registered so the grammar resolves EVERY segment; folder omitted (SS014 deferred)." },
-    "Zoo":     { "name": "Cmdlet Zoo",          "dependsOn": ["Cmdlets"],         "note": "asset-loaded auxiliary cmdlets (sub-namespace Subsystem.Pwsh.Cmdlets.Zoo). Folder omitted (SS014 deferred)." }
+    "Zoo":     { "name": "Cmdlet Zoo",          "dependsOn": ["Cmdlets"],         "note": "asset-loaded auxiliary cmdlets (sub-namespace Subsystem.Pwsh.Cmdlets.Zoo). Folder omitted (SS014 deferred)." },
+    "Adb":     { "name": "Adb Transport",       "dependsOn": ["Vom", "Dg"],       "note": "the device-attach transport (ADB wire protocol: connection, pairing, mDNS discovery, Conscrypt TLS) + the agent peer layer (AgentActorProtocol, DialoguePresenter). Registered deliberately on Scott's direction 2026-07-01 ('register adb if u have to'). Folder omitted (SS014 deferred, same as Device/Pwsh); named a legit-async network seam by synchronousCore — its sync ratchet is a separate migration." }
   },
 
   "hostPaths": ["src/runspace/windows/", "src/runspace/MainActivity.cs", "src/runspace/Services/",
@@ -28,7 +29,7 @@
     "_about": "Code that exists but whose component registration is a pending deliberate decision - do NOT coin codes for these in PRs.",
     "areas": [
       "Host/ (ObpHost, ProjectionServer, Registrar, SubsystemApi, ModelsApi, Firewall) - ratchet R7",
-      "Adb/", "Widgets/ (Android head)", "Services/ (Android head)", "RuntimeBroker satellites (ModelManager, ModelCatalog, AgentSessionTable, Hud)"
+      "Widgets/ (Android head)", "Services/ (Android head)", "RuntimeBroker satellites (ModelManager, ModelCatalog, AgentSessionTable, Hud)"
     ]
   },
 
