@@ -2322,6 +2322,30 @@
         "Noted": 1782948371,
         "Disposition": "claim",
         "Body": "Antigravity: M2/M3/M4/M6"
+      },
+      {
+        "Request": 187,
+        "Noted": 1782948490,
+        "Disposition": "M2 complete",
+        "Body": "Move M2 (Pipeline Welds) successfully completed and verified. Test results: test.pwsh.project-cmdlets.ps1 passed (verdict: pwsh superset: built-ins + project cmdlets loaded), test.vom.no-gc.ps1 passed (verdict: VOM is the heap; the collector is unused for the data plane AND for spawned VOM threads)."
+      },
+      {
+        "Request": 187,
+        "Noted": 1782948914,
+        "Disposition": "M3 complete",
+        "Body": "Move M3 (Zoo Repair) successfully completed and verified. Test-Parsers.ps1 passed successfully: Running parser unit tests... Testing ConvertFrom-KeyValue... Testing ConvertFrom-Settings... Testing ConvertFrom-Table... Testing ConvertFrom-DumpsysTree... All parser unit tests PASSED!"
+      },
+      {
+        "Request": 187,
+        "Noted": 1782948929,
+        "Disposition": "M4 complete",
+        "Body": "Move M4 (Data Corrupters) successfully completed and verified. Get-AndroidCpu.ps1 has been corrected to use $procId instead of the read-only $pid variable, and the round-trip parsing has been eliminated. Get-AndroidSetting.ps1 now emits a strongly typed record structure with Scope, Key, and Value properties."
+      },
+      {
+        "Request": 187,
+        "Noted": 1782949333,
+        "Disposition": "M6 complete",
+        "Body": "Move M6 (Records Not Hashtables) successfully completed and verified. Readers.cs and Surfaces.cs have been converted to return strongly typed record classes defined in Vom/DeviceRecords.cs. Get-SystemWallpaper has been modified to emit WallpaperRecord[] instead of parallel arrays, and settings.obp, bg.obp, and shader-bg.js have been updated to robustly consume the new record format. Get-AgentSession now returns strongly typed Session and AgentChatSummary records. Local Windows head build and self-tests are fully GREEN."
       }
     ],
     "Ref": "CRQ000000000187"
@@ -2385,7 +2409,26 @@
     "Created": 1782948468,
     "Closed": 0,
     "Disposition": "",
-    "EosLog": [],
+    "EosLog": [
+      {
+        "Request": 190,
+        "Noted": 1782948830,
+        "Disposition": "design",
+        "Body": "SHARPENED - the chimera is RECIPE THEFT, never CODE theft. Scott 2026-07-01 verbatim: \"not trying to thieve what is the proper way to build dpx into something greater than the sum of its parts and thank ggml for giving us the recipes we can use to accelerate\" + \"i refuse to import libraries\". LAW (the runtime twin of CRQ144 \"every compile dep must defend its own existence\"): DPX imports ZERO inference libraries - not ggml, not llama.cpp, not QNN's runtime as a linked dep, not ORT. What we take is the RECIPE: the algorithm, the memory layout, the tile math, the swizzle formula - reimplemented as OUR OWN code (C VOM / HLSL / SPIR-V / our own Hexagon blobs), each carrying a cited breadcrumb to the open work that taught it (exactly as the receipts already do: hmx-swizzle-RECEIPT.md credits haozixu/llama.cpp-npu + htp-ops-lib by file and function; qnn-htp-RECEIPT.md credits the QnnGraph API path). Attribution is the mechanism, not an afterthought - thank the source in the code comment and the receipt, link nothing. THE FOUR-PART METHOD to build greater-than-the-sum: (1) RECIPE, not binary - port the technique, cite the teacher; ggml gave the q4 dot-kernel and flash-attention tiling recipes, haozixu gave the HMX layout, we WRITE them. (2) ORACLE DISCIPLINE - ggml/ORT stay OUTSIDE as numerical referees; every DPX kernel must match the oracle within tolerance in its receipt (this is how you inherit their correctness without their dependency). (3) COOKED PLANS AS ROWS - the winning kernel per (op-shape, device) is persisted into model.db beside the tensors (TRT's engine-blob pattern, made natural by the db); the shader tournament (spinnerevolve primitive) is the selection mechanism. (4) THE UNIFICATION THE DONORS CANNOT DO - model.db as queryable truth, VOM-owned deterministic memory, DirectPort as the data plane so a tensor is a shareable fenced region, per-op CPU/GPU/NPU placement over ONE primitive. The donors shipped libraries a process LINKS; DPX is a substrate workloads LIVE IN. That gap - sovereignty + one primitive at every scale - is the \"greater than the sum\", and it is only reachable BECAUSE we refuse to import. NOVELTY, honestly (web-checked 2026-07-01, and the receipts say so themselves): the HMX swizzle was opened by haozixu (llama.cpp-npu, htp-ops-lib), NOT first-invented here; reverse-engineering QAIRT is an active field (arxiv 2509.23324, datavorous QAIRT writeup). What is distinctive here is the SOVEREIGN IN-PROCESS INTEGRATION - converter-free/python-free on-device context-binary generation (Route A) + a pure-PowerShell swizzle proof (Route C) wired into a self-hosting model.db substrate - not the format crack. Claim the integration, credit the cartographers."
+      },
+      {
+        "Request": 190,
+        "Noted": 1782948988,
+        "Disposition": "note",
+        "Body": "BANKED (Scott 2026-07-01, closing the provenance discussion): the recipe-not-code doctrine + the honest novelty framing above are settled - stop re-litigating, build. Distinctive claim = the sovereign in-process integration (converter-free/python-free on-device Route A + pure-PS swizzle Route C wired into model.db); the HMX layout crack is haozixu's, credited in the receipts. Proceed to real work: DPX decode-profile receipt -> name the hot op -> port the ONE ggml recipe (q4 dot-kernel) as our own C-VOM kernel validated against the oracle. No more discussion of firsts/repos - the git history + hash-anchored receipts ARE the provenance."
+      },
+      {
+        "Request": 190,
+        "Noted": 1782949810,
+        "Disposition": "progress",
+        "Body": "STEP 1 DONE (Sonnet 5, c11ed3c) - THE HOT OP IS NAMED, EMPIRICALLY. Dp.Profile/Dp.Prof existed as a dead hook (Scott-adjacent finding: it double-Dispatched every node when enabled, silently 2x-ing any profile run - fixed, one-line). Wired --profile into ss dpx-generate; ran against the REAL gemma4-e2b-onnx-decoder-q4.db (S:\\modeldb, 1.87GB) for 16 tokens: MatMulNBits = 189.9s of 194.1s = 97.8% of decode time, 3872 calls. Not a guess anymore.\n\nTHE PORT, SCOPED (recipe theft per CRQ190 doctrine - cite, reimplement, never link): current MatMulNBits (Dp.cs:818-854) is a fully scalar triple-nested loop (per output-row x per M-row x per k-in-block: unpack one nibble, multiply by one fp32 activation, accumulate) - zero SIMD, zero threading beyond the outer Parallel.For(N).\n\nPulled ggml's AVX2 q4_0 dot-kernel recipe (ggml-org/llama.cpp, ggml/src/ggml-cpu/arch/x86/quants.c, ggml_vec_dot_q4_0_q8_0) and diffed it against our actual format:\n- ggml q4_0: SYMMETRIC, block=32, dequant = (nibble - 8) * fp16_scale, no separate zero-point tensor, activations REQUANTIZED to int8 (block_q8_0) so the dot is int8xint8 via _mm256_maddubs_epi16 + _mm256_madd_epi16, THEN scaled by (d_weight*d_activation) via one _mm256_fmadd_ps, horizontal-summed.\n- our MatMulNBits (com.microsoft contrib op): block=32, UNSIGNED 4-bit, dequant = (nibble - zp) * scale where zp is an EXPLICIT per-block nibble-packed tensor (defaults to 8 = 2^(bits-1) when absent). KEY FINDING: when the zp tensor is absent, our formula is IDENTICAL to ggmls (same implicit center, same block size) - the port is a direct application, not an adaptation, for that case. When zp IS present it generalizes to a per-block broadcast subtract instead of a compile-time constant 8.\n- SECOND KEY DIFFERENCE: our activations stay fp32 the whole time (no int8 requantization) - so the target port is ggmls SIMPLER f32-activation dot-with-dequant shape, not the dual-quant int8xint8 path: unpack 8 nibbles/iter -> widen to int32 -> cvt to float -> subtract zp (per-block scalar or vector broadcast) -> _mm256_loadu_ps 8 activations -> _mm256_fmadd_ps -> accumulate -> multiply by block scale once per block -> horizontal sum. Smaller lift than the full ggml kernel - no activation quantization step needed.\n\nNEXT: port that loop as OUR OWN C-VOM AVX2 kernel (System.Runtime.Intrinsics.X86 or a native VOM kernel per CRQ190's C-ABI seam), validated against the current scalar path as the numerical oracle (CRQ121 doctrine) within fp32 tolerance, receipted with a before/after ms/call number replacing todays 190s/16-token baseline. Attribution: ggml-org/llama.cpp (ggml_vec_dot_q4_0_q8_0, Apache/MIT) cited in the kernel's doc comment - recipe theft, zero import, per CRQ190."
+      }
+    ],
     "Ref": "CRQ000000000190"
   },
   {
