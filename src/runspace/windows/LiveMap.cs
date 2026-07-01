@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -81,6 +82,71 @@ internal static class LiveMap
 
         Console.WriteLine("(⇐ = this file's internal `using Subsystem.*` edges — what it includes from the rest of the tree.)");
         return 0;
+    }
+
+    // --- the manifest ---
+
+    // The MANIFEST — every file under the repo root, grouped by folder, names only. The map above answers
+    // "how is the source structured"; this answers "what exists AT ALL" — every extension, not just .cs:
+    // tests, docs, native, shaders, scripts, artifacts. Onboard embeds it as a mandatory section (CRQ178),
+    // so seeing that a file exists never depends on a session deciding to go look for it. Noise is pruned
+    // by directory NAME (.git, obj, bin, vendor, node_modules, .vs) plus .claude/worktrees — nested working
+    // copies of this same tree, which would multiply every entry.
+    private static readonly string[] NoiseDirNames = { ".git", "obj", "bin", "vendor", "node_modules", ".vs" };
+    private static readonly HashSet<string> NoiseDirs = new(NoiseDirNames, StringComparer.OrdinalIgnoreCase);
+
+    internal static string ProjectManifest(string root)
+    {
+        if (!Directory.Exists(root)) return "";
+        root = Path.GetFullPath(root);
+        var byDir = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        EnumerateManifest(root, root, byDir);
+        int total = 0;
+        foreach (var names in byDir.Values) total += names.Count;
+
+        const int Width = 118;
+        var sb = new StringBuilder();
+        sb.AppendLine($"{total} files · every file under {root}");
+        sb.AppendLine($"(pruned: {string.Join(", ", NoiseDirNames)}, .claude/worktrees). A file not listed here does not exist.");
+        sb.AppendLine();
+        foreach (var kv in byDir)
+        {
+            kv.Value.Sort(StringComparer.OrdinalIgnoreCase);
+            var line = new StringBuilder($"{kv.Key} ({kv.Value.Count}):");
+            foreach (var name in kv.Value)
+            {
+                if (line.Length + name.Length + 1 > Width) { sb.AppendLine(line.ToString()); line.Clear().Append("     "); }
+                line.Append(' ').Append(name);
+            }
+            sb.AppendLine(line.ToString());
+        }
+        sb.AppendLine();
+        sb.Append("Structure (top-level types + include edges per file): `ss contextualize --map` / ss_map.");
+        return sb.ToString();
+    }
+
+    // One recursion step: this dir's files into the bucket, then descend past the noise. An unreadable dir
+    // is skipped, never fatal (mirrors Parse).
+    private static void EnumerateManifest(string root, string dir, SortedDictionary<string, List<string>> byDir)
+    {
+        string[] files, subdirs;
+        try { files = Directory.GetFiles(dir); subdirs = Directory.GetDirectories(dir); }
+        catch { return; }
+        if (files.Length > 0)
+        {
+            var rel = Path.GetRelativePath(root, dir).Replace('\\', '/');
+            var key = rel == "." ? "(root)" : rel + "/";
+            if (!byDir.TryGetValue(key, out var list)) byDir[key] = list = new();
+            foreach (var f in files) list.Add(Path.GetFileName(f));
+        }
+        foreach (var d in subdirs)
+        {
+            var name = Path.GetFileName(d);
+            if (NoiseDirs.Contains(name)) continue;
+            if (name.Equals("worktrees", StringComparison.OrdinalIgnoreCase) &&
+                Path.GetFileName(dir).Equals(".claude", StringComparison.OrdinalIgnoreCase)) continue;
+            EnumerateManifest(root, d, byDir);
+        }
     }
 
     private sealed class FileNode
