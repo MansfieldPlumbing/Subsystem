@@ -31,8 +31,6 @@ internal static class Build
         };
     }
 
-    // `ss build` (default) — rebuild the WINDOWS head (this exe) from source via dotnet publish, then
-    // self-replace the running image. dotnet is still the compiler for this step (the last external dep).
     private static int BuildWindows(string[] args)
     {
         Console.WriteLine("ss build — self-rebuild (Windows head). Safety checks:");
@@ -45,10 +43,6 @@ internal static class Build
         var csproj = Path.Combine(root, "src", "runspace", "windows", "SubsystemWin.csproj");
         if (!File.Exists(csproj)) { Console.Error.WriteLine($"  [FAIL] project: {csproj} missing."); return 2; }
         Console.WriteLine($"  [ok] project: {csproj}");
-
-        var dotnet = ResolveDotnet();
-        if (dotnet == null) { Console.Error.WriteLine("  [FAIL] compiler: no dotnet (DOTNET_ROOT / <drive>\\dotnet / PATH). It is still the compiler — the last external dep."); return 2; }
-        Console.WriteLine($"  [ok] compiler: {dotnet}");
 
         if (srcFiles < 20) { Console.Error.WriteLine($"  [FAIL] sanity: only {srcFiles} .cs files — the source looks incomplete; refusing to build from it."); return 2; }
         Console.WriteLine($"  [ok] sanity: source is complete");
@@ -87,50 +81,74 @@ internal static class Build
             }
         }
 
-        // Embed the source so the rebuilt exe carries its own code (`ss extract` writes it back out).
-        var dump = Path.Combine(root, "src", "runspace", "windows", "ss-source.dump");
-        try { WriteSourceDump(root, dump); Console.WriteLine($"ss build: embedded source dump ({new FileInfo(dump).Length / 1024:n0} KB)"); }
-        catch (Exception ex) { Console.Error.WriteLine("ss build: source dump failed (building without embed): " + ex.Message); }
-
-        var drive = Path.GetPathRoot(root) ?? root;
-        var outDir = Path.Combine(drive, "tmp", "ss-build");
-        Console.WriteLine("ss build: publishing (self-contained, single-file) via " + dotnet);
-        int rc = RunProc(dotnet, $"publish \"{csproj}\" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o \"{outDir}\"");
-        var built = Path.Combine(outDir, "ss.exe");
-        if (rc != 0 || !File.Exists(built)) { Console.Error.WriteLine($"ss build: RED — publish failed (exit {rc})"); return 1; }
-        Console.WriteLine($"ss build: compiled ss.exe ({new FileInfo(built).Length / (1024 * 1024):n0} MB)");
+        Console.WriteLine("ss build: compiling in-process via Roslyn + packaging single-file bundle...");
+        var (exeBytes, compileErrors) = SelfBuild.Compile(root);
+        if (exeBytes == null)
+        {
+            var es = compileErrors ?? Array.Empty<string>();
+            Console.Error.WriteLine($"ss build: RED — compile failed ({es.Length} errors). First 40:");
+            foreach (var e in es.Take(40)) Console.Error.WriteLine("  " + e);
+            return 1;
+        }
+        Console.WriteLine($"ss build: compiled ss.exe ({exeBytes.Length / (1024 * 1024):n0} MB)");
 
         // Replace the running exe IN-SITU (update in place) + drop a copy in the source repo. Never the drive root.
         var selfExe = Environment.ProcessPath ?? Path.Combine(root, "ss.exe");
         foreach (var t in new[] { selfExe, Path.Combine(root, "ss.exe") }.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            try { File.Copy(built, t, true); Console.WriteLine("  + " + t); }
-            catch   // the running image is locked — rename it aside (Windows allows it), then copy.
+            try { File.WriteAllBytes(t, exeBytes); Console.WriteLine("  + " + t); }
+            catch   // the running image is locked — rename it aside (Windows allows it), then write.
             {
-                var old = t + ".old";
+                var old = t + "." + Guid.NewGuid().ToString("N").Substring(0, 4) + ".old";
                 try { if (File.Exists(old)) File.Delete(old); } catch { }
-                try { File.Move(t, old); File.Copy(built, t, true); Console.WriteLine($"  + {t}  (self-replaced; old → {old})"); }
+                try { File.Move(t, old); File.WriteAllBytes(t, exeBytes); Console.WriteLine($"  + {t}  (self-replaced; old → {old})"); }
                 catch (Exception ex) { Console.Error.WriteLine($"  ! {t}: {ex.Message}"); }
             }
         }
 
-        // The loose native sidecars (directport.dll + the VirtuaCam broker set) are ExcludeFromSingleFile,
-        // so they sit BESIDE the published ss.exe in outDir — the self-replace above only moved ss.exe. Copy
-        // them next to each ss.exe too, or a self-replaced binary can't LoadLibrary the broker (`ss camera`)
-        // or the DirectPort natives. Without this, a freshly self-built ss.exe is missing its native floor.
+        // Gather native sidecars from their repository sources and package them beside the executable
+        var sidecarSources = new List<string>();
+        var dpDll = Path.Combine(root, "src", "native", "directport", "directport.dll");
+        if (File.Exists(dpDll)) sidecarSources.Add(dpDll);
+        else
+        {
+            var fallbackDp = Path.Combine(root, "directport.dll");
+            if (File.Exists(fallbackDp)) sidecarSources.Add(fallbackDp);
+        }
+
+        var vcDir = Path.Combine(root, "src", "native", "virtuacam");
+        if (Directory.Exists(vcDir))
+        {
+            foreach (var f in Directory.GetFiles(vcDir))
+            {
+                if (f.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    sidecarSources.Add(f);
+            }
+        }
+        else
+        {
+            foreach (var name in new[] { "DirectPortBroker.dll", "DirectPortClient.dll", "DirectPortConsumer.dll", "DirectPortDisplay.dll", "DirectPortMFCamera.dll", "DirectPortMFGraphicsCapture.dll", "VirtuaCamProcess.exe" })
+            {
+                var f = Path.Combine(root, name);
+                if (File.Exists(f)) sidecarSources.Add(f);
+            }
+        }
+
+        var vomDll = Path.Combine(root, "src", "native", "vom", "vom.dll");
+        if (File.Exists(vomDll)) sidecarSources.Add(vomDll);
+
         foreach (var dir in new[] { Path.GetDirectoryName(selfExe), root }
                      .Where(d => !string.IsNullOrEmpty(d)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            foreach (var native in Directory.GetFiles(outDir)
-                         .Where(f => f.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                                  || f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
+            foreach (var srcPath in sidecarSources)
             {
-                var leaf = Path.GetFileName(native);
-                if (leaf.Equals("ss.exe", StringComparison.OrdinalIgnoreCase)) continue;
-                try { File.Copy(native, Path.Combine(dir!, leaf), true); }
+                var leaf = Path.GetFileName(srcPath);
+                var destPath = Path.Combine(dir!, leaf);
+                try { File.Copy(srcPath, destPath, true); Console.WriteLine($"  + sidecar: {leaf} -> {dir}"); }
                 catch (Exception ex) { Console.Error.WriteLine($"  ! sidecar {leaf} -> {dir}: {ex.Message}"); }
             }
         }
+
         Console.WriteLine("ss build: GREEN");
         return 0;
     }

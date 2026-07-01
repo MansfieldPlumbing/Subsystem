@@ -170,8 +170,8 @@ public readonly struct DpTensor
 
     public void Close()
     {
-        VomClass.Close(Owner, Data.Path);
-        if (QScale is Handle qs) VomClass.Close(Owner, qs.Path);
-        if (QZero is Handle qz) VomClass.Close(Owner, qz.Path);
+        VomClass.Close(Owner, Data.Id);
+        if (QScale is Handle qs) VomClass.Close(Owner, qs.Id);
+        if (QZero is Handle qz) VomClass.Close(Owner, qz.Id);
     }
 }

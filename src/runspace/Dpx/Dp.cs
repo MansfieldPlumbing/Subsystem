@@ -268,90 +268,109 @@ public class Dp
     public static readonly Random DropRng = new(1234);    // seeded -> reproducible rmse(p) sweep
     public static long Dropped = 0;
 
+    public bool Verbose { get; set; }
+    [ThreadStatic]
+    public static bool ActiveVerbose;
+
     Dictionary<string, Tensor> _winit;   // decoded initializers, cached: streaming Run()s many short feeds over ONE graph -> decode the 82M weights ONCE, not per chunk
-    public Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null)
+    public unsafe Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null)
     {
-        if (_winit == null)
+        ActiveVerbose = Verbose;
+        try
         {
-            // Decode initializers into the cached _winit (the ONLY copy kernels read across Run()s), freeing each
-            // weight's source bytes AS it is decoded — so the ModelProto fp32 bytes and the _winit copy never
-            // both pile up (keeps the fp32-path transient near steady, not 2x). Periodic reclaim of the freed LOH.
-            _winit = new Dictionary<string, Tensor>();
-            // Weight storage is VOM-native (CRQ164): the packed block-q4 bytes (Rawb) go into a real VOM
-            // handle, not a GC array, so a ~1GB weight blob doesn't sit on the managed heap. Lazily own one
-            // if the caller didn't supply theirs.
-            _owner ??= VomClass.CreateOwner($"\\Agent\\Dpx\\Weights\\{Guid.NewGuid():N}");
-            // Index initializers by name so a packed weight can find its sibling "<name>_scale"/"<name>_zp"
-            // (EmitNativeQuant emits the three separately). A weight with a _scale sibling and a 2/4/8-bit
-            // byte:element ratio stays PACKED (a quant Tensor); everything else widens via FromProto as before.
-            var byName = new Dictionary<string, TensorProto>();
-            foreach (var it in _m.Graph.Initializer) byName[it.Name] = it;
-            int k = 0;
-            foreach (var init in _m.Graph.Initializer)
+            if (_winit == null)
             {
-                byName.TryGetValue(init.Name + "_scale", out var scP);
-                if (IsPackedQuant(init, scP))
-                    _winit[init.Name] = MakeQuant(init, scP, byName.GetValueOrDefault(init.Name + "_zp"));
-                else
-                    _winit[init.Name] = FromProto(init, _owner);
-                init.RawData = new ByteString(System.Array.Empty<byte>());   // source bytes consumed; free them now
-                if ((++k & 63) == 0) GC.Collect();
-            }
-            _m.Graph.Initializer.Clear();
-            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect();
-        }
-        var env = new Dictionary<string, Tensor>(_winit);   // shallow: kernels allocate fresh outputs, never mutate weight arrays in place -> safe to reuse across chunks
-        foreach (var kv in feed) env[kv.Key] = kv.Value;
-        var nodes = _m.Graph.Node;
-        // Liveness reclaim: free each intermediate once its LAST consumer has run. A 4630-node decoder otherwise
-        // keeps every output forever (hundreds of 32MB [.,32003,.] tensors -> ~10GB). Weights alias _winit, so
-        // evicting them from env can't free them (correct — they're reused across streaming Run()s); only the
-        // per-run intermediates are reclaimed. Graph outputs are pinned. Pure memory management — numerics intact.
-        var lastUse = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (int i = 0; i < nodes.Count; i++) foreach (var inp in nodes[i].Input) if (!string.IsNullOrEmpty(inp)) lastUse[inp] = i;
-        var pinned = new HashSet<string>(_m.Graph.Output.Select(o => o.Name), StringComparer.Ordinal);
-        DpxMem.Sample();   // ambient RAM reading at entry (telemetry inlet for the host)
-        for (int ni = 0; ni < nodes.Count; ni++)
-        {
-            var node = nodes[ni];
-            var ins = node.Input.Select(n => string.IsNullOrEmpty(n) ? null : env[n]).ToArray();
-            Tensor[] outs;
-            if (Profile)
-            {
-                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                outs = Dispatch(node, ins);
-                double dt = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-                var e = Prof.GetValueOrDefault(node.OpType); Prof[node.OpType] = (e.ms + dt, e.n + 1);
-            }
-            else outs = Dispatch(node, ins);
-            // stale-read model: with prob p, a residual merge's second-branch transfer is "skipped" -> the residual carries (drop-path).
-            if (DropP > 0 && node.OpType == "Add" && (DropScope.Length == 0 || node.Name.Contains(DropScope)) && outs.Length > 0 && outs[0] != null && !outs[0].IsInt
-                && ins.Length > 0 && ins[0] != null && ins[0].Count == outs[0].Count && DropRng.NextDouble() < DropP)
-            { outs[0] = ins[0]; Dropped++; }
-            for (int i = 0; i < node.Output.Count && i < outs.Length; i++) if (!string.IsNullOrEmpty(node.Output[i])) env[node.Output[i]] = outs[i];
-            onNode?.Invoke(node, outs, env);   // env passed so a hook can INJECT an oracle value for downstream
-            foreach (var inp in node.Input)    // reclaim dead intermediates (last use is this node; never a pinned graph output)
-                if (!string.IsNullOrEmpty(inp) && lastUse.TryGetValue(inp, out var lu) && lu == ni && !pinned.Contains(inp))
+                // Decode initializers into the cached _winit (the ONLY copy kernels read across Run()s), freeing each
+                // weight's source bytes AS it is decoded — so the ModelProto fp32 bytes and the _winit copy never
+                // both pile up (keeps the fp32-path transient near steady, not 2x). Periodic reclaim of the freed LOH.
+                _winit = new Dictionary<string, Tensor>();
+                // Weight storage is VOM-native (CRQ164): the packed block-q4 bytes (Rawb) go into a real VOM
+                // handle, not a GC array, so a ~1GB weight blob doesn't sit on the managed heap. Lazily own one
+                // if the caller didn't supply theirs.
+                _owner ??= VomClass.CreateOwner($"\\Agent\\Dpx\\Weights\\{Guid.NewGuid():N}");
+                // Index initializers by name so a packed weight can find its sibling "<name>_scale"/"<name>_zp"
+                // (EmitNativeQuant emits the three separately). A weight with a _scale sibling and a 2/4/8-bit
+                // byte:element ratio stays PACKED (a quant Tensor); everything else widens via FromProto as before.
+                var byName = new Dictionary<string, TensorProto>();
+                foreach (var it in _m.Graph.Initializer) byName[it.Name] = it;
+                int k = 0;
+                foreach (var init in _m.Graph.Initializer)
                 {
-                    if (env.Remove(inp, out var t))
+                    byName.TryGetValue(init.Name + "_scale", out var scP);
+                    if (IsPackedQuant(init, scP))
+                        _winit[init.Name] = MakeQuant(init, scP, byName.GetValueOrDefault(init.Name + "_zp"));
+                    else
+                        _winit[init.Name] = FromProto(init, _owner);
+                    init.RawData = new ByteString(System.Array.Empty<byte>());   // source bytes consumed; free them now
+                    if ((++k & 63) == 0) GC.Collect();
+                }
+                _m.Graph.Initializer.Clear();
+                System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect();
+            }
+            var env = new Dictionary<string, Tensor>(_winit);   // shallow: kernels allocate fresh outputs, never mutate weight arrays in place -> safe to reuse across chunks
+            foreach (var kv in feed) env[kv.Key] = kv.Value;
+            var nodes = _m.Graph.Node;
+            // Liveness reclaim: free each intermediate once its LAST consumer has run. A 4630-node decoder otherwise
+            // keeps every output forever (hundreds of 32MB [.,32003,.] tensors -> ~10GB). Weights alias _winit, so
+            // evicting them from env can't free them (correct — they're reused across streaming Run()s); only the
+            // per-run intermediates are reclaimed. Graph outputs are pinned. Pure memory management — numerics intact.
+            var lastUse = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; i < nodes.Count; i++) foreach (var inp in nodes[i].Input) if (!string.IsNullOrEmpty(inp)) lastUse[inp] = i;
+            var pinned = new HashSet<string>(_m.Graph.Output.Select(o => o.Name), StringComparer.Ordinal);
+            DpxMem.Sample();   // ambient RAM reading at entry (telemetry inlet for the host)
+            for (int ni = 0; ni < nodes.Count; ni++)
+            {
+                var node = nodes[ni];
+                var ins = node.Input.Select(n => string.IsNullOrEmpty(n) ? null : env[n]).ToArray();
+                Tensor[] outs;
+                try
+                {
+                    if (Profile)
                     {
-                        if (!_winit.ContainsKey(inp) && !feed.ContainsKey(inp))
+                        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                        outs = Dispatch(node, ins);
+                        double dt = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                        var e = Prof.GetValueOrDefault(node.OpType); Prof[node.OpType] = (e.ms + dt, e.n + 1);
+                    }
+                    outs = Dispatch(node, ins);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Error executing node '{node.Name}' (op={node.OpType}): {ex.Message}", ex);
+                }
+                // stale-read model: with prob p, a residual merge's second-branch transfer is "skipped" -> the residual carries (drop-path).
+                if (DropP > 0 && node.OpType == "Add" && (DropScope.Length == 0 || node.Name.Contains(DropScope)) && outs.Length > 0 && outs[0] != null && !outs[0].IsInt
+                    && ins.Length > 0 && ins[0] != null && ins[0].Count == outs[0].Count && DropRng.NextDouble() < DropP)
+                { outs[0] = ins[0]; Dropped++; }
+                for (int i = 0; i < node.Output.Count && i < outs.Length; i++) if (!string.IsNullOrEmpty(node.Output[i])) env[node.Output[i]] = outs[i];
+                onNode?.Invoke(node, outs, env);   // env passed so a hook can INJECT an oracle value for downstream
+                foreach (var inp in node.Input)    // reclaim dead intermediates (last use is this node; never a pinned graph output)
+                    if (!string.IsNullOrEmpty(inp) && lastUse.TryGetValue(inp, out var lu) && lu == ni && !pinned.Contains(inp))
+                    {
+                        if (env.Remove(inp, out var t))
                         {
-                            t?.FreeNative();
+                            if (!_winit.ContainsKey(inp) && !feed.ContainsKey(inp))
+                            {
+                                t?.FreeNative();
+                            }
                         }
                     }
-                }
-        }
-        var result = _m.Graph.Output.ToDictionary(o => o.Name, o => env[o.Name]);
-        foreach (var kvp in env)
-        {
-            if (!_winit.ContainsKey(kvp.Key) && !feed.ContainsKey(kvp.Key) && !pinned.Contains(kvp.Key))
-            {
-                kvp.Value?.FreeNative();
             }
+            var result = _m.Graph.Output.ToDictionary(o => o.Name, o => env[o.Name]);
+            foreach (var kvp in env)
+            {
+                if (!_winit.ContainsKey(kvp.Key) && !feed.ContainsKey(kvp.Key) && !pinned.Contains(kvp.Key))
+                {
+                    kvp.Value?.FreeNative();
+                }
+            }
+            return result;
         }
-        return result;
+        finally
+        {
+            ActiveVerbose = false;
+        }
     }
 
     public static Tensor[] Dispatch(NodeProto n, Tensor[] x)
@@ -929,12 +948,34 @@ public class Dp
     // past_k/v[B,Nkv,past,H]. Outputs: attn[B,S,Nq·H], present_k/v[B,Nkv,total,H] (the full cache; window only masks).
     static unsafe Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n)
     {
+        if (ActiveVerbose)
+        {
+            Console.Error.WriteLine($"[DEBUG GQA] Node: {n.Name}");
+            for (int i = 0; i < x.Length; i++)
+            {
+                var t = x[i];
+                if (t == null)
+                {
+                    Console.Error.WriteLine($"  x[{i}]: null");
+                }
+                else
+                {
+                    string shapeStr = string.Join(",", t.Shape);
+                    Console.Error.WriteLine($"  x[{i}]: shape=[{shapeStr}], count={t.Count}, FpIsInstantiated={t.Fp != null}, NativePtr={(nint)t.NativePtr:X}, IpIsInstantiated={t.Ip != null}");
+                }
+            }
+        }
+
         int Nq = (int)L(n, "num_heads", 0), Nkv = (int)L(n, "kv_num_heads", 0), win = (int)L(n, "local_window_size", -1);
         float scaleAttr = F(n, "scale", 0f), softcap = F(n, "softcap", 0f);
         var pastK = x[3]; var pastV = x[4];
         int B = pastK.Shape[0], past = pastK.Shape[2], H = pastK.Shape[3];
         int S = x[0].Shape.Length == 4 ? x[0].Shape[2] : x[0].Shape[1];
         int total = past + S; float scale = scaleAttr != 0 ? scaleAttr : 1f / MathF.Sqrt(H);
+        if (ActiveVerbose)
+        {
+            Console.Error.WriteLine($"  PARAMS: Nq={Nq}, Nkv={Nkv}, win={win}, scaleAttr={scaleAttr}, softcap={softcap}, B={B}, past={past}, H={H}, S={S}, total={total}, scale={scale}");
+        }
         var qf = x[0].AsF(); var kf = x[1].AsF(); var vf = x[2].AsF();
         var pkf = pastK.Count > 0 ? pastK.AsF() : default; var pvf = pastV.Count > 0 ? pastV.AsF() : default;
         var pk = TensorArena.AllocSpan((long)B * Nkv * total * H); var pv = TensorArena.AllocSpan((long)B * Nkv * total * H);

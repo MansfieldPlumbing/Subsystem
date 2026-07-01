@@ -18,6 +18,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\..\runspace\Dpx\Program.cs" Link="Program.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\ModelDb.cs" Link="ModelDb.cs" />
     <Compile Include="..\..\..\runspace\Dpx\Dp.cs" Link="Dp.cs" />
     <Compile Include="..\..\..\runspace\Dpx\MemGovernor.cs" Link="MemGovernor.cs" />
     <Compile Include="..\..\..\runspace\Dpx\GpuD3D12.cs" Link="GpuD3D12.cs" />

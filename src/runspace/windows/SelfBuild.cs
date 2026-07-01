@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -220,40 +221,75 @@ internal static class SelfBuild
             .Select(a => MetadataReference.CreateFromImage(a.Image))
             .ToList<MetadataReference>();
 
-        // SubsystemWin.csproj's exact compile set: host-windows + the linked runspace Vom/Cm. CodeContext is
-        // a separate bundled assembly — referenced above, NOT recompiled.
-        var roots = new[] { "src/runspace/windows/", "src/runspace/Vom/", "src/runspace/Cm/", "src/shell/cell/", "src/runspace/Device/VomInterop.cs",
-                            // The vom: provider lives in the SHARED Pwsh surface (so Android compiles it too),
-                            // but the rest of Pwsh/ is still welded to Android (WrapperCmdlet base, TerminalSession,
-                            // Subsystem.Device) — folding all of Pwsh/ in is the peer-heads seam (see the Pwsh-into-
-                            // Windows CR). Until then, pull in JUST this file: it depends only on Vom + the SMA SDK.
-                            "src/runspace/Pwsh/VomDrive.cs",
-                            // the portable ADB core wired onto the Windows head (#75) — the IAdbTransport seam +
-                            // AdbConnection wire protocol + AndroidPubKey; the Windows binding SslStreamAdbTransport
-                            // lives in windows/ (already covered by the windows/ root above).
-                            "src/runspace/Adb/IAdbTransport.cs", "src/runspace/Adb/AdbConnection.cs", "src/runspace/Adb/AndroidPubKey.cs",
-                            // Subsystem.Dpx (dp-onnx folded in-proc, CRQ143 P2 + CRQ164): the ONNX reader, the
-                            // .litertlm/.tflite reader + translator (LiteRt), the interpreter (Dp, ex-Interp), the
-                            // GPU seams, DpxDecoder (Runtime is the lightweight windows/RuntimeTypes.cs shim, already
-                            // in scope via the windows/ root above — no RuntimeBroker/ needed), and DpxQnn (pure
-                            // P/Invoke against libQnnHtp/libQnnCpu, resolved at LOAD time on the target device, not
-                            // compile time here — no QNN toolchain/SDK dependency, no cross-process boundary, just
-                            // another VOM handle over unified memory). A DIRECTORY root, not an enumerated file list —
-                            // the enumerated version already went stale once (DpTensor.cs missing at CRQ164 landing).
-                            "src/runspace/Dpx/" };
-        // launcher/ is a SEPARATE exe with its own Main — folding it into this ConsoleApplication
-        // compile collides with windows/Program.cs (CS0017). Exclude it; it is superseded by the
-        // VOM slot-loader. Dpx/Program.cs is the standalone dp-onnx dev-CLI's own top-level Main —
-        // same collision, same reason.
-        var excluded = new[] { "src/runspace/windows/launcher/", "src/runspace/Dpx/Program.cs" };
-        var sources = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(p =>
+        var csprojPath = Path.Combine(sourceRoot, "src", "runspace", "windows", "SubsystemWin.csproj");
+        if (!File.Exists(csprojPath))
+            return (null, new[] { $"project file '{csprojPath}' not found." });
+
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Load(csprojPath);
+        }
+        catch (Exception ex)
+        {
+            return (null, new[] { $"failed to load project file: {ex.Message}" });
+        }
+
+        var baseDir = Path.GetDirectoryName(csprojPath)!;
+        var sourceFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Default compile files in baseDir recursively (excluding bin/ and obj/)
+        foreach (var file in Directory.GetFiles(baseDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(baseDir, file);
+            if (rel.StartsWith("bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                rel.StartsWith("obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             {
-                var rel = Path.GetRelativePath(sourceRoot, p).Replace('\\', '/');
-                return roots.Any(r => rel.StartsWith(r, StringComparison.OrdinalIgnoreCase))
-                    && !excluded.Any(x => rel.StartsWith(x, StringComparison.OrdinalIgnoreCase));
-            })
-            .ToList();
+                continue;
+            }
+            sourceFiles.Add(Path.GetFullPath(file));
+        }
+
+        // Parse compile elements
+        foreach (var compile in doc.Descendants("Compile"))
+        {
+            var include = compile.Attribute("Include")?.Value;
+            var exclude = compile.Attribute("Exclude")?.Value;
+            var remove = compile.Attribute("Remove")?.Value;
+
+            if (!string.IsNullOrEmpty(include))
+            {
+                foreach (var f in ResolveWildcards(baseDir, include))
+                    sourceFiles.Add(Path.GetFullPath(f));
+            }
+            if (!string.IsNullOrEmpty(exclude))
+            {
+                foreach (var f in ResolveWildcards(baseDir, exclude))
+                    sourceFiles.Remove(Path.GetFullPath(f));
+            }
+            if (!string.IsNullOrEmpty(remove))
+            {
+                foreach (var f in ResolveWildcards(baseDir, remove))
+                    sourceFiles.Remove(Path.GetFullPath(f));
+            }
+        }
+
+        // Gather dependency references
+        var dependencies = new List<string>();
+        foreach (var pr in doc.Descendants("PackageReference"))
+        {
+            var inc = pr.Attribute("Include")?.Value;
+            if (!string.IsNullOrEmpty(inc)) dependencies.Add(inc);
+        }
+        foreach (var proj in doc.Descendants("ProjectReference"))
+        {
+            var inc = proj.Attribute("Include")?.Value;
+            if (!string.IsNullOrEmpty(inc)) dependencies.Add(Path.GetFileNameWithoutExtension(inc));
+        }
+
+        Console.WriteLine($"  [csproj] gathered {sourceFiles.Count} C# files, dependencies: {string.Join(", ", dependencies)}");
+
+        var sources = sourceFiles.ToList();
         if (sources.Count == 0) return (null, new[] { "no source matched the SubsystemWin compile set." });
 
         var trees = sources.Select(p => CSharpSyntaxTree.ParseText(File.ReadAllText(p), path: p)).ToList();
@@ -459,6 +495,46 @@ internal static class SelfBuild
             doc.AddRange(b.Lines);
         }
         return new UTF8Encoding(false).GetBytes(string.Join("\n", doc) + "\n");
+    }
+
+    private static List<string> ResolveWildcards(string baseDir, string pattern)
+    {
+        var files = new List<string>();
+        pattern = pattern.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        
+        if (pattern.Contains("*"))
+        {
+            string dirPart;
+            string filePattern;
+            int lastSep = pattern.LastIndexOf(Path.DirectorySeparatorChar);
+            if (lastSep >= 0)
+            {
+                dirPart = Path.GetFullPath(Path.Combine(baseDir, pattern.Substring(0, lastSep)));
+                filePattern = pattern.Substring(lastSep + 1);
+            }
+            else
+            {
+                dirPart = baseDir;
+                filePattern = pattern;
+            }
+            
+            if (Directory.Exists(dirPart))
+            {
+                var searchOption = filePattern.Contains("**") ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                filePattern = filePattern.Replace("**" + Path.DirectorySeparatorChar, "").Replace("**", "");
+                try
+                {
+                    files.AddRange(Directory.GetFiles(dirPart, filePattern, searchOption));
+                }
+                catch {}
+            }
+        }
+        else
+        {
+            string full = Path.GetFullPath(Path.Combine(baseDir, pattern));
+            if (File.Exists(full)) files.Add(full);
+        }
+        return files;
     }
 
     private static string? ArgValue(string[] args, string name)

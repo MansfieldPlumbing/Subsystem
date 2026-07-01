@@ -38,6 +38,10 @@ $syntaxTrees = [System.Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTre
 $dpOnnxText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\DpxDecoder.cs"))
 $syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($dpOnnxText))
 
+# 1b. Parse ModelDb.cs
+$modelDbText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\ModelDb.cs"))
+$syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($modelDbText))
+
 # 2. Parse ToolDescriptor
 $toolDescriptorCode = @"
 namespace Subsystem.RuntimeBroker

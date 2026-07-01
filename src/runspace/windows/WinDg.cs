@@ -44,6 +44,8 @@ public static class Dg
     public static void Warn (string source, Exception ex)   => Write(DgLevel.Warn,  source, Describe(ex));
     public static void Error(string source, Exception ex)   => Write(DgLevel.Error, source, Describe(ex));
 
+    public static bool ConsoleVerbose { get; set; } = false;
+
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 
     public static void Write(DgLevel level, string source, string message)
@@ -54,7 +56,17 @@ public static class Dg
         {
             _ring.Enqueue(rec);
             while (_ring.Count > RingCapacity) _ring.Dequeue();
-            Console.WriteLine(line);
+            
+            bool print = true;
+            if (source == "vom" && level == DgLevel.Info && !ConsoleVerbose)
+            {
+                print = false;
+            }
+
+            if (print)
+            {
+                Console.WriteLine(line);
+            }
             Append(rec);
         }
     }

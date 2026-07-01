@@ -42,6 +42,7 @@ public static class Program
             "check" or "-check" or "--check"                                 => Check.Run(args[1..]),
             "extract" or "-extract" or "--extract"                           => SelfSource.Extract(args[1..]),
             "chat"                                                           => Chat.Run(args[1..]),
+            "dpx-generate" or "dpx-gen"                                      => DpxGenerate.Run(args[1..]),
             "tts" or "-tts" or "--tts" or "speak"                            => Tts.Run(args[1..]),
             "surface" or "-surface" or "--surface"                           => Surface.Run(args[1..]),
             "camera" or "-camera" or "--camera"                              => Camera.Run(args[1..]),

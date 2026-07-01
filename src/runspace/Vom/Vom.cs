@@ -135,14 +135,26 @@ public static unsafe partial class Vom
         return true;
     }
 
+    public static bool Close(Owner owner, uint id)
+    {
+        if (!owner.Handles.TryGet(id, out var e) || e == null) return false;
+        if (Interlocked.Decrement(ref e.RefCount) > 0) return false;
+
+        string path = e.Descriptor.Path;
+        if (owner.PathToId.TryGetValue(path, out var currentId) && currentId == id)
+        {
+            owner.PathToId.TryRemove(path, out _);
+        }
+
+        if (owner.Handles.Free(id, out var removed) && removed != null)
+            FreeEntry(owner, removed);
+        return true;
+    }
+
     public static bool Close(Owner owner, string path)
     {
         if (!owner.PathToId.TryGetValue(path, out var id)) return false;
-        if (!owner.Handles.TryGet(id, out var e) || e == null) return false;
-        if (Interlocked.Decrement(ref e.RefCount) > 0) return false;
-        if (owner.PathToId.TryRemove(path, out _) && owner.Handles.Free(id, out var removed) && removed != null)
-            FreeEntry(owner, removed);
-        return true;
+        return Close(owner, id);
     }
 
     private static void FreeEntry(Owner owner, HandleEntry e)
