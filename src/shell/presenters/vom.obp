@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <base href="/">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOM Managed Heap Visualizer</title>
+
+    <link rel="stylesheet" href="/theme.css">
+    <script src="/themes.js"></script>
+    <script src="/shell/presenter.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: var(--bg, #000); color: var(--fg, #f2f2f2);
+            font-family: var(--font-sans, sans-serif); overflow: hidden;
+            user-select: none; -webkit-user-select: none;
+            font-size: 13px;
+        }
+
+        /* App Layout (Win32 Multi-Pane Style) */
+        .app-layout {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        /* Retro Toolbar */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface, #111);
+            border-bottom: 1px solid var(--border, rgba(255,255,255,0.1));
+            padding: 6px 12px;
+            height: 42px;
+            flex-shrink: 0;
+        }
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .divider {
+            width: 1px;
+            height: 18px;
+            background: var(--border, rgba(255,255,255,0.1));
+            margin: 0 6px;
+        }
+        .tool-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--fg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border);
+        }
+        .tool-btn:active {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .tool-btn select {
+            background: transparent;
+            border: none;
+            color: var(--fg);
+            font-size: 12px;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+        }
+        .tool-btn select option {
+            background: #111;
+            color: #fff;
+        }
+
+        /* Top Split Container */
+        .top-pane {
+            display: flex;
+            flex-direction: row;
+            height: 55%;
+            border-bottom: 1px solid var(--border, rgba(255,255,255,0.1));
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        /* Tree directory list */
+        .tree-view {
+            width: 62%;
+            border-right: 1px solid var(--border, rgba(255,255,255,0.1));
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg);
+        }
+        .pane-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--surface, #111);
+            border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted, #878787);
+        }
+        .pane-content {
+            flex: 1;
+            overflow: auto;
+        }
+
+        /* Legend View */
+        .legend-view {
+            width: 38%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        /* Bottom Cushion Treemap */
+        .bottom-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #050505;
+        }
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+        }
+        #treemap-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: block;
+        }
+
+        /* Table Grid Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-family: var(--font-mono, monospace);
+            font-size: 11px;
+        }
+        thead {
+            position: sticky;
+            top: 0;
+            background: var(--surface, #111);
+            z-index: 10;
+            box-shadow: 0 1px 0 var(--border);
+        }
+        th {
+            padding: 6px 10px;
+            font-weight: 600;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+        tr {
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            cursor: pointer;
+        }
+        tr:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        tr.selected {
+            background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+            color: #fff;
+        }
+        td {
+            padding: 6px 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
+        }
+
+        /* Custom cell formatting */
+        .path-cell {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .toggle-arrow {
+            display: inline-block;
+            width: 10px;
+            text-align: center;
+            color: var(--muted);
+            font-style: normal;
+        }
+        .folder-icon {
+            color: #eab308;
+            font-weight: bold;
+        }
+        .bar-container {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(to right, var(--accent), var(--accent-2, #0078D4));
+            border-radius: 1px;
+        }
+        .color-chip {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            border: 1px solid rgba(0,0,0,0.5);
+            vertical-align: middle;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            height: 24px;
+            background: var(--surface, #111);
+            border-top: 1px solid var(--border, rgba(255,255,255,0.1));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            font-size: 11px;
+            font-family: var(--font-mono, monospace);
+            color: var(--muted);
+            flex-shrink: 0;
+        }
+        .status-active-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success, #10b981);
+            margin-right: 6px;
+        }
+
+        /* Nerd Font icon shim */
+        .nf {
+            font-family: var(--font-mono);
+            font-style: normal;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border: 2px solid var(--bg); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- WinDirStat Custom Windows Toolbar -->
+        <div class="toolbar">
+            <div class="toolbar-group">
+                <button id="tb-refresh" title="Refresh Snapshot" class="tool-btn">
+                    <span class="nf">&#xf021;</span>
+                    <span>Refresh</span>
+                </button>
+                <div class="divider"></div>
+                <button id="tb-updir" title="Reset Selection" class="tool-btn">
+                    <span class="nf">&#xf062;</span>
+                    <span>Reset Selection</span>
+                </button>
+                <button id="tb-collapse" title="Collapse All" class="tool-btn">
+                    <span class="nf">&#xf068;</span>
+                    <span>Collapse All</span>
+                </button>
+                <div class="divider"></div>
+                <!-- Scenario Select -->
+                <div class="tool-btn">
+                    <span class="nf">&#xf0c9;</span>
+                    <span style="color: var(--muted); margin-right: 4px;">SCENARIO:</span>
+                    <select id="scenario-select">
+                        <option value="active_inference">Active Inference Engine</option>
+                        <option value="tui_multisession">TUI Multi-Session</option>
+                        <option value="leak_test">Leak Diagnostics</option>
+                    </select>
+                </div>
+            </div>
+            <div class="toolbar-group">
+                <span style="font-size: 10px; color: var(--muted); font-family: var(--font-mono);">S: VOM HEAP PRESENTEST</span>
+            </div>
+        </div>
+
+        <!-- Upper split pane: Tree on Left, Legend on Right -->
+        <div class="top-pane">
+            <!-- Object Path Tree List -->
+            <div class="tree-view">
+                <div class="pane-header">
+                    <span>OBJECT DIRECTORY HIERARCHY</span>
+                    <span style="color: var(--accent)">CLICK ROW TO EXPAND / FOCUS</span>
+                </div>
+                <div class="pane-content" id="tree-container">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Legend and Formats Table -->
+            <div class="legend-view">
+                <div class="pane-header">
+                    <span>VOM TYPE METADATA</span>
+                    <span style="color: var(--success)">HOVER TO HIGHLIGHT TYPES</span>
+                </div>
+                <div class="pane-content" id="legend-container">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Lower Cushion Treemap -->
+        <div class="bottom-pane">
+            <div class="pane-header">
+                <span>3D CUSHION MAP (SQUAREMODELSTAT METRIC)</span>
+                <span id="map-hover-details" style="color: var(--accent); font-family: var(--font-mono); text-transform: none;"></span>
+            </div>
+            <div class="canvas-container" id="canvas-wrapper">
+                <canvas id="treemap-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Classic Windows Status Bar -->
+        <div class="status-bar">
+            <div id="status-left">
+                <span class="status-active-dot"></span>
+                <span>Ready</span>
+            </div>
+            <div id="status-right" style="display: flex; gap: 16px;">
+                <span id="status-handles">Handles: --</span>
+                <span id="status-bytes">Memory Heap: --</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Color mapping matching design specification
+        const typeColorMap = {
+            Tensor: "#d946ef",         // Fuchsia
+            CellBuffer: "#3b82f6",     // Royal Blue
+            GlyphAtlas: "#10b981",     // Emerald Green
+            VulkanSurface: "#f59e0b",  // Amber
+            PeBinary: "#ef4444",       // Red
+            MemoryArena: "#06b6d4",    // Cyan
+            SlotMap: "#8b5cf6",        // Violet
+            CliXML: "#14b8a6",         // Teal
+            Raw: "#64748b",            // Slate
+            TimelineFence: "#e11d48",  // Rose
+            Default: "#475569"
+        };
+
+        const typeDescriptionMap = {
+            Tensor: "Core Weights / KV Cache Allocation",
+            CellBuffer: "Unified Cell Buffer (R32_UINT Frame)",
+            GlyphAtlas: "MSDF Glyph Atlas Textures",
+            VulkanSurface: "Device Swapchains & Gpu Surfaces",
+            PeBinary: "PE Header System Maps / Code Assets",
+            MemoryArena: "HLE Page Tables / Arena Memory",
+            SlotMap: "Subsystem Safe Rollback Slot Tables",
+            CliXML: "Object stream serialization formats",
+            Raw: "Raw native / unformatted byte regions",
+            TimelineFence: "CPU/GPU sync timeline fences"
+        };
+
+        // State variables
+        let snapshot = null;
+        let currentScenario = "active_inference";
+        let hoveredHandleId = null;
+        let selectedHandleId = null;
+        let hoveredOwnerPath = null;
+        let hoveredType = null;
+        const expandedOwners = {};
+        let layoutElements = [];
+
+        // Utilities
+        function formatBytes(bytes) {
+            if (bytes === 0) return "0 B";
+            const k = 1024;
+            const sizes = ["B", "KiB", "MiB", "GiB", "TiB"];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+        }
+
+        // -------------------------------------------------------------
+        // Squarify Treemap Engine
+        // -------------------------------------------------------------
+        function squarify(nodes, container) {
+            if (nodes.length === 0 || container.w <= 0 || container.h <= 0) return [];
+            const sorted = [...nodes].sort((a, b) => b.size - a.size);
+            const totalSize = sorted.reduce((acc, n) => acc + n.size, 0);
+            if (totalSize === 0) return [];
+
+            const elements = [];
+
+            function layoutRow(row, containerRect, vert) {
+                const rowSize = row.reduce((acc, n) => acc + n.size, 0);
+                const rowLength = vert ? containerRect.h : containerRect.w;
+                const rowBreadth = (rowSize / totalSize) * (containerRect.w * containerRect.h) / rowLength;
+                let offset = vert ? containerRect.y : containerRect.x;
+
+                for (const node of row) {
+                    const nodeArea = (node.size / totalSize) * (containerRect.w * containerRect.h);
+                    const nodeLength = nodeArea / rowBreadth;
+                    const rect = vert
+                        ? { x: containerRect.x, y: offset, w: rowBreadth, h: nodeLength }
+                        : { x: offset, y: containerRect.y, w: nodeLength, h: rowBreadth };
+
+                    elements.push({ node, rect });
+                    offset += nodeLength;
+                }
+
+                if (vert) {
+                    containerRect.x += rowBreadth;
+                    containerRect.w -= rowBreadth;
+                } else {
+                    containerRect.y += rowBreadth;
+                    containerRect.h -= rowBreadth;
+                }
+            }
+
+            function worstAspectRatio(row, containerRect, vert) {
+                if (row.length === 0) return Infinity;
+                const rowSize = row.reduce((acc, n) => acc + n.size, 0);
+                const rowLength = vert ? containerRect.h : containerRect.w;
+                const rowBreadth = (rowSize / totalSize) * (containerRect.w * containerRect.h) / rowLength;
+
+                let worst = 0;
+                for (const node of row) {
+                    const nodeArea = (node.size / totalSize) * (containerRect.w * containerRect.h);
+                    const nodeLength = nodeArea / rowBreadth;
+                    const r = Math.max(rowBreadth / nodeLength, nodeLength / rowBreadth);
+                    if (r > worst) worst = r;
+                }
+                return worst;
+            }
+
+            const remaining = [...sorted];
+            const containerRect = { ...container };
+
+            while (remaining.length > 0) {
+                const vert = containerRect.w > containerRect.h;
+                const row = [];
+                let worst = Infinity;
+
+                while (remaining.length > 0) {
+                    const next = remaining[0];
+                    const testRow = [...row, next];
+                    const testWorst = worstAspectRatio(testRow, containerRect, vert);
+
+                    if (testWorst <= worst) {
+                        row.push(remaining.shift());
+                        worst = testWorst;
+                    } else {
+                        break;
+                    }
+                }
+                layoutRow(row, containerRect, vert);
+            }
+
+            return elements;
+        }
+
+        // -------------------------------------------------------------
+        // Cushion Rendering (Realistic Specular Glare/Sphere Bubble)
+        // -------------------------------------------------------------
+        function drawCushionRect(ctx, x, y, w, h, baseColor, isHovered, isSelected) {
+            if (w <= 0 || h <= 0) return;
+
+            ctx.save();
+
+            // Fill base flat color
+            ctx.fillStyle = baseColor;
+            ctx.fillRect(x, y, w, h);
+
+            // 3D Bevel Highlight & Shading Linear Gradients
+            const bevelGrd = ctx.createLinearGradient(x, y, x + w, y + h);
+            bevelGrd.addColorStop(0, "rgba(255, 255, 255, 0.38)");
+            bevelGrd.addColorStop(0.2, "rgba(255, 255, 255, 0.05)");
+            bevelGrd.addColorStop(0.8, "rgba(0, 0, 0, 0.28)");
+            bevelGrd.addColorStop(1, "rgba(0, 0, 0, 0.65)");
+            ctx.fillStyle = bevelGrd;
+            ctx.fillRect(x, y, w, h);
+
+            // Specular Bubble Glow Point Light (Radial Gradient)
+            const lightX = x + w * 0.3;
+            const lightY = y + h * 0.3;
+            const radius = Math.min(w, h) * 0.9;
+            if (radius > 0) {
+                const specGrd = ctx.createRadialGradient(lightX, lightY, 0, lightX, lightY, radius);
+                specGrd.addColorStop(0, "rgba(255, 255, 255, 0.3)");
+                specGrd.addColorStop(0.4, "rgba(255, 255, 255, 0.03)");
+                specGrd.addColorStop(1, "rgba(0, 0, 0, 0)");
+                ctx.fillStyle = specGrd;
+                ctx.fillRect(x, y, w, h);
+            }
+
+            // Outline Borders (Deep classic dark Win32 outline)
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, y, w, h);
+
+            // Glow edge / Selection outlines
+            if (isSelected) {
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+                ctx.strokeStyle = "#eab308"; // Gold inner trim
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 3, y + 3, w - 6, h - 6);
+            } else if (isHovered) {
+                ctx.strokeStyle = "#eab308"; // Amber
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+            } else {
+                // Subtle glare ring
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+            }
+
+            ctx.restore();
+        }
+
+        // -------------------------------------------------------------
+        // Paint Canvas Visualizer
+        // -------------------------------------------------------------
+        function drawTreemap() {
+            const canvas = document.getElementById("treemap-canvas");
+            if (!canvas) return;
+            const wrapper = canvas.parentElement;
+            if (!wrapper) return;
+
+            const w = wrapper.clientWidth;
+            const h = wrapper.clientHeight;
+            canvas.width = w;
+            canvas.height = h;
+
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            ctx.clearRect(0, 0, w, h);
+
+            if (!snapshot) return;
+
+            const flatNodes = [];
+            for (const owner of snapshot.owners) {
+                for (const handle of owner.handles) {
+                    flatNodes.push({
+                        id: handle.id,
+                        name: handle.name,
+                        size: handle.sizeBytes,
+                        color: typeColorMap[handle.type] || typeColorMap.Default,
+                        type: handle.type,
+                        format: handle.format || "Raw",
+                        subdir: handle.subdir || "",
+                        ownerPath: owner.path
+                    });
+                }
+            }
+
+            if (flatNodes.length === 0) return;
+
+            const padding = 2;
+            const container = { x: padding, y: padding, w: w - padding * 2, h: h - padding * 2 };
+            layoutElements = squarify(flatNodes, container);
+
+            // Group by owner for outline rings
+            const byOwner = {};
+            for (const el of layoutElements) {
+                if (!byOwner[el.node.ownerPath]) byOwner[el.node.ownerPath] = [];
+                byOwner[el.node.ownerPath].push(el);
+            }
+
+            // Draw cushions
+            for (const el of layoutElements) {
+                const isHovered = (hoveredHandleId === el.node.id) ||
+                                  (hoveredOwnerPath && el.node.ownerPath === hoveredOwnerPath) ||
+                                  (hoveredType && el.node.type === hoveredType);
+                const isSelected = selectedHandleId === el.node.id;
+
+                drawCushionRect(ctx, el.rect.x, el.rect.y, el.rect.w, el.rect.h, el.node.color, isHovered, isSelected);
+            }
+
+            // Highlighting outer borders of owner containers
+            for (const path in byOwner) {
+                const list = byOwner[path];
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const el of list) {
+                    minX = Math.min(minX, el.rect.x);
+                    minY = Math.min(minY, el.rect.y);
+                    maxX = Math.max(maxX, el.rect.x + el.rect.w);
+                    maxY = Math.max(maxY, el.rect.y + el.rect.h);
+                }
+                ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+            }
+        }
+
+        function repaintWithoutLayout() {
+            const canvas = document.getElementById("treemap-canvas");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (const el of layoutElements) {
+                const isHovered = (hoveredHandleId === el.node.id) ||
+                                  (hoveredOwnerPath && el.node.ownerPath === hoveredOwnerPath) ||
+                                  (hoveredType && el.node.type === hoveredType);
+                const isSelected = selectedHandleId === el.node.id;
+
+                drawCushionRect(ctx, el.rect.x, el.rect.y, el.rect.w, el.rect.h, el.node.color, isHovered, isSelected);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // Data Loaders & View Binder
+        // -------------------------------------------------------------
+        async function fetchSnapshot() {
+            try {
+                const res = await fetch(`/api/vom/snapshot?scenario=${currentScenario}`);
+                snapshot = await res.json();
+                renderAll();
+            } catch (err) {
+                console.error("Failed to load VOM snapshot", err);
+            }
+        }
+
+        function renderAll() {
+            if (!snapshot) return;
+
+            // Status bar
+            document.getElementById("status-handles").innerText = `Handles: ${snapshot.activeHandleCount}`;
+            document.getElementById("status-bytes").innerText = `Memory Heap: ${formatBytes(snapshot.totalBytesAllocated)}`;
+
+            // 1. Directory list
+            const treeContainer = document.getElementById("tree-container");
+            let treeHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 50%;">Object Path / Handle</th>
+                            <th style="width: 15%; text-align: right;">Bytes</th>
+                            <th style="width: 10%; text-align: right;">% Ratio</th>
+                            <th style="width: 25%; text-align: center;">Memory Alloc</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const owner of snapshot.owners) {
+                const isExpanded = !!expandedOwners[owner.path];
+                const percentage = ((owner.activeBytes / snapshot.totalBytesAllocated) * 100).toFixed(1);
+                const isHovered = hoveredOwnerPath === owner.path;
+
+                treeHtml += `
+                    <tr class="owner-row ${isHovered ? "selected" : ""}" data-path="${owner.path}">
+                        <td class="path-cell" style="font-weight: 600;">
+                            <span class="toggle-arrow">${isExpanded ? "▼" : "▶"}</span>
+                            <span class="folder-icon">&#xf07b;</span>
+                            <span>${owner.path}</span>
+                        </td>
+                        <td style="text-align: right; color: var(--success); font-weight: bold;">${formatBytes(owner.activeBytes)}</td>
+                        <td style="text-align: right; color: var(--muted);">${percentage}%</td>
+                        <td>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: ${percentage}%;"></div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+
+                if (isExpanded) {
+                    for (const handle of owner.handles) {
+                        const hPct = ((handle.sizeBytes / snapshot.totalBytesAllocated) * 100).toFixed(1);
+                        const hColor = typeColorMap[handle.type] || typeColorMap.Default;
+                        const isHSelected = selectedHandleId === handle.id;
+
+                        treeHtml += `
+                            <tr class="handle-row ${isHSelected ? "selected" : ""}" data-handle-id="${handle.id}" data-owner-path="${owner.path}">
+                                <td class="path-cell" style="padding-left: 24px;">
+                                    <span class="color-chip" style="background: ${hColor};"></span>
+                                    <span style="color: var(--muted); font-size: 10px;">${handle.id}</span>
+                                    <span style="color: var(--fg); font-weight: 500;">${handle.name}</span>
+                                </td>
+                                <td style="text-align: right; color: var(--accent);">${formatBytes(handle.sizeBytes)}</td>
+                                <td style="text-align: right; color: var(--muted);">${hPct}%</td>
+                                <td>
+                                    <div class="bar-container" style="height: 4px;">
+                                        <div class="bar-fill" style="width: ${hPct}%; background: ${hColor};"></div>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }
+                }
+            }
+
+            treeHtml += `</tbody></table>`;
+            treeContainer.innerHTML = treeHtml;
+
+            // Bind events for tree
+            treeContainer.querySelectorAll(".owner-row").forEach(row => {
+                row.addEventListener("click", () => {
+                    const path = row.getAttribute("data-path");
+                    expandedOwners[path] = !expandedOwners[path];
+                    renderAll();
+                });
+                row.addEventListener("mouseenter", () => {
+                    hoveredOwnerPath = row.getAttribute("data-path");
+                    repaintWithoutLayout();
+                });
+                row.addEventListener("mouseleave", () => {
+                    hoveredOwnerPath = null;
+                    repaintWithoutLayout();
+                });
+            });
+
+            treeContainer.querySelectorAll(".handle-row").forEach(row => {
+                row.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const hId = row.getAttribute("data-handle-id");
+                    selectedHandleId = hId === selectedHandleId ? null : hId;
+                    renderAll();
+                });
+                row.addEventListener("mouseenter", () => {
+                    hoveredHandleId = row.getAttribute("data-handle-id");
+                    repaintWithoutLayout();
+                });
+                row.addEventListener("mouseleave", () => {
+                    hoveredHandleId = null;
+                    repaintWithoutLayout();
+                });
+            });
+
+            // 2. Legend Groupings
+            const legendContainer = document.getElementById("legend-container");
+            const typeStats = {};
+            let maxTotalBytes = 0;
+
+            for (const owner of snapshot.owners) {
+                for (const handle of owner.handles) {
+                    if (!typeStats[handle.type]) {
+                        typeStats[handle.type] = { bytes: 0, count: 0 };
+                    }
+                    typeStats[handle.type].bytes += handle.sizeBytes;
+                    typeStats[handle.type].count++;
+                }
+            }
+
+            let legendHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Type Extension</th>
+                            <th style="width: 20%; text-align: center;">Color</th>
+                            <th style="width: 25%; text-align: right;">Bytes</th>
+                            <th style="width: 15%; text-align: right;">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            const sortedTypes = Object.entries(typeStats).sort((a, b) => b[1].bytes - a[1].bytes);
+
+            for (const [type, data] of sortedTypes) {
+                const ratio = ((data.bytes / snapshot.totalBytesAllocated) * 100).toFixed(1);
+                const color = typeColorMap[type] || typeColorMap.Default;
+                const description = typeDescriptionMap[type] || "Custom dynamic allocation";
+
+                legendHtml += `
+                    <tr class="legend-row" data-type="${type}">
+                        <td>
+                            <div style="font-weight: bold; color: var(--fg);">${type}</div>
+                            <div style="font-size: 9px; color: var(--muted);">${description}</div>
+                        </td>
+                        <td style="text-align: center;">
+                            <span class="color-chip" style="background: ${color}; width: 24px; height: 14px;"></span>
+                        </td>
+                        <td style="text-align: right; color: var(--accent); font-weight: bold;">${formatBytes(data.bytes)}</td>
+                        <td style="text-align: right; color: var(--muted);">${data.count}</td>
+                    </tr>
+                `;
+            }
+
+            legendHtml += `</tbody></table>`;
+            legendContainer.innerHTML = legendHtml;
+
+            // Legend interactions
+            legendContainer.querySelectorAll(".legend-row").forEach(row => {
+                row.addEventListener("mouseenter", () => {
+                    hoveredType = row.getAttribute("data-type");
+                    repaintWithoutLayout();
+                });
+                row.addEventListener("mouseleave", () => {
+                    hoveredType = null;
+                    repaintWithoutLayout();
+                });
+            });
+
+            // Paint Canvas Cushion Map
+            drawTreemap();
+        }
+
+        // Canvas Hookups
+        const canvas = document.getElementById("treemap-canvas");
+        const hoverText = document.getElementById("map-hover-details");
+
+        canvas.addEventListener("mousemove", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            let found = null;
+            for (const el of layoutElements) {
+                if (mx >= el.rect.x && mx <= el.rect.x + el.rect.w &&
+                    my >= el.rect.y && my <= el.rect.y + el.rect.h) {
+                    found = el;
+                    break;
+                }
+            }
+
+            if (found) {
+                hoveredHandleId = found.node.id;
+                canvas.style.cursor = "pointer";
+                const details = `[${found.node.id}] ${found.node.ownerPath}\\${found.node.subdir}\\${found.node.name} (${formatBytes(found.node.size)}) | Type: ${found.node.type}`;
+                hoverText.innerText = details;
+            } else {
+                hoveredHandleId = null;
+                canvas.style.cursor = "default";
+                hoverText.innerText = "";
+            }
+            repaintWithoutLayout();
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            hoveredHandleId = null;
+            hoverText.innerText = "";
+            repaintWithoutLayout();
+        });
+
+        canvas.addEventListener("click", () => {
+            if (hoveredHandleId) {
+                selectedHandleId = hoveredHandleId === selectedHandleId ? null : hoveredHandleId;
+                // Auto expand owner
+                const matched = layoutElements.find(el => el.node.id === hoveredHandleId);
+                if (matched) {
+                    expandedOwners[matched.node.ownerPath] = true;
+                }
+                renderAll();
+                setTimeout(() => {
+                    const row = document.querySelector(`[data-handle-id="${selectedHandleId}"]`);
+                    if (row) row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }, 40);
+            }
+        });
+
+        // Event hooks for controls
+        document.getElementById("tb-refresh").onclick = () => fetchSnapshot();
+        document.getElementById("scenario-select").onchange = (e) => {
+            currentScenario = e.target.value;
+            fetchSnapshot();
+        };
+        document.getElementById("tb-updir").onclick = () => {
+            selectedHandleId = null;
+            renderAll();
+        };
+        document.getElementById("tb-collapse").onclick = () => {
+            for (const path in expandedOwners) {
+                expandedOwners[path] = false;
+            }
+            renderAll();
+        };
+
+        // Resize support
+        const resizeObserver = new ResizeObserver(() => {
+            drawTreemap();
+        });
+        resizeObserver.observe(document.getElementById("canvas-wrapper"));
+
+        // Load initially
+        fetchSnapshot();
+    </script>
+</body>
+</html>
