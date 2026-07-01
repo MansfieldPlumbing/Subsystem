@@ -66,6 +66,12 @@ internal static class Onboard
             ReadTail(Path.Combine(repo, "ss-log.md"), 18),
             "ss-log.md not found — run from the repo or pass --path.");
 
+        // FILES — the full manifest, mandatory. Seeing that a file EXISTS must never depend on a session
+        // deciding to go look for it (the keyhole fix, CRQ178). Projected by LiveMap — one scanner home.
+        WriteSection("FILES — THE FULL MANIFEST",
+            IsRepo(repo) ? LiveMap.ProjectManifest(repo) : null,
+            "repo root not resolved — run from the repo or pass --path.");
+
         // CONTRACT — delegate to contextualize (one truth; no duplicated description).
         Console.WriteLine("CONTRACT — components · DAG · verbs (live, from the binary):");
         Console.WriteLine(new string('-', 78));
@@ -125,23 +131,17 @@ internal static class Onboard
         Console.WriteLine();
     }
 
-    // Auto-discover the repo: honor --path, else walk up from the cwd and the binary's directory for a
-    // folder holding both README.md and src/ (the repo-root markers). Mirrors how the map finds source.
+    // Resolve the repo the doctrine way: --path, else the WORKING DIR, else the binary's own dir — never a
+    // walk UP the tree, never a probe beside it (Scott, 2026-07-01: "my thing is and always has been working
+    // dir and recursively down into the dir tree"; LiveMap.ResolveRoot is the same rule). A miss degrades
+    // each section to its pointer rather than failing.
     private static string ResolveRepo(string explicitPath)
     {
         if (!string.IsNullOrWhiteSpace(explicitPath) && Directory.Exists(explicitPath)) return explicitPath;
-        foreach (var seed in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
-        {
-            var dir = new DirectoryInfo(seed);
-            while (dir != null)
-            {
-                if (IsRepo(dir.FullName)) return dir.FullName;
-                var beside = Path.Combine(dir.FullName, "subsystem");  // a `subsystem` repo beside the exe/cwd (S:\ss.exe -> S:\subsystem)
-                if (IsRepo(beside)) return beside;
-                dir = dir.Parent;
-            }
-        }
-        return AppContext.BaseDirectory;
+        string cwd = Directory.GetCurrentDirectory();
+        if (IsRepo(cwd)) return cwd;
+        if (IsRepo(AppContext.BaseDirectory)) return AppContext.BaseDirectory;
+        return cwd;
     }
 
     private static bool IsRepo(string dir) =>

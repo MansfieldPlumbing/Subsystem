@@ -62,7 +62,7 @@ USAGE
   ss contextualize  (-c)    contextualize the system from the binary — add --json | --map
   ss contextualize --map    the live architecture map, subsystem by subsystem
   ss contextualize --json   the contract as JSON (for agents / MCP)
-  ss onboard                one-shot alignment package: telos · laws · decisions · state · contract (start here)
+  ss onboard                one-shot alignment package: telos · laws · decisions · state · file manifest · contract (start here)
   ss <verb> --path|-p <dir> point any verb at a source tree instead of the repo beside the exe
   ss help                   this text
 

@@ -135,7 +135,7 @@ internal static class Mcp
         new
         {
             name = "ss_onboard",
-            description = "The one-shot alignment package — telos, invariants, settled decisions, conventions, live state, and the contract. Call this FIRST on a cold session to understand the system from the binary.",
+            description = "The one-shot alignment package — telos, invariants, settled decisions, conventions, live state, the FULL file manifest (every file in the tree — a file not listed does not exist), and the contract. Call this FIRST on a cold session to understand the system from the binary.",
             inputSchema = new
             {
                 type = "object",
