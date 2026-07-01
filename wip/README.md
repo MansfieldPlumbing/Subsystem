@@ -13,6 +13,7 @@ verdict**; `ss test <name>` is the receipt where one exists, and each blocker is
 - **SentencePiece tokenizer** — lifted from `gemma-talking-layer` into `src/native/dp-onnx/onnxnet/SentencePiece.cs`
   (the sovereign `.spm` reader + Unigram tokenizer, sibling of `OnnxProto.cs`). Receipt: `ss test sentencepiece`
   (gemma-4 vocab 262144, `<bos>`=2, encode→detokenize bit-exact, no sentencepiece/protobuf lib).
+- **VOM GPU Compiler (`vom-gpu-compiler/`)** — Graduated to `src/tools/VomGpuCompiler/` to serve as the compiler for the native `sssd.exe` daemon. Receipt: `ss test gpu-pe-factory`. CRQ145.
 
 ## Retired from wip (capability already in `src/`)
 
@@ -22,9 +23,6 @@ verdict**; `ss test <name>` is the receipt where one exists, and each blocker is
 
 ## Parked (proven/partial/recon, still blocked from `src/`)
 
-- **`vom-gpu-compiler/`** — the GPU PE-factory experiment. Its pure-C# D3D12 spine **already graduated** to
-  `src/native/dp-onnx/onnx-interp/GpuD3D12.cs`; this stays as the experiment that proved it. Receipt:
-  `ss test gpu-pe-factory`. Frontier: a *functional* PE. CRQ145.
 - **`directport/`** — the full upstream DirectPort C++ SDK + examples. The **load-bearing core already
   graduated**: `src/native/directport/{directport.h,directportd3d12.cpp}`, `Device/DirectPortVk.cs`,
   `windows/DirectPort{Native,Producer,Bench}.cs`. Kept as the reference. CRQ117.

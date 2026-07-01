@@ -9,21 +9,21 @@ $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }
 
-$dir = @('S:\subsystem\wip\vom-gpu-compiler','S:\subsystem-project\subsystem-main\wip\vom-gpu-compiler') |
+$dir = @('S:\subsystem\src\tools\VomGpuCompiler','S:\subsystem-project\subsystem-main\src\tools\VomGpuCompiler') |
        Where-Object { Test-Path (Join-Path $_ 'compile.ps1') } | Select-Object -First 1
-if (-not $dir) { Write-Host "SKIP - vom-gpu-compiler not found on this box." -ForegroundColor Yellow; return }
+if (-not $dir) { Write-Host "SKIP - VomGpuCompiler not found on this box." -ForegroundColor Yellow; return }
 # compile.ps1 uses the CodeDom Add-Type (/unsafe /platform:x64) — Windows PowerShell 5.1, not pwsh 7.
 $ps51 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path $ps51)) { Write-Host "SKIP - Windows PowerShell 5.1 not present (Add-Type CodeDom needed)." -ForegroundColor Yellow; return }
 
-$vom = Join-Path $dir 'vom.exe'
-Remove-Item $vom -Force -EA SilentlyContinue
+$target = Join-Path $dir 'sssd.exe'
+Remove-Item $target -Force -EA SilentlyContinue
 $out = (& $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'compile.ps1') 2>&1 | Out-String)
 Assert ($out -match 'Native PE executable compiled via GPU') "GPU PE-factory ran (D3D12 dispatch -> PE bytes, VOM-brokered)"
 Assert ($out -match 'Live elements: 0')                       "VOM cascade-reclaimed every D3D12 handle (0 leaked)"
-Assert (Test-Path $vom)                                       "vom.exe produced"
-if (Test-Path $vom) {
-    $b = [System.IO.File]::ReadAllBytes($vom)
+Assert (Test-Path $target)                                    "sssd.exe produced"
+if (Test-Path $target) {
+    $b = [System.IO.File]::ReadAllBytes($target)
     $peOff = [BitConverter]::ToInt32($b, 0x3C)
     Assert ($b[0] -eq 0x4D -and $b[1] -eq 0x5A)               "PE has MZ signature"
     Assert ($peOff -gt 0 -and $peOff -lt $b.Length-24 -and $b[$peOff] -eq 0x50 -and $b[$peOff+1] -eq 0x45) "PE has PE\0\0 signature"

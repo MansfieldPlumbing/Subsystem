@@ -1,4 +1,4 @@
-﻿# compile.ps1 — Compile VOM GPU Compiler on the fly and execute GPU compiler pass.
+# compile.ps1 — Compile VOM GPU Compiler on the fly and execute GPU compiler pass.
 # Compatible with PowerShell 5.1 (stock Windows 11).
 
 $ErrorActionPreference = 'Stop'
@@ -500,7 +500,7 @@ namespace Subsystem.Vom
                 Console.WriteLine("Loading embedded shader source...");
                 string hlslCode = @"
 #define VomRS ""RootFlags(0), RootConstants(num32BitConstants=4, b0), SRV(t0), SRV(t1), UAV(u0)""
-// VomCompiler.hlsl — The GPU Compiler for a Native Win64 PE Executable (vom.exe)
+// VomCompiler.hlsl — The GPU Compiler for a Native Win64 PE Executable (sssd.exe)
 // Assembles the PE32+ headers, Import Address Table, and raw x64 machine code.
 #define GROUP_SIZE 64
 #define LDS_SIZE 1024
@@ -552,13 +552,13 @@ void AssemblePeHeaders(uint tid) {
         WriteToLds(144, 0x00000000);   // NumberOfSymbols
         WriteToLds(148, 0x002200F0);   // SizeOfOptionalHeader=0xF0, Characteristics=0x0022 (EXE|LARGE_ADDR_AWARE)
         // ---- Optional header PE32+ (@0x98=152) ----
-        WriteToLds(152, 0x000E020B);   // Magic=0x020B(PE32+), LinkerVer 14.0
+        WriteToLds(152, 0x000E020B);   // Magic=0x020B(PE32+), LinkerVer 11.0
         WriteToLds(156, 0x00000200);   // SizeOfCode
         WriteToLds(160, 0x00000200);   // SizeOfInitializedData
         WriteToLds(164, 0x00000000);   // SizeOfUninitializedData
         WriteToLds(168, 0x00000200);   // AddressOfEntryPoint (RVA == file off, low-align)
         WriteToLds(172, 0x00000200);   // BaseOfCode
-        WriteToLds(176, 0x40000000);   // ImageBase low  (0x140000000)
+        WriteToLds(176, 0x00000000);   // ImageBase low (0x100000000)
         WriteToLds(180, 0x00000001);   // ImageBase high
         WriteToLds(184, 0x00000200);   // SectionAlignment = 0x200
         WriteToLds(188, 0x00000200);   // FileAlignment    = 0x200  (==SectionAlignment: low-alignment flat map)
@@ -580,7 +580,9 @@ void AssemblePeHeaders(uint tid) {
         WriteToLds(252, 0x00000000);   // SizeOfHeapCommit hi
         WriteToLds(256, 0x00000000);   // LoaderFlags
         WriteToLds(260, 0x00000010);   // NumberOfRvaAndSizes = 16
-        // 16 data directories @264..391 stay zero (no imports in the dir -> loader skips the .rdata stub)
+        // Import Table RVA Directory entry (Directory index 1)
+        WriteToLds(272, O_RdataSection); // Import Table RVA
+        WriteToLds(276, 0x00000100);     // Size of Import Table
         // ---- Section table (@392 = 152 + 0xF0) ----
         WriteToLds(392, 0x7865742E);   // .tex
         WriteToLds(396, 0x00000074);   // t
@@ -601,7 +603,7 @@ void AssemblePeHeaders(uint tid) {
         WriteToLds(456, 0x00000000);
         WriteToLds(460, 0x00000000);
         WriteToLds(464, 0x00000000);
-        WriteToLds(468, 0x40000040);   // .rdata Characteristics: INITIALIZED_DATA|READ
+        WriteToLds(468, 0xC0000040);   // .rdata Characteristics: INITIALIZED_DATA|READ|WRITE
     }
     GroupMemoryBarrierWithGroupSync();
     if (tid < 32) {
@@ -618,69 +620,109 @@ void AssembleImportTable(uint tid) {
 
     if (tid == 0) {
         uint rdataBase = O_RdataSection;
-        WriteToLds(0, rdataBase + 40);
-        WriteToLds(4, 0);
-        WriteToLds(8, 0);
-        WriteToLds(12, rdataBase + 200);
-        WriteToLds(16, rdataBase + 100);
+        WriteToLds(0, rdataBase + 40);  // ILT RVA
+        WriteToLds(4, 0);               // TimeDateStamp
+        WriteToLds(8, 0);               // ForwarderChain
+        WriteToLds(12, rdataBase + 200);// DLL Name RVA (kernel32.dll)
+        WriteToLds(16, rdataBase + 100);// IAT RVA
         WriteToLds(20, 0); WriteToLds(24, 0); WriteToLds(28, 0); WriteToLds(32, 0); WriteToLds(36, 0);
 
-        WriteToLds(40, rdataBase + 220); WriteToLds(44, 0);
-        WriteToLds(48, rdataBase + 240); WriteToLds(52, 0);
-        WriteToLds(56, rdataBase + 260); WriteToLds(60, 0);
-        WriteToLds(64, rdataBase + 280); WriteToLds(68, 0);
-        WriteToLds(72, rdataBase + 300); WriteToLds(76, 0);
-        WriteToLds(80, rdataBase + 320); WriteToLds(84, 0);
-        WriteToLds(88, 0); WriteToLds(92, 0);
+        WriteToLds(40, rdataBase + 220); // ILT[0] -> GetStdHandle
+        WriteToLds(44, 0);
+        WriteToLds(48, rdataBase + 240); // ILT[1] -> CreateProcessW
+        WriteToLds(52, 0);
+        WriteToLds(56, rdataBase + 260); // ILT[2] -> WaitForSingleObject
+        WriteToLds(60, 0);
+        WriteToLds(64, rdataBase + 284); // ILT[3] -> CloseHandle
+        WriteToLds(68, 0);
+        WriteToLds(72, rdataBase + 300); // ILT[4] -> ExitProcess
+        WriteToLds(76, 0);
+        WriteToLds(80, rdataBase + 320); // ILT[5] -> GetExitCodeProcess
+        WriteToLds(84, 0);
+        WriteToLds(88, 0); WriteToLds(92, 0); // ILT Terminator
     }
     if (tid == 1) {
         uint rdataBase = O_RdataSection;
-        WriteToLds(100, rdataBase + 220); WriteToLds(104, 0);
-        WriteToLds(108, rdataBase + 240); WriteToLds(112, 0);
-        WriteToLds(116, rdataBase + 260); WriteToLds(120, 0);
-        WriteToLds(124, rdataBase + 280); WriteToLds(128, 0);
-        WriteToLds(132, rdataBase + 300); WriteToLds(136, 0);
-        WriteToLds(140, rdataBase + 320); WriteToLds(144, 0);
-        WriteToLds(148, 0); WriteToLds(152, 0);
+        WriteToLds(100, rdataBase + 220); WriteToLds(104, 0); // IAT[0] -> GetStdHandle
+        WriteToLds(108, rdataBase + 240); WriteToLds(112, 0); // IAT[1] -> CreateProcessW
+        WriteToLds(116, rdataBase + 260); WriteToLds(120, 0); // IAT[2] -> WaitForSingleObject
+        WriteToLds(124, rdataBase + 284); WriteToLds(128, 0); // IAT[3] -> CloseHandle
+        WriteToLds(132, rdataBase + 300); WriteToLds(136, 0); // IAT[4] -> ExitProcess
+        WriteToLds(140, rdataBase + 320); WriteToLds(144, 0); // IAT[5] -> GetExitCodeProcess
+        WriteToLds(148, 0); WriteToLds(152, 0); // IAT Terminator
 
-        WriteToLds(200, 0x6E72656B);
-        WriteToLds(204, 0x32336C65);
-        WriteToLds(208, 0x6C6C642E);
+        // DLL Name: kernel32.dll
+        WriteToLds(200, 0x6E72656B); // kern
+        WriteToLds(204, 0x32336C65); // el32
+        WriteToLds(208, 0x6C6C642E); // .dll
         WriteToLds(212, 0x00000000);
     }
     if (tid == 2) {
-        WriteToLds(220, 0x65617243);
-        WriteToLds(224, 0x614E6574);
-        WriteToLds(228, 0x5064656D);
-        WriteToLds(232, 0x57657069);
-        WriteToLds(236, 0x00000000);
+        // Name Hints:
+        // GetStdHandle (Hint: 0, Name: GetStdHandle)
+        WriteToLds(220, 0x65470000);
+        WriteToLds(224, 0x64745374);
+        WriteToLds(228, 0x646E6148);
+        WriteToLds(232, 0x0000656C);
 
-        WriteToLds(240, 0x6E6E6F43);
-        WriteToLds(244, 0x4E746365);
-        WriteToLds(248, 0x64656D61);
-        WriteToLds(252, 0x65706950);
+        // CreateProcessW (Hint: 0, Name: CreateProcessW)
+        WriteToLds(240, 0x72430000);
+        WriteToLds(244, 0x65746165);
+        WriteToLds(248, 0x636F7250);
+        WriteToLds(252, 0x57737365);
         WriteToLds(256, 0x00000000);
     }
     if (tid == 3) {
-        WriteToLds(260, 0x65617243);
-        WriteToLds(264, 0x69466574);
-        WriteToLds(268, 0x4D656C6C);
-        WriteToLds(272, 0x6E697070);
-        WriteToLds(276, 0x00005767);
+        // WaitForSingleObject (Hint: 0, Name: WaitForSingleObject)
+        WriteToLds(260, 0x61570000);
+        WriteToLds(264, 0x6F467469);
+        WriteToLds(268, 0x6E695372);
+        WriteToLds(272, 0x4F656C67);
+        WriteToLds(276, 0x63656A62);
+        WriteToLds(280, 0x00000074);
 
-        WriteToLds(280, 0x5670614D);
-        WriteToLds(284, 0x4F656977);
-        WriteToLds(288, 0x6C694666);
-        WriteToLds(292, 0x00000065);
+        // CloseHandle (Hint: 0, Name: CloseHandle)
+        WriteToLds(284, 0x6C430000);
+        WriteToLds(288, 0x4865736F);
+        WriteToLds(292, 0x6C646E61);
+        WriteToLds(296, 0x00000065);
 
-        WriteToLds(300, 0x65617243);
-        WriteToLds(304, 0x50657474);
-        WriteToLds(308, 0x65636F72);
-        WriteToLds(312, 0x00577373);
+        // ExitProcess (Hint: 0, Name: ExitProcess)
+        WriteToLds(300, 0x78450000);
+        WriteToLds(304, 0x72507469);
+        WriteToLds(308, 0x7365636F);
+        WriteToLds(312, 0x00000073);
 
-        WriteToLds(320, 0x74697845);
-        WriteToLds(324, 0x636F7250);
-        WriteToLds(328, 0x00737365);
+        // GetExitCodeProcess (Hint: 0, Name: GetExitCodeProcess)
+        WriteToLds(320, 0x65470000); // \0\0Ge
+        WriteToLds(324, 0x69784574); // tExi
+        WriteToLds(328, 0x646F4374); // tCod
+        WriteToLds(332, 0x6F725065); // ePro
+        WriteToLds(336, 0x73736563); // cess
+        WriteToLds(340, 0x00000000); // \0\0\0\0
+
+        // Wide string command line S:\subsystem\ss.exe mcp at offset 360
+        WriteToLds(360, 0x003A0053); // S:
+        WriteToLds(364, 0x0073005C); // \s
+        WriteToLds(368, 0x00620075); // ub
+        WriteToLds(372, 0x00790073); // sy
+        WriteToLds(376, 0x00740073); // st
+        WriteToLds(380, 0x006D0065); // em
+        WriteToLds(384, 0x0073005C); // \s
+        WriteToLds(388, 0x002E0073); // s.
+        WriteToLds(392, 0x00780065); // ex
+        WriteToLds(396, 0x00200065); // e 
+        WriteToLds(400, 0x0063006D); // mc
+        WriteToLds(404, 0x00000070); // p\0
+
+        // Wide string CWD S:\subsystem at offset 416
+        WriteToLds(416, 0x003A0053); // S:
+        WriteToLds(420, 0x0073005C); // \s
+        WriteToLds(424, 0x00620075); // ub
+        WriteToLds(428, 0x00790073); // sy
+        WriteToLds(432, 0x00740073); // st
+        WriteToLds(436, 0x006D0065); // em
+        WriteToLds(440, 0x00000000); // \0
     }
     GroupMemoryBarrierWithGroupSync();
     if (tid < 32) {
@@ -695,30 +737,15 @@ void GenerateCode(uint tid) {
     if (tid < TotalMethods) {
         CompileUnit unit = g_IrInput[tid];
         uint codeOffset = O_TextSection + unit.RvaOffset;
-        uint prologue[2] = { 0xE5894855, 0x20EC8348 };
-
-        uint targetWord = codeOffset / 16;
-        uint targetReg = (codeOffset % 16) / 4;
-        uint targetShift = (codeOffset % 4) * 8;
-
-        InterlockedOr(g_PeOutput[targetWord][targetReg], prologue[0] << targetShift);
-        InterlockedOr(g_PeOutput[targetWord + (targetReg + 1) / 4][(targetReg + 1) % 4], prologue[1] << targetShift);
 
         for (uint i = 0; i < unit.OpcodeCount; i++) {
             uint val = g_Bytecodes[unit.OpcodeOffset + i];
-            uint instrOffset = codeOffset + 8 + i * 4;
+            uint instrOffset = codeOffset + i * 4;
             uint iw = instrOffset / 16;
             uint ir = (instrOffset % 16) / 4;
             uint ishift = (instrOffset % 4) * 8;
             InterlockedOr(g_PeOutput[iw][ir], val << ishift);
         }
-
-        uint epilogue = 0xC35DC420;
-        uint epilogueOffset = codeOffset + 8 + unit.OpcodeCount * 4;
-        uint ew = epilogueOffset / 16;
-        uint er = (epilogueOffset % 16) / 4;
-        uint eshift = (epilogueOffset % 4) * 8;
-        InterlockedOr(g_PeOutput[ew][er], epilogue << eshift);
     }
 }
 
@@ -853,17 +880,56 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID, uint3 groupThreadId : 
                 Console.WriteLine("Preparing buffer payloads...");
                 int peSize = 4096;
 
+                byte[] codeBytes = new byte[] {
+                    0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xE4, 0xF0, 
+                    0x48, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00, 0x48, 
+                    0x8D, 0x7C, 0x24, 0x50, 0x31, 0xC0, 0xB9, 0x11, 
+                    0x00, 0x00, 0x00, 0xF3, 0x48, 0xAB, 0xC7, 0x44, 
+                    0x24, 0x50, 0x68, 0x00, 0x00, 0x00, 0xC7, 0x84, 
+                    0x24, 0x8C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 
+                    0x00, 0xB9, 0xF6, 0xFF, 0xFF, 0xFF, 0xFF, 0x15, 
+                    0x28, 0x02, 0x00, 0x00, 0x48, 0x89, 0x84, 0x24, 
+                    0xA0, 0x00, 0x00, 0x00, 0xB9, 0xF5, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0x15, 0x15, 0x02, 0x00, 0x00, 0x48, 
+                    0x89, 0x84, 0x24, 0xA8, 0x00, 0x00, 0x00, 0xB9, 
+                    0xF4, 0xFF, 0xFF, 0xFF, 0xFF, 0x15, 0x02, 0x02, 
+                    0x00, 0x00, 0x48, 0x89, 0x84, 0x24, 0xB0, 0x00, 
+                    0x00, 0x00, 0x48, 0x31, 0xC9, 0x48, 0x8D, 0x15, 
+                    0xF4, 0x02, 0x00, 0x00, 0x45, 0x31, 0xC0, 0x45, 
+                    0x31, 0xC9, 0xC7, 0x44, 0x24, 0x20, 0x01, 0x00, 
+                    0x00, 0x00, 0xC7, 0x44, 0x24, 0x28, 0x00, 0x00, 
+                    0x00, 0x00, 0x48, 0xC7, 0x44, 0x24, 0x30, 0x00, 
+                    0x00, 0x00, 0x00, 0x48, 0x8D, 0x05, 0x06, 0x03, 
+                    0x00, 0x00, 0x48, 0x89, 0x44, 0x24, 0x38, 0x48, 
+                    0x8D, 0x44, 0x24, 0x50, 0x48, 0x89, 0x44, 0x24, 
+                    0x40, 0x48, 0x8D, 0x84, 0x24, 0xC0, 0x00, 0x00, 
+                    0x00, 0x48, 0x89, 0x44, 0x24, 0x48, 0xFF, 0x15, 
+                    0xB0, 0x01, 0x00, 0x00, 0x85, 0xC0, 0x75, 0x0E, 
+                    0x65, 0x8B, 0x0C, 0x25, 0x68, 0x00, 0x00, 0x00, 
+                    0xFF, 0x15, 0xB6, 0x01, 0x00, 0x00, 0x48, 0x8B, 
+                    0x8C, 0x24, 0xC0, 0x00, 0x00, 0x00, 0x48, 0xC7, 
+                    0xC2, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x15, 0x91, 
+                    0x01, 0x00, 0x00, 0x48, 0x8B, 0x8C, 0x24, 0xC0, 
+                    0x00, 0x00, 0x00, 0x48, 0x8D, 0x54, 0x24, 0x30, 
+                    0xFF, 0x15, 0x96, 0x01, 0x00, 0x00, 0x48, 0x8B, 
+                    0x8C, 0x24, 0xC8, 0x00, 0x00, 0x00, 0xFF, 0x15, 
+                    0x78, 0x01, 0x00, 0x00, 0x48, 0x8B, 0x8C, 0x24, 
+                    0xC0, 0x00, 0x00, 0x00, 0xFF, 0x15, 0x6A, 0x01, 
+                    0x00, 0x00, 0x8B, 0x4C, 0x24, 0x30, 0xFF, 0x15, 
+                    0x68, 0x01, 0x00, 0x00, 0xC3
+                };
+
+                uint[] bytecodes = new uint[(codeBytes.Length + 3) / 4];
+                Buffer.BlockCopy(codeBytes, 0, bytecodes, 0, codeBytes.Length);
+
                 CompileUnit[] irData = new CompileUnit[1];
                 irData[0] = new CompileUnit
                 {
                     FuncIndex = 0,
-                    OpcodeCount = 12,
+                    OpcodeCount = (uint)bytecodes.Length,
                     OpcodeOffset = 0,
                     RvaOffset = 0
                 };
-
-                uint[] bytecodes = new uint[12];
-                for (int i = 0; i < 12; i++) bytecodes[i] = 0x90909090;
 
                 // VOM-shaped Memory Allocations
                 Handle irRegion = Vom.Alloc(owner, irData.Length * sizeof(CompileUnit), VomFormat.Bytes, "CompileUnitData", false, "Buffers", "IrInput");
@@ -1067,8 +1133,8 @@ Add-Type -TypeDefinition $csharpCode -Language CSharp -CompilerParameters @{
     CompilerOptions = "/unsafe /platform:x64"
 }
 
-# 4. Execute the compiler to generate vom.exe
-$targetExe = Join-Path $root "vom.exe"
+# 4. Execute the compiler to generate sssd.exe
+$targetExe = Join-Path $root "sssd.exe"
 Write-Host "Executing GPU Compilation pass..."
 [Subsystem.Vom.VomGpuCompiler]::Compile($targetExe)
 
@@ -1077,5 +1143,5 @@ if (Test-Path $targetExe) {
     $fileInfo = Get-Item $targetExe
     Write-Host "Compiled size: $($fileInfo.Length) bytes"
 } else {
-    throw "GPU Compiler executed but target vom.exe was not created."
+    throw "GPU Compiler executed but target sssd.exe was not created."
 }
