@@ -2334,5 +2334,26 @@
       }
     ],
     "Ref": "CRQ000000000188"
+  },
+  {
+    "Id": 189,
+    "Kind": "Change",
+    "Category": "Device",
+    "Summary": "WINDOWS-NATIVE AWARENESS - the Windows head becomes as natively aware as the Android head, fortified from Microsoft Learn. Scott 2026-07-01 verbatim: \"we should make ss natively aware of windows just like the android build is\" + \"anything that microsoft has in microsoft learn we should use to fortify subsystem\". The Android head has a Device-driver family (Readers: battery/sensors/network, Actuators, Light, Surfaces, thermal) and a dumpsys zoo; the Windows head has almost none of it. The Windows equivalents all exist and are documented on Learn: power/battery status, thermal, Windows.Devices.Sensors/Geolocation, network adapters, audio endpoints, display topology, CIM/WMI as the dumpsys-equivalent (the Windows zoo), ETW for Dg sinks, SCM for the CRQ188 kernel service, Job Objects as the process-carrier containment under a VOM Owner, toast/notification surfaces. Each lands as a Device driver mounted as a VOM leaf + a typed-record cmdlet obeying the CRQ187 weld doctrine, capability-gated default-deny where it reads user state. AI Studio drafts the parity map first - see EOS.",
+    "RelatedFiles": [],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1782948248,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 189,
+        "Noted": 1782948248,
+        "Disposition": "assignment",
+        "Body": "AI STUDIO / GEMINI ASSIGNMENT (spec-only, NO repo access; deliverable = one markdown table document). Produce the WINDOWS PARITY MAP for Subsystem: every native-awareness capability the Android head has (Device/Readers.cs: battery, sensors, network; Actuators; Light; Surfaces; thermal via dumpsys; the Get-Android* zoo) mapped to its Windows implementation, fortified EXCLUSIVELY from Microsoft Learn. One row per capability, columns: | Capability | Android-head implementation (file/cmdlet) | Windows API (exact Microsoft Learn page title + URL) | Proposed surface (Device driver VOM leaf + Verb-Noun cmdlet, verbs ONLY from: Create Open Close Query Set Enumerate Parse Read Write Register Unregister Reference Dereference Alloc Free Spawn Terminate Signal Wait Initialize Load Rehydrate Project Mount Bind Grant Revoke Resolve Extract Apply Remedy) | Typed record shape it emits | Capability-gate needed (default-deny y/n) | Effort S/M/L |. ALSO include Windows-only fortifications the Android head cannot have, each with its Learn citation: CIM/WMI as the Windows dumpsys-zoo equivalent (name the specific CIM classes per row), ETW as a Dg diagnostic sink, SCM service install for the CRQ188 kernel (opt-in only), Job Objects as process-carrier containment under a VOM Owner, DXGI adapter/memory queries for the Dpx GPU path. RULES: objects never strings (every row emits a typed record, never text); no async (the fence idiom is the house sync); nothing hardcoded; every claim cites a live Learn page; if an API is deprecated on Learn, say so and name the replacement. The doc must stand alone - a grunt implements a row without asking you anything. Return as one self-contained markdown block so the courier session can file it via Add-EosLog onto this Request."
+      }
+    ],
+    "Ref": "CRQ000000000189"
   }
 ]
