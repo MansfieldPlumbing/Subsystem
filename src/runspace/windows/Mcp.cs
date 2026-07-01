@@ -41,30 +41,70 @@ internal static class Mcp
             // hand-written JSON-RPC handshake. e.g. `ss mcp call ss_git -gitRoot S:\subsystem-project\subsystem-main`.
             if (args.Length > 0 && args[0].Equals("call", StringComparison.OrdinalIgnoreCase))
                 return CallShorthand(args[1..], rs);
-            string? line;
-            while ((line = Console.In.ReadLine()) != null)
+            // PROTOCOL MODE: stdout belongs to JSON-RPC alone. Park the real writer for the protocol and
+            // route every stray Console write (a log sink, a banner, a background thread) to stderr — one
+            // poisoned stdout line is a parse error and a client "Server disconnected".
+            var rpc = Console.Out;
+            Console.SetOut(Console.Error);
+            // Lifecycle breadcrumbs go to stderr: the MCP client records stderr in its own log
+            // (mcp-server-Subsystem.log), so every future flap carries its cause line.
+            var exePath = Environment.ProcessPath ?? "";
+            Console.Error.WriteLine($"[ss mcp] serving pid={Environment.ProcessId} v={ReadVersion()} exe={exePath}" +
+                (File.Exists(exePath) ? $" exeWriteUtc={File.GetLastWriteTimeUtc(exePath):o}" : ""));
+            RegisterAnnounce(exePath);
+            try
             {
-                if (line.Length == 0) continue;
-                JsonDocument req;
-                try { req = JsonDocument.Parse(line); } catch { continue; }   // ignore non-JSON noise
-                using (req)
+                string? line;
+                while ((line = Console.In.ReadLine()) != null)
                 {
-                    var root = req.RootElement;
-                    var method = root.TryGetProperty("method", out var m) ? (m.GetString() ?? "") : "";
-                    // A request carries an id and gets a reply; a notification (initialized/cancelled) does not.
-                    if (!root.TryGetProperty("id", out var idEl)) continue;
-                    object? result = null, error = null;
-                    try { result = Resolve(method, root, rs); }
-                    catch (Exception ex) { error = new { code = -32603, message = ex.Message }; }
-                    Write(idEl, result, error);
+                    if (line.Length == 0) continue;
+                    JsonDocument req;
+                    try { req = JsonDocument.Parse(line); } catch { continue; }   // ignore non-JSON noise
+                    using (req)
+                    {
+                        var root = req.RootElement;
+                        var method = root.TryGetProperty("method", out var m) ? (m.GetString() ?? "") : "";
+                        // A request carries an id and gets a reply; a notification (initialized/cancelled) does not.
+                        if (!root.TryGetProperty("id", out var idEl)) continue;
+                        object? result = null, error = null;
+                        try { result = Resolve(method, root, rs); }
+                        catch (Exception ex) { error = new { code = -32603, message = ex.Message }; }
+                        Write(rpc, idEl, result, error);
+                    }
                 }
+                Console.Error.WriteLine("[ss mcp] stdin EOF — client closed the pipe; exiting clean.");
             }
+            finally { UnregisterAnnounce(); }
         }
         finally
         {
-            global::Subsystem.Vom.Vom.Terminate(pwshMount);
+            // The reclaim must never turn a clean disconnect into a crash exit the client paints as an error.
+            try { global::Subsystem.Vom.Vom.Terminate(pwshMount); }
+            catch (Exception ex) { Console.Error.WriteLine("[ss mcp] shutdown reclaim: " + ex.Message); }
         }
         return 0;
+    }
+
+    // The courier announce — who serves whom, readable BEFORE anyone kills a process (the first CRQ188
+    // slice). HKCU\Software\Subsystem\Mcp\<pid> carries the exe identity and start time; removed on clean
+    // exit, and a stale key names a dead pid so scanners PID-validate. Guarded: announce failure must never
+    // take the server down.
+    private static void RegisterAnnounce(string exePath)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Subsystem\Mcp\" + Environment.ProcessId);
+            key.SetValue("Exe", exePath);
+            key.SetValue("StartedUtc", DateTime.UtcNow.ToString("o"));
+            if (File.Exists(exePath)) key.SetValue("ExeWriteUtc", File.GetLastWriteTimeUtc(exePath).ToString("o"));
+        }
+        catch (Exception ex) { Console.Error.WriteLine("[ss mcp] announce: " + ex.Message); }
+    }
+
+    private static void UnregisterAnnounce()
+    {
+        try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(@"Software\Subsystem\Mcp\" + Environment.ProcessId, throwOnMissingSubKey: false); }
+        catch (Exception ex) { Console.Error.WriteLine("[ss mcp] unannounce: " + ex.Message); }
     }
 
     private static object Resolve(string method, JsonElement root, Runspace rs) => method switch
@@ -250,12 +290,13 @@ internal static class Mcp
         return rs;
     }
 
-    private static void Write(JsonElement id, object? result, object? error)
+    // Writes on the parked protocol writer — never Console.Out, which is stderr-routed in protocol mode.
+    private static void Write(TextWriter rpc, JsonElement id, object? result, object? error)
     {
         var payload = new Dictionary<string, object?> { ["jsonrpc"] = "2.0", ["id"] = ParseId(id) };
         if (error != null) payload["error"] = error; else payload["result"] = result;
-        Console.Out.WriteLine(JsonSerializer.Serialize(payload));
-        Console.Out.Flush();
+        rpc.WriteLine(JsonSerializer.Serialize(payload));
+        rpc.Flush();
     }
 
     private static object? ParseId(JsonElement id) => id.ValueKind switch
