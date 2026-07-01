@@ -258,6 +258,7 @@ public class Dp
         "Conv","ConvTranspose","LayerNormalization","Softmax","LSTM","Resize","STFT","NonZero","ScatterND","DynamicUpdateSlice",
         "Split","Unpack","Pack","Tile","GroupNormalization","Gelu","InstanceNormalization","ReduceProd","DequantizeLinear","QuantizeLinear",
         "MatMulNBits","GatherBlockQuantized","RotaryEmbedding","SimplifiedLayerNormalization","GroupQueryAttention",
+        "ReduceAll","OneHot",
     };
 
     public static bool Profile = false;
@@ -419,6 +420,8 @@ public class Dp
             case "ReduceMean": return One(Reduce(x, n, "mean"));
             case "ReduceSum": return One(Reduce(x, n, "sum"));
             case "ReduceMax": return One(Reduce(x, n, "max"));
+            case "ReduceAll": return One(Reduce(x, n, "all"));
+            case "OneHot": return One(OneHot(x, n));
             case "CumSum": return One(CumSum(x[0], (int)x[1].AsI()[0], L(n, "exclusive", 0) != 0, L(n, "reverse", 0) != 0));
             case "Slice": return One(Slice(x, n));
             case "Pad": return One(Pad(x, n));
@@ -1157,7 +1160,7 @@ public class Dp
         return r;
     }
 
-    static unsafe Tensor Reduce(Tensor[] x, NodeProto n, string mode)   // mode: "sum" | "mean" | "max" -- one loop, not a per-op copy
+    static unsafe Tensor Reduce(Tensor[] x, NodeProto n, string mode)   // mode: "sum" | "mean" | "max" | "all" -- one loop, not a per-op copy
     {
         var a = x[0]; var d = a.AsF(); int r = a.Shape.Length;
         bool keep = L(n, "keepdims", 1) != 0;
@@ -1171,9 +1174,9 @@ public class Dp
         }
         int[] oshA = osh.Count == 0 ? new[] { 1 } : osh.ToArray(); var oStr = ContigStrides(oshA);
         long outN = 1; foreach (var dd in oshA) outN *= dd; long reduced = d.Length / Math.Max(1, outN);
-        bool isMax = mode == "max", isMean = mode == "mean";
+        bool isMax = mode == "max", isMean = mode == "mean", isAll = mode == "all";
         int m = axes.Count; bool trailing = m > 0; for (int k = r - m; k < r; k++) if (k < 0 || !axes.Contains(k)) trailing = false;
-        if (trailing && !isMax)   // contiguous trailing block -> each output = SIMD sum of a contiguous run (sum/mean only)
+        if (trailing && (mode == "sum" || mode == "mean"))   // contiguous trailing block -> each output = SIMD sum of a contiguous run (sum/mean only)
         {
             var of = TensorArena.AllocSpan(outN);
             fixed (float* p_of = of)
@@ -1193,16 +1196,73 @@ public class Dp
         }
         var acc = new double[outN];
         if (isMax) for (long i = 0; i < outN; i++) acc[i] = double.NegativeInfinity;
+        else if (isAll) for (long i = 0; i < outN; i++) acc[i] = 1.0;   // booleans are 0.0f/1.0f floats in this engine (dp-onnx convention); AND starts true
         var idx = new int[r];
         for (long lin = 0; lin < d.Length; lin++)
         {
             long oi = 0; for (int k = 0; k < r; k++) { int od = outDimOfIn[k]; if (od >= 0) { int coord = axes.Contains(k) && keep ? 0 : idx[k]; oi += coord * oStr[od]; } }
-            if (isMax) acc[oi] = Math.Max(acc[oi], d[(int)lin]); else acc[oi] += d[(int)lin];
+            if (isMax) acc[oi] = Math.Max(acc[oi], d[(int)lin]);
+            else if (isAll) acc[oi] = (acc[oi] != 0.0 && d[(int)lin] != 0f) ? 1.0 : 0.0;
+            else acc[oi] += d[(int)lin];
             for (int k = r - 1; k >= 0; k--) { if (++idx[k] < a.Shape[k]) break; idx[k] = 0; }
         }
         var o = TensorArena.AllocSpan(outN);
         for (long i = 0; i < outN; i++) o[(int)i] = (float)(isMean ? acc[i] / reduced : acc[i]);
         return Tensor.F(o, oshA);
+    }
+
+    // OneHot: out[..., d, ...] (d inserted at axis) = onVal where indices==d else offVal. values = [offVal, onVal].
+    static unsafe Tensor OneHot(Tensor[] x, NodeProto n)
+    {
+        var indices = x[0]; var depthT = x[1]; var valuesT = x[2];
+        int depth = (int)(depthT.IsInt ? depthT.Ip[0] : depthT.AsF()[0]);
+        var valSpan = valuesT.AsF(); float offVal = valSpan[0], onVal = valSpan[1];
+        int rank = indices.Shape.Length; int axis = (int)L(n, "axis", -1); if (axis < 0) axis += rank + 1;
+        var outShape = new int[rank + 1];
+        for (int i = 0, j = 0; i < rank + 1; i++) outShape[i] = i == axis ? depth : indices.Shape[j++];
+        long outN = 1; foreach (var dd in outShape) outN *= dd;
+        var o = TensorArena.AllocSpan(outN);
+        long outer = 1; for (int i = 0; i < axis; i++) outer *= outShape[i];
+        long inner = 1; for (int i = axis + 1; i < outShape.Length; i++) inner *= outShape[i];
+        int outLen = o.Length;
+        fixed (float* p_o = o)
+        {
+            float* ptr_o = p_o;
+            if (indices.IsInt)
+            {
+                var idxArr = indices.Ip;
+                System.Threading.Tasks.Parallel.For(0L, outer, oo =>
+                {
+                    var span_o = new Span<float>(ptr_o, outLen);
+                    for (int d = 0; d < depth; d++)
+                    {
+                        long outBase = (oo * depth + d) * inner;
+                        for (long ii = 0; ii < inner; ii++)
+                            span_o[(int)(outBase + ii)] = idxArr[oo * inner + ii] == d ? onVal : offVal;
+                    }
+                });
+            }
+            else
+            {
+                var idxF = indices.AsF(); int idxLen = idxF.Length;
+                fixed (float* p_idx = idxF)
+                {
+                    float* ptr_idx = p_idx;
+                    System.Threading.Tasks.Parallel.For(0L, outer, oo =>
+                    {
+                        var span_o = new Span<float>(ptr_o, outLen);
+                        var span_idx = new Span<float>(ptr_idx, idxLen);
+                        for (int d = 0; d < depth; d++)
+                        {
+                            long outBase = (oo * depth + d) * inner;
+                            for (long ii = 0; ii < inner; ii++)
+                                span_o[(int)(outBase + ii)] = (long)span_idx[(int)(oo * inner + ii)] == d ? onVal : offVal;
+                        }
+                    });
+                }
+            }
+        }
+        return Tensor.F(o, outShape);
     }
 
     static Tensor CumSum(Tensor a, int axis, bool excl, bool rev)

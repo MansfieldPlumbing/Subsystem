@@ -205,6 +205,10 @@ public static class Tflite
         ["LOGICAL_AND"] = "And", ["LOGICAL_NOT"] = "Not", ["FLOOR_MOD"] = "Mod",
         ["RSQRT"] = "Rsqrt", ["NOT_EQUAL"] = "NotEqual", ["DEQUANTIZE"] = "DequantizeLinear", ["QUANTIZE"] = "QuantizeLinear",
         ["UNPACK"] = "Unpack", ["DYNAMIC_UPDATE_SLICE"] = "DynamicUpdateSlice", ["PACK"] = "Pack", ["FILL"] = "Fill", ["REDUCE_MAX"] = "ReduceMax",
+        ["REDUCE_ALL"] = "ReduceAll", ["ONE_HOT"] = "OneHot",
+        // DEPTHWISE_CONV_2D lowers to the SAME "Conv" node CONV_2D already uses (group=C_in makes it
+        // depthwise) -- Conv's im2col+per-group-GEMM kernel already handles this case; no new kernel.
+        ["DEPTHWISE_CONV_2D"] = "Conv",
     };
 
     public static string MapToOnnx(string tfliteName) => ToOnnx.TryGetValue(tfliteName, out var v) ? v : null;
@@ -628,10 +632,33 @@ public static class Tflite
                     var (scl, zr, ax) = SynthQuant(ts[outIx[0]], g);
                     node.Input.Add(ins[0]); if (scl != null) { node.Input.Add(scl); node.Input.Add(zr); if (ax >= 0) node.Attribute.Add(IntAttr("axis", ax)); }
                     break; }
-                case "SUM": case "MEAN": case "REDUCE_MAX":   // ReduceSum/Mean/Max: tflite axes=input[1]; keep_dims=ReducerOptions[0]
+                case "SUM": case "MEAN": case "REDUCE_MAX": case "REDUCE_ALL":   // ReduceSum/Mean/Max/All: tflite axes=input[1]; keep_dims=ReducerOptions[0] (same options table for every reducer)
                     foreach (var s in ins) node.Input.Add(s);
                     node.Attribute.Add(IntAttr("keepdims", boVal != 0 ? fr.FieldU8(boVal, 0) : 0));
                     break;
+                case "ONE_HOT": {   // tflite ONE_HOT(indices, depth, on_value, off_value); OneHotOptions.axis[0] (default -1)
+                    foreach (var s in ins) node.Input.Add(s);
+                    node.Attribute.Add(IntAttr("axis", boVal != 0 ? fr.FieldI32(boVal, 0, -1) : -1));
+                    break; }
+                case "DEPTHWISE_CONV_2D": {   // -> "Conv" (group=C_in); DepthwiseConv2DOptions: padding[0] stride_w[1]
+                                              // stride_h[2] depth_multiplier[3] fused_activation[4] dilation_w[5] dilation_h[6]
+                    foreach (var s in ins) if (!string.IsNullOrEmpty(s)) node.Input.Add(s);
+                    int padMode = boVal != 0 ? fr.FieldU8(boVal, 0) : 0;         // 0=SAME, 1=VALID
+                    int strideW = boVal != 0 ? fr.FieldI32(boVal, 1, 1) : 1;
+                    int strideH = boVal != 0 ? fr.FieldI32(boVal, 2, 1) : 1;
+                    int dilW = boVal != 0 ? fr.FieldI32(boVal, 5, 1) : 1;
+                    int dilH = boVal != 0 ? fr.FieldI32(boVal, 6, 1) : 1;
+                    var sa = new AttributeProto { Name = "strides", Type = AttributeProto.Types.AttributeType.Ints };
+                    sa.Ints.Add(strideH); sa.Ints.Add(strideW); node.Attribute.Add(sa);
+                    var da = new AttributeProto { Name = "dilations", Type = AttributeProto.Types.AttributeType.Ints };
+                    da.Ints.Add(dilH); da.Ints.Add(dilW); node.Attribute.Add(da);
+                    string autoPad = padMode == 0 ? "SAME_UPPER" : "VALID";
+                    node.Attribute.Add(new AttributeProto { Name = "auto_pad", Type = AttributeProto.Types.AttributeType.String, S = ByteString.CopyFromUtf8(autoPad) });
+                    int cIn = ts[inIx[0]].Shape.Length > 1 ? ts[inIx[0]].Shape[1] : 1;
+                    node.Attribute.Add(IntAttr("group", cIn));   // group=C_in is what makes Conv depthwise
+                    { int act = boVal != 0 ? fr.FieldU8(boVal, 4) : 0;   // fused_activation_function[4] -- same fail-closed discipline as FULLY_CONNECTED
+                      if (act != 0) throw new NotImplementedException($"op[{o}] DEPTHWISE_CONV_2D fused_activation={act} unmapped"); }
+                    break; }
                 case "FULLY_CONNECTED":    // y = input . weights^T (+ bias) -> Gemm(input, weights, bias), transB=1
                     foreach (var s in ins) if (!string.IsNullOrEmpty(s)) node.Input.Add(s);
                     node.Attribute.Add(IntAttr("transB", 1));
