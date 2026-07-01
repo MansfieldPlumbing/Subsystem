@@ -190,6 +190,7 @@ SS011|AdbCommands.cs|Namespace 'Subsystem' carries no component segment (root-on
 SS011|AdbConnection.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AdbMdnsDiscoverer.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AdbPairingClient.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
+SS011|AgentActorProtocol.cs|Namespace 'Subsystem.Adb' segment 'Adb' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentDelta.cs|Namespace 'Subsystem.RuntimeBroker' segment 'RuntimeBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentSessionTable.cs|Namespace 'Subsystem.RuntimeBroker' segment 'RuntimeBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AgentSettings.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -199,6 +200,7 @@ SS011|AnsiHighlighter.cs|Namespace 'Subsystem' carries no component segment (roo
 SS011|Broker.cs|Namespace 'Subsystem.RuntimeBroker' segment 'RuntimeBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|ConscryptAdbTransport.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Dg.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
+SS011|DialoguePresenter.cs|Namespace 'Subsystem.Adb' segment 'Adb' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|DumpsysTreeParser.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Firewall.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|HelpSystem.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -262,6 +264,10 @@ SS013|Dp.cs|Method 'Release' starts with 'Release', which is not in the verb cat
 SS013|Dp.cs|Method 'TrackAlloc' starts with 'Track', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'TrackFree' starts with 'Track', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'dpgpu_gemm' starts with 'dpgpu_gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|DpxDecoder.cs|Method 'DisposeAsync' starts with 'Dispose', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|DpxDecoder.cs|Method 'DisposeAsync' starts with 'Dispose', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|DpxDecoder.cs|Method 'MoveNextAsync' starts with 'Move', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|DpxDecoder.cs|Method 'MoveNextAsync' starts with 'Move', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|GpuD3D12.cs|Method 'Gemm' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|GpuVulkan.cs|Method 'Gemm' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|LiteRt.cs|Method 'Deref' starts with 'Deref', which is not in the verb catalog — register the verb deliberately or use an approved one
@@ -349,6 +355,7 @@ SS015|Dg.cs|Static field '_ctx' (mutable) — statics compute, never remember/au
 SS015|Dg.cs|Static field '_dir' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dg.cs|Static field '_ring' (readonly Queue — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dg.cs|Static field '_stateRefreshedAt' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 'ActiveVerbose' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'DropP' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'DropScope' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Dropped' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)

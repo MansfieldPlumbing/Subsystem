@@ -24,7 +24,7 @@ namespace Subsystem.Adb
             {
                 var now = DateTime.Now.ToString("HH:mm:ss.fff");
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"[{now}] [{sender}] \"Routing token {tokenId} to {recipient} for expert {expertName}... [VOM region \\Actor\\{recipient}\\Objects\\Input]\"");
+                Console.WriteLine($"[{now}] [{sender}] \"Routing token {tokenId} to {recipient} for expert {expertName}... [VOM region \\Agent\\{recipient}\\Objects\\Input]\"");
                 Console.ResetColor();
             }
         }
@@ -68,7 +68,7 @@ namespace Subsystem.Adb
             {
                 var now = DateTime.Now.ToString("HH:mm:ss.fff");
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[{now}] [System] \"Actor {id} faulted: {message}\"");
+                Console.WriteLine($"[{now}] [System] \"Agent {id} faulted: {message}\"");
                 Console.ResetColor();
             }
         }

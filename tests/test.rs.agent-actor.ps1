@@ -31,8 +31,8 @@ try {
     Assert ($conn.FreeMemory -eq 6400000000) "Memory quota read correctly"
 
     # Verify VOM registration
-    $owner = $VomType::GetOwner("\Actor\Galaxy-S23")
-    Assert ($null -ne $owner) "VOM Owner created under \Actor\Galaxy-S23 path namespace"
+    $owner = $VomType::GetOwner("\Agent\Galaxy-S23")
+    Assert ($null -ne $owner) "VOM Owner created under \Agent\Galaxy-S23 path namespace"
     
     # 3. Spin up the In-Process Device Agent
     $agent = [Activator]::CreateInstance($AgentType, $conn)
@@ -78,7 +78,7 @@ try {
     $agent.Dispose()
     $deviceSet.Dispose()
     
-    $ownerGone = $null -eq $VomType::GetOwner("\Actor\Galaxy-S23")
+    $ownerGone = $null -eq $VomType::GetOwner("\Agent\Galaxy-S23")
     Assert $ownerGone "Teardown Terminated and reclaimed the VOM actor namespace and all handle allocations"
 
 } catch {

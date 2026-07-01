@@ -16,10 +16,10 @@ function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundC
 
 $V = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Subsystem.Vom.Vom') } | Where-Object {$_} | Select-Object -First 1
 if(-not $V){ Write-Host "Subsystem.Vom not loaded in this host — cannot run." -ForegroundColor Red; return }
-if(-not $V.GetMethod('SlotSwapTest')){ Write-Host "Vom.SlotSwapTest not present — this binary predates the slot loader." -ForegroundColor Red; return }
+if(-not $V.GetMethod('ApplySlotSwapTest')){ Write-Host "Vom.ApplySlotSwapTest not present — this binary predates the slot loader." -ForegroundColor Red; return }
 
 # A — load / swap / free-on-zero on code
-$swap = $V::SlotSwapTest() | ConvertFrom-Json
+$swap = $V::ApplySlotSwapTest() | ConvertFrom-Json
 Write-Host "A  swap: v1=$($swap.v1Value) v2=$($swap.v2Value) ; v2LiveAfterSwap=$($swap.v2LiveAfterSwap) ; v1ReclaimedOnZero=$($swap.v1ReclaimedOnZero)"
 Assert ([bool]$swap.v1Served)         "slot v1 loaded and served (1)"
 Assert ([bool]$swap.v2Served)         "slot v2 loaded and served (2)"

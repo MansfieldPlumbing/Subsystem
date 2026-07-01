@@ -14,19 +14,19 @@ function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundC
 
 $V = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Subsystem.Vom.Vom') } | Where-Object {$_} | Select-Object -First 1
 if(-not $V){ Write-Host "Subsystem.Vom not loaded in this host — cannot run." -ForegroundColor Red; return }
-if(-not $V.GetMethod('SlotRollbackTest')){ Write-Host "Vom.SlotRollbackTest not present — this binary predates slot rollback." -ForegroundColor Red; return }
+if(-not $V.GetMethod('ApplySlotRollbackTest')){ Write-Host "Vom.ApplySlotRollbackTest not present — this binary predates slot rollback." -ForegroundColor Red; return }
 
-$r = $V::SlotRollbackTest() | ConvertFrom-Json
-Write-Host "A  rollback: rolledBack=$($r.rolledBack) v1StillServes=$($r.v1StillServes) badSlotReclaimed=$($r.badSlotReclaimed)"
+$r = $V::ApplySlotRollbackTest() | ConvertFrom-Json
+Write-Host "A  rollback: rolledBack=$($r.rolledBack) v1StillServes=$($r.v1StillServes) faultingSlotReclaimed=$($r.faultingSlotReclaimed)"
 Assert ([bool]$r.rolledBack)        "a faulting swap rolled back instead of going live"
 Assert ([bool]$r.v1StillServes)     "the prior good slot is still live and serving after the bad swap"
-Assert ([bool]$r.badSlotReclaimed)  "the bad slot was freed-on-zero — no half-loaded residue"
+Assert ([bool]$r.faultingSlotReclaimed)  "the bad slot was freed-on-zero — no half-loaded residue"
 
 $pass = $fails.Count -eq 0
 Write-Host ""
 Write-Host ($(if($pass){"PASS — A/B rollback on the VOM loader: a bad swap reverts to the known-good slot and leaves nothing behind."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
 [pscustomobject]@{
     test='test.vom.slot-rollback'; pass=$pass
-    rolledBack=[bool]$r.rolledBack; v1StillServes=[bool]$r.v1StillServes; badSlotReclaimed=[bool]$r.badSlotReclaimed
+    rolledBack=[bool]$r.rolledBack; v1StillServes=[bool]$r.v1StillServes; faultingSlotReclaimed=[bool]$r.faultingSlotReclaimed
     verdict=$(if($pass){'bad swap rolls back to the good slot; loser freed-on-zero'}else{'see failures'})
 }

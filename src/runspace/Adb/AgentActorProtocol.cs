@@ -74,8 +74,8 @@ namespace Subsystem.Adb
         }
     }
 
-    // Connection representation for an in-process VOM actor.
-    public class VomActorConnection
+    // Connection representation for an in-process VOM peer.
+    public class VomPeerConnection
     {
         public string Name { get; }
         public string[] Experts { get; }
@@ -85,7 +85,7 @@ namespace Subsystem.Adb
         public Owner DeviceOwner { get; }
         public ulong CurrentPhase { get; set; } = 0;
 
-        public VomActorConnection(string name, string[] experts, long freeMemory, Owner owner, VomChannel input, VomChannel output)
+        public VomPeerConnection(string name, string[] experts, long freeMemory, Owner owner, VomChannel input, VomChannel output)
         {
             Name = name;
             Experts = experts;
@@ -99,15 +99,15 @@ namespace Subsystem.Adb
     // Registry and lifecycle manager of the attached device set.
     public class InProcessDeviceSet : IDisposable
     {
-        private readonly ConcurrentDictionary<string, VomActorConnection> _devices = new();
+        private readonly ConcurrentDictionary<string, VomPeerConnection> _devices = new();
         private readonly List<Owner> _createdOwners = new();
 
-        public ICollection<VomActorConnection> Devices => _devices.Values;
+        public ICollection<VomPeerConnection> Devices => _devices.Values;
 
-        public VomActorConnection CreateDevice(string name, string[] experts, long freeMemory)
+        public VomPeerConnection CreateDevice(string name, string[] experts, long freeMemory)
         {
             // Create VOM Owner to host the device's shared communication handles
-            var owner = Vom.Vom.CreateOwner($"\\Actor\\{name}");
+            var owner = Vom.Vom.CreateOwner($"\\Agent\\{name}");
             _createdOwners.Add(owner);
 
             // Allocate input and output regions with monotonic CpuFences
@@ -120,7 +120,7 @@ namespace Subsystem.Adb
             var inputChannel = new VomChannel(hInput, fInput);
             var outputChannel = new VomChannel(hOutput, fOutput);
 
-            var conn = new VomActorConnection(name, experts, freeMemory, owner, inputChannel, outputChannel);
+            var conn = new VomPeerConnection(name, experts, freeMemory, owner, inputChannel, outputChannel);
             _devices[name] = conn;
 
             // Trigger handshake formatting in DialoguePresenter
@@ -129,7 +129,7 @@ namespace Subsystem.Adb
             return conn;
         }
 
-        public VomActorConnection? GetDevice(string name)
+        public VomPeerConnection? GetDevice(string name)
         {
             return _devices.TryGetValue(name, out var d) ? d : null;
         }
@@ -138,7 +138,7 @@ namespace Subsystem.Adb
         {
             foreach (var owner in _createdOwners)
             {
-                try { Vom.Vom.Terminate(owner); } catch { }
+                try { Vom.Vom.Terminate(owner); } catch (Exception ex) { Dg.Error("agent", ex); }
             }
             _createdOwners.Clear();
             _devices.Clear();
@@ -148,20 +148,23 @@ namespace Subsystem.Adb
     // In-process device agent runner. Executes in a dedicated thread.
     public class InProcessDeviceAgent : IDisposable
     {
-        private readonly VomActorConnection _conn;
+        private readonly VomPeerConnection _conn;
         private readonly CancellationTokenSource _cts = new();
 
-        public InProcessDeviceAgent(VomActorConnection conn)
+        public InProcessDeviceAgent(VomPeerConnection conn)
         {
             _conn = conn;
         }
 
         public void Start()
         {
-            Task.Run(() => AgentLoopAsync(_cts.Token));
+            // The loop below is already fully synchronous (blocking Fence waits, no real await) — spawn it
+            // on a VOM-owned thread (Ps) instead of an ambient Task.Run, so it is quota'd and cascade-terminated
+            // with _conn.DeviceOwner rather than invisible to Terminate/DropPrefix (SS009).
+            Vom.Vom.Spawn(_conn.DeviceOwner, "Agent", _ => AgentLoop(_cts.Token));
         }
 
-        private async Task AgentLoopAsync(CancellationToken ct)
+        private void AgentLoop(CancellationToken ct)
         {
             ulong phase = 1;
             while (!ct.IsCancellationRequested)
@@ -199,7 +202,6 @@ namespace Subsystem.Adb
                     break;
                 }
             }
-            await Task.CompletedTask;
         }
 
         public void Stop()
@@ -226,7 +228,7 @@ namespace Subsystem.Adb
 
         public async Task<float[]> RouteTokenAsync(long tokenId, string expertName, float[] inputActivations, CancellationToken ct = default)
         {
-            VomActorConnection? target = null;
+            VomPeerConnection? target = null;
             foreach (var device in _deviceSet.Devices)
             {
                 if (Array.IndexOf(device.Experts, expertName) >= 0)
@@ -253,8 +255,11 @@ namespace Subsystem.Adb
             // Doorbell signal: notify device agent to start execution
             target.Input.Fence.Signal(phase);
 
-            // OS-scheduler park: wait for device to signal OutputFence reaching 'phase'
-            await Task.Run(() => target.Output.Fence.CpuWait(phase), ct);
+            // OS-scheduler park: wait for device to signal OutputFence reaching 'phase'. CpuWait blocks the
+            // calling thread directly — no ambient Task.Run hop needed, callers are already synchronous
+            // (SS009: a Task.Run here would only be a pointless thread-pool bounce, never real concurrency).
+            ct.ThrowIfCancellationRequested();
+            target.Output.Fence.CpuWait(phase);
 
             // Read output activations directly from device's Output VOM shared region
             var (_, _, _, outputData) = target.Output.Read();
@@ -267,13 +272,13 @@ namespace Subsystem.Adb
         // Route a batch of tokens concurrently and wait for all of them using Fence.WaitAll.
         public async Task<List<float[]>> RouteBatchAsync(List<(long tokenId, string expertName, float[] input)> batch, CancellationToken ct = default)
         {
-            var targets = new List<VomActorConnection>();
+            var targets = new List<VomPeerConnection>();
             var targetPhases = new List<ulong>();
             var fences = new List<Fence>();
             
             foreach (var item in batch)
             {
-                VomActorConnection? device = null;
+                VomPeerConnection? device = null;
                 foreach (var d in _deviceSet.Devices)
                 {
                     if (Array.IndexOf(d.Experts, item.expertName) >= 0)
@@ -298,10 +303,10 @@ namespace Subsystem.Adb
                 fences.Add(device.Output.Fence);
             }
 
-            // OS-scheduler park: WaitAll fences reach targetPhases concurrently
-            await Task.Run(() => {
-                Fence.WaitAll(fences.ToArray(), targetPhases.ToArray());
-            }, ct);
+            // OS-scheduler park: WaitAll fences reach targetPhases concurrently (blocks the calling thread
+            // directly — see RouteTokenAsync for why no Task.Run wrapper is needed here).
+            ct.ThrowIfCancellationRequested();
+            Fence.WaitAll(fences.ToArray(), targetPhases.ToArray());
 
             var results = new List<float[]>();
             for (int i = 0; i < batch.Count; i++)
@@ -317,13 +322,13 @@ namespace Subsystem.Adb
         // Route a batch of tokens and wait for at least 'n' of them to complete using Fence.WaitN.
         public async Task<int> RouteBatchQuorumAsync(List<(long tokenId, string expertName, float[] input)> batch, int n, CancellationToken ct = default)
         {
-            var targets = new List<VomActorConnection>();
+            var targets = new List<VomPeerConnection>();
             var targetPhases = new List<ulong>();
             var fences = new List<Fence>();
             
             foreach (var item in batch)
             {
-                VomActorConnection? device = null;
+                VomPeerConnection? device = null;
                 foreach (var d in _deviceSet.Devices)
                 {
                     if (Array.IndexOf(d.Experts, item.expertName) >= 0)
@@ -348,29 +353,29 @@ namespace Subsystem.Adb
                 fences.Add(device.Output.Fence);
             }
 
-            // OS-scheduler park: WaitN fences reach targetPhases concurrently
-            int readyCount = 0;
-            await Task.Run(() => {
-                readyCount = Fence.WaitN(fences.ToArray(), targetPhases.ToArray(), n);
-            }, ct);
+            // OS-scheduler park: WaitN fences reach targetPhases concurrently (blocks the calling thread
+            // directly — see RouteTokenAsync for why no Task.Run wrapper is needed here).
+            ct.ThrowIfCancellationRequested();
+            int readyCount = Fence.WaitN(fences.ToArray(), targetPhases.ToArray(), n);
 
             return readyCount;
         }
     }
 
-    public static class AgentActorHost
+    public static class AgentHost
     {
         public static int Run(string[] args)
         {
-            Console.WriteLine("=== Subsystem P2P In-Process VOM Agent-Actor Host ===");
+            Console.WriteLine("=== Subsystem P2P In-Process VOM Agent Host ===");
+            var hostOwner = Vom.Vom.CreateOwner("\\Agent\\Host");
             using var deviceSet = new InProcessDeviceSet();
             var orchestrator = new MoeDispatch(deviceSet);
 
-            // Spin up the 4 device actors completely in-process (symmetrical peer-head architecture)
-            var dev1 = deviceSet.CreateDevice("Galaxy-S23", new[] { "expert_0", "expert_1" }, 6400000000L);
-            var dev2 = deviceSet.CreateDevice("Razr+", new[] { "expert_2", "expert_3" }, 4000000000L);
-            var dev3 = deviceSet.CreateDevice("OnePlus", new[] { "expert_4", "expert_5" }, 8000000000L);
-            var dev4 = deviceSet.CreateDevice("moto-edge", new[] { "expert_6", "expert_7" }, 3000000000L);
+            // Spin up the 4 device peers completely in-process (symmetrical peer-head architecture)
+            var dev1 = deviceSet.CreateDevice("Peer-1", new[] { "expert_0", "expert_1" }, 6400000000L);
+            var dev2 = deviceSet.CreateDevice("Peer-2", new[] { "expert_2", "expert_3" }, 4000000000L);
+            var dev3 = deviceSet.CreateDevice("Peer-3", new[] { "expert_4", "expert_5" }, 8000000000L);
+            var dev4 = deviceSet.CreateDevice("Peer-4", new[] { "expert_6", "expert_7" }, 3000000000L);
 
             using var agent1 = new InProcessDeviceAgent(dev1);
             using var agent2 = new InProcessDeviceAgent(dev2);
@@ -382,15 +387,17 @@ namespace Subsystem.Adb
             agent3.Start();
             agent4.Start();
 
-            // Simple interactive loop to send test tokens
+            // Simple interactive loop to send test tokens — VOM-owned (Ps.Spawn) under \Agent\Host so it is
+            // quota'd and cascade-terminated with the host owner, not an ambient Task.Run (SS009).
             long nextTokenId = 100;
             var quitCts = new CancellationTokenSource();
 
-            Task.Run(async () =>
+            Vom.Vom.Spawn(hostOwner, "TokenGenerator", _ =>
             {
                 while (!quitCts.Token.IsCancellationRequested)
                 {
-                    await Task.Delay(4000);
+                    Thread.Sleep(4000);
+                    if (quitCts.Token.IsCancellationRequested) break;
 
                     long id = nextTokenId++;
                     string expert = $"expert_{(id % 8)}"; // expert_0 to expert_7
@@ -399,7 +406,7 @@ namespace Subsystem.Adb
 
                     try
                     {
-                        var output = await orchestrator.RouteTokenAsync(id, expert, input, quitCts.Token);
+                        var output = orchestrator.RouteTokenAsync(id, expert, input, quitCts.Token).GetAwaiter().GetResult();
                     }
                     catch (Exception ex)
                     {
@@ -416,16 +423,17 @@ namespace Subsystem.Adb
             agent2.Stop();
             agent3.Stop();
             agent4.Stop();
+            Vom.Vom.Terminate(hostOwner);
 
             return 0;
         }
     }
 
-    public static class AgentActorDevice
+    public static class AgentDevice
     {
         public static int Run(string[] args)
         {
-            Console.WriteLine("Running in-process. Symmetrical peer actor is executed via 'ss actor'.");
+            Console.WriteLine("Running in-process. Symmetrical peer agent is executed via 'ss agent'.");
             return 0;
         }
     }

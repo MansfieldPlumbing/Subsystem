@@ -483,7 +483,7 @@ internal static class SelfBuild
             var rel = Path.GetRelativePath(rootFull, file).Replace('\\', '/');
             string[] lines;
             try { lines = File.ReadAllLines(file); }
-            catch { continue; }
+            catch (Exception ex) { Dg.Error("selfbuild", ex); continue; }
             if (lines.Length == 0) continue;
             blocks.Add((rel, lines));
             doc.Add($"{rel} | {startLine}");
@@ -526,7 +526,7 @@ internal static class SelfBuild
                 {
                     files.AddRange(Directory.GetFiles(dirPart, filePattern, searchOption));
                 }
-                catch {}
+                catch (Exception ex) { Dg.Error("selfbuild", ex); }
             }
         }
         else

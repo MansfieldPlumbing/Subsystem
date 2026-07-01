@@ -588,7 +588,7 @@ namespace Subsystem.Dpx
                     return ValueTask.FromResult(true);
                 }
             }
-            catch (ObjectDisposedException) { }
+            catch (ObjectDisposedException) { Dg.Log("dpx", "DpxDecoder queue disposed while awaiting the next item — turn ended"); }
             return ValueTask.FromResult(false);
         }
 
@@ -596,9 +596,9 @@ namespace Subsystem.Dpx
 
         public ValueTask DisposeAsync()
         {
-            try { _queue.Dispose(); } catch { }
+            try { _queue.Dispose(); } catch (Exception ex) { Dg.Error("dpx", ex); }
             _turnGate.Release();
-            try { VomClass.Terminate(_owner); } catch { }
+            try { VomClass.Terminate(_owner); } catch (Exception ex) { Dg.Error("dpx", ex); }
             return ValueTask.CompletedTask;
         }
     }
