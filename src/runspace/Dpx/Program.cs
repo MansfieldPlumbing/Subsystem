@@ -35,6 +35,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "gpu-test" ? GpuTest(args)
      : args[0] == "gpu-test-q4" ? GpuTestQ4(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
+     : args[0] == "gpu-tune" ? GpuTune(args)
      : args[0] == "db" ? ToDb(args)
      : args[0] == "db-stats" ? DbStats(args)
      : args[0] == "dumpsg" ? DumpSg(args)
@@ -127,6 +128,12 @@ static int ToDb(string[] args)
     return WriteModelDb(dbPath, new[] { (0, "onnx", ModelProto.Parser.ParseFrom(File.ReadAllBytes(srcPath)).Graph) });
 }
 
+static int GpuTune(string[] args)
+{
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx gpu-tune <model.db>"); return 1; }
+    return ShaderTournament.RunTournament(args[1]);
+}
+
 // Write one or more signatures (sig, role, graph) into the SQLite model store. One writer for the ONNX and
 // litertlm paths (invariant 9). node/tensor ids are GLOBAL across signatures so node_attr.tensor_id stays
 // unique; the `signature` table is the section index. `sigs` is streamed — each graph is written then dropped.
@@ -143,7 +150,24 @@ CREATE TABLE graph_io(sig INTEGER, kind TEXT, name TEXT, elem_type INTEGER, shap
 CREATE TABLE node(id INTEGER PRIMARY KEY, sig INTEGER, ord INTEGER, op_type TEXT, name TEXT, backend TEXT);
 CREATE TABLE node_io(node_id INTEGER, slot INTEGER, kind TEXT, value_name TEXT);
 CREATE TABLE node_attr(node_id INTEGER, name TEXT, type INTEGER, i INTEGER, f REAL, s TEXT, ints TEXT, floats TEXT, tensor_id INTEGER);
-CREATE TABLE tensor(id INTEGER PRIMARY KEY, sig INTEGER, name TEXT, dtype INTEGER, dims TEXT, data BLOB);";
+CREATE TABLE tensor(id INTEGER PRIMARY KEY, sig INTEGER, name TEXT, dtype INTEGER, dims TEXT, data BLOB);
+CREATE TABLE IF NOT EXISTS gpu_tactic_plan (
+    adapter_name TEXT,
+    op_type TEXT,
+    m INTEGER,
+    n INTEGER,
+    k INTEGER,
+    block_m INTEGER,
+    block_n INTEGER,
+    block_k INTEGER,
+    thread_m INTEGER,
+    thread_n INTEGER,
+    use_shared_mem INTEGER,
+    unroll_factor INTEGER,
+    dxil_bytecode BLOB,
+    latency_ms REAL,
+    PRIMARY KEY(adapter_name, op_type, m, n, k)
+);";
         ddl.ExecuteNonQuery();
     }
     using var tx = c.BeginTransaction();
@@ -345,6 +369,7 @@ static int GenOnnx(string[] args)
     int maxNew = args.Length > 5 && int.TryParse(args[5], out var mn) ? mn : 64;
 
     Console.Error.WriteLine("loading embed + decoder graphs from .db (q4, dequant deferred to the kernel)…");
+    Dp.ActiveModelDbPath = decDb;
     TensorArena.Active = true;   // activations on the native off-GC arena (the proto-Sub-VOM); real Vom.Alloc-region + Spawn-SubGraph ownership port follows the correctness proof
     var embed = new Dp(LoadGraphFromDb(0, embDb));
     var dec   = new Dp(LoadGraphFromDb(0, decDb));
@@ -448,7 +473,7 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs>"); return 1; }
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db>"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):

@@ -640,6 +640,7 @@ public class Dp
 
     // --- GPU MatMul: route each 2D [M,K]@[K,N] batch through dpgpu.dll (D3D12). Opt-in via --gpu-matmul. ---
     public static bool UseGpuMatMul = false;
+    public static string ActiveModelDbPath;
     static byte[] _gemmDxil; static bool _gpuDead = false;
     static byte[] GemmDxil()
     {
@@ -666,12 +667,25 @@ public class Dp
         try
         {
             byte[] dxil = GemmDxil(); var bidx = new int[nb];
+            int threadM = 16;
+            int threadN = 16;
+            if (!string.IsNullOrEmpty(ActiveModelDbPath))
+            {
+                string adapterName = Gpu.DeviceName();
+                byte[] tuned = ModelDb.GetTunedShader(ActiveModelDbPath, adapterName, "Gemm", M, N, K, out var tm, out var tn);
+                if (tuned != null)
+                {
+                    dxil = tuned;
+                    threadM = tm;
+                    threadN = tn;
+                }
+            }
             for (long bi = 0; bi < outBatch; bi++)
             {
                 long aB = 0, bB = 0; for (int k = 0; k < nb; k++) { aB += bidx[k] * sA[k]; bB += bidx[k] * sB[k]; }
                 a.Slice((int)(aB * M * K), M * K).CopyTo(aSub);
                 b.Slice((int)(bB * K * N), K * N).CopyTo(bSub);
-                int rc = Gpu.dpgpu_gemm(aSub, bSub, cSub, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
+                int rc = Gpu.dpgpu_gemm(aSub, bSub, cSub, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length, threadM, threadN);
                 if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm rc={rc}");
                 cSub.CopyTo(o.Slice((int)(bi * M * N), M * N));
                 for (int k = nb - 1; k >= 0; k--) { if (++bidx[k] < lead[k]) break; bidx[k] = 0; }
@@ -2306,14 +2320,14 @@ static class Gpu
 {
     static readonly bool s_vk = string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "vulkan", StringComparison.OrdinalIgnoreCase);
     static byte[] s_spv;
-    public static int dpgpu_gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, uint dxilLen)
+    public static int dpgpu_gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, uint dxilLen, int threadM = 16, int threadN = 16)
     {
         if (s_vk)
         {
             s_spv ??= System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "gemm.spv"));
             return GpuVulkan.Gemm(A, B, C, M, N, K, s_spv);
         }
-        return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen);
+        return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen, threadM, threadN);
     }
     static byte[] s_spvQ4;
     // q4 seam: A/Scales fp32, Bq/Zp are the packed uint8 SEQUENTIAL-nibble buffers straight off the model (never

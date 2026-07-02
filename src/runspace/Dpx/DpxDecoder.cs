@@ -120,6 +120,7 @@ namespace Subsystem.Dpx
 
                     _interp = new Dp(_model) { Verbose = this.Verbose };
                     if (_split) _embedInterp = new Dp(_embedModel!) { Verbose = this.Verbose };
+                    Dp.ActiveModelDbPath = _modelPath;
                     _backendName = "DPX";
                     _ready = true;
                     return null;

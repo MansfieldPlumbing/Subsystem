@@ -22,6 +22,9 @@
     <Compile Include="..\..\..\runspace\Dpx\Dp.cs" Link="Dp.cs" />
     <Compile Include="..\..\..\runspace\Dpx\MemGovernor.cs" Link="MemGovernor.cs" />
     <Compile Include="..\..\..\runspace\Dpx\GpuD3D12.cs" Link="GpuD3D12.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\ShaderTournament.cs" Link="ShaderTournament.cs" />
+    <Compile Include="VomStubs.cs" />
+    <Compile Include="..\..\..\runspace\Dpx\DpTensor.cs" Link="DpTensor.cs" />
     <Compile Include="..\..\..\runspace\Dpx\GpuVulkan.cs" Link="GpuVulkan.cs" />
     <Compile Include="..\..\..\runspace\Dpx\OnnxProto.cs" Link="OnnxProto.cs" />
     <Compile Include="..\..\..\runspace\Dpx\LiteRt.cs" Link="LiteRt.cs" />

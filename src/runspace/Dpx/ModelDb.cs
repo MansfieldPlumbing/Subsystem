@@ -96,5 +96,103 @@ namespace Subsystem.Dpx
             Console.Error.WriteLine($"loaded sig{sig} from {dbPath}: {g.Node.Count} nodes, {g.Initializer.Count} initializers, {g.Input.Count} inputs, {g.Output.Count} outputs");
             return new ModelProto { Graph = g };
         }
+
+        public static byte[] GetTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, out int threadM, out int threadN)
+        {
+            threadM = 16;
+            threadN = 16;
+            if (!System.IO.File.Exists(dbPath)) return null;
+            try
+            {
+                using var c = new SqliteConnection($"Data Source={dbPath}");
+                c.Open();
+                
+                // check if gpu_tactic_plan table exists
+                using (var cmdTable = c.CreateCommand())
+                {
+                    cmdTable.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gpu_tactic_plan'";
+                    if (cmdTable.ExecuteScalar() == null) return null;
+                }
+                
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT dxil_bytecode, thread_m, thread_n FROM gpu_tactic_plan WHERE adapter_name=$a AND op_type=$o AND m=$m AND n=$n AND k=$k LIMIT 1";
+                cmd.Parameters.AddWithValue("$a", adapterName);
+                cmd.Parameters.AddWithValue("$o", opType);
+                cmd.Parameters.AddWithValue("$m", m);
+                cmd.Parameters.AddWithValue("$n", n);
+                cmd.Parameters.AddWithValue("$k", k);
+                using var r = cmd.ExecuteReader();
+                if (r.Read())
+                {
+                    byte[] data = r.IsDBNull(0) ? null : (byte[])r.GetValue(0);
+                    threadM = r.IsDBNull(1) ? 16 : r.GetInt32(1);
+                    threadN = r.IsDBNull(2) ? 16 : r.GetInt32(2);
+                    return data;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"  WARN: error reading gpu_tactic_plan: {ex.Message}");
+            }
+            return null;
+        }
+
+        public static void SaveTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, int blockM, int blockN, int blockK, int threadM, int threadN, int useSharedMem, int unrollFactor, byte[] dxil, double latencyMs)
+        {
+            try
+            {
+                using var c = new SqliteConnection($"Data Source={dbPath}");
+                c.Open();
+                
+                // create table if not exists
+                using (var cmdTable = c.CreateCommand())
+                {
+                    cmdTable.CommandText = @"
+CREATE TABLE IF NOT EXISTS gpu_tactic_plan (
+    adapter_name TEXT,
+    op_type TEXT,
+    m INTEGER,
+    n INTEGER,
+    k INTEGER,
+    block_m INTEGER,
+    block_n INTEGER,
+    block_k INTEGER,
+    thread_m INTEGER,
+    thread_n INTEGER,
+    use_shared_mem INTEGER,
+    unroll_factor INTEGER,
+    dxil_bytecode BLOB,
+    latency_ms REAL,
+    PRIMARY KEY(adapter_name, op_type, m, n, k)
+);";
+                    cmdTable.ExecuteNonQuery();
+                }
+                
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+INSERT OR REPLACE INTO gpu_tactic_plan 
+(adapter_name, op_type, m, n, k, block_m, block_n, block_k, thread_m, thread_n, use_shared_mem, unroll_factor, dxil_bytecode, latency_ms)
+VALUES ($a, $o, $m, $n, $k, $bm, $bn, $bk, $tm, $tn, $usm, $uf, $dxil, $lat);";
+                cmd.Parameters.AddWithValue("$a", adapterName);
+                cmd.Parameters.AddWithValue("$o", opType);
+                cmd.Parameters.AddWithValue("$m", m);
+                cmd.Parameters.AddWithValue("$n", n);
+                cmd.Parameters.AddWithValue("$k", k);
+                cmd.Parameters.AddWithValue("$bm", blockM);
+                cmd.Parameters.AddWithValue("$bn", blockN);
+                cmd.Parameters.AddWithValue("$bk", blockK);
+                cmd.Parameters.AddWithValue("$tm", threadM);
+                cmd.Parameters.AddWithValue("$tn", threadN);
+                cmd.Parameters.AddWithValue("$usm", useSharedMem);
+                cmd.Parameters.AddWithValue("$uf", unrollFactor);
+                cmd.Parameters.AddWithValue("$dxil", (object?)dxil ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$lat", latencyMs);
+                cmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"  ERROR: failed saving tuned shader to DB: {ex.Message}");
+            }
+        }
     }
 }

@@ -140,15 +140,32 @@ unsafe static class GpuD3D12
         IntPtr b; Fn<DCreateRes>(s_dev, 27)(s_dev, ref hp, 0, ref rd, state, IntPtr.Zero, resIID, out b); return b;
     }
 
-    public static int Gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, int dxilLen)
+    static byte[] s_lastDxil;
+    static bool ByteArraysEqual(byte[] a, byte[] b)
+    {
+        if (a == null || b == null) return a == b;
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    public static int Gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, int dxilLen, int threadM = 16, int threadN = 16)
     {
         EnsureInit();
-        if (s_pso == IntPtr.Zero || s_psoLen != dxilLen)
+        if (s_pso == IntPtr.Zero || !ByteArraysEqual(s_lastDxil, dxil))
         {
+            if (s_pso != IntPtr.Zero)
+            {
+                Marshal.Release(s_pso);
+                s_pso = IntPtr.Zero;
+            }
             IntPtr dp = Marshal.AllocHGlobal(dxilLen); Marshal.Copy(dxil, 0, dp, dxilLen);
             CPSO pd = new CPSO { RS = s_root, CS = new BC { p = dp, len = (IntPtr)dxilLen } };
-            if (Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out s_pso) != 0) return -6;
+            int rc = Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out s_pso);
+            Marshal.FreeHGlobal(dp);
+            if (rc != 0) return -6;
             s_psoLen = dxilLen;
+            s_lastDxil = dxil;
         }
         byte[] resIID = G(IID_RES);
         IntPtr alloc; Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out alloc);
@@ -165,7 +182,7 @@ unsafe static class GpuD3D12
         Fn<DSetPSO>(list, 25)(list, s_pso); Fn<DSetRS>(list, 29)(list, s_root);
         uint* gc = stackalloc uint[3]; gc[0] = M; gc[1] = N; gc[2] = K; Fn<DSet32>(list, 35)(list, 0, 3, gc, 0);
         Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bVA); Fn<DSetUAV>(list, 41)(list, 3, cVA);
-        Fn<DDispatch>(list, 14)(list, (N + 15) / 16, (M + 15) / 16, 1);
+        Fn<DDispatch>(list, 14)(list, (N + (uint)threadN - 1) / (uint)threadN, (M + (uint)threadM - 1) / (uint)threadM, 1);
         BAR bar = new BAR { Type = 0, Res = cBuf, Before = 8, After = 2048 }; Fn<DBarrier>(list, 26)(list, 1, ref bar);
         Fn<DCopy>(list, 15)(list, rbBuf, 0, cBuf, 0, cB);
         Fn<DClose>(list, 9)(list);
