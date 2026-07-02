@@ -1,7 +1,5 @@
 # Subsystem
 
-> *This project is devoted to the loving memory of Billie Dean Mansfield — 1945–2026.*
-
 **A self-hosting, GC-free compute fabric** — an NT-Object-Manager-shaped runtime where memory, code, threads, and devices are *one namespace of refcounted handles* (the VOM), and **one transport (DirectPort)** pushes fenced, zero-copy regions across every boundary: process · GPU↔NPU · language · machine. It builds itself, owns its own memory, and reclaims deterministically (free-on-zero / cascade-kill).
 
 > *First proof, below: PowerShell 7 hosted in-process inside a native Android app — no Linux userland, no VM, no proot, no root.*
