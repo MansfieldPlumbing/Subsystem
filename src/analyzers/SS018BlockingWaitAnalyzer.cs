@@ -3,18 +3,24 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
+using System.Linq;
 
 namespace Subsystem.Analyzers
 {
     /// <summary>
-    /// SS018 — No async in the core. The VOM mesh is brutally synchronous: every node owns a real thread
-    /// and hands off through a Fence (push, best-effort, copy-then-share). async/await earns nothing here
-    /// and costs plenty — it colors callers (infects every caller's signature), hides which thread owns the
-    /// work, allocates hidden state machines, and births the sync-over-async deadlock (.Result / .Wait() /
-    /// .GetAwaiter().GetResult() block a thread that then can't observe cancellation). So async is the
-    /// host/seam's job, not the core's: <c>await</c> and sync-over-async are refused in component code.
-    /// Exempt: the host/seam (catalog hostPaths — the boundary where async legitimately lives) and foreign
-    /// generated code (obj/). Warning, census-pending; the message states the WHY so it never needs re-explaining.
+    /// SS018 — No async in the runspace. Subsystem owns its runspace (and the federated ss runspaces, and
+    /// them only); it is brutally synchronous: every node owns a real thread and hands off through a Fence
+    /// (push, best-effort, copy-then-share). The fence value IS the clock — a waiter parks on the address
+    /// (futex), a producer wakes it (WakeByAddressAll); no scheduler, no continuation, no allocation. async
+    /// surrenders exactly the two things Subsystem exists to own — memory and ordering: it colors callers,
+    /// hands the owning thread to the ThreadPool's scheduler, allocates hidden state machines, and births the
+    /// sync-over-async deadlock (.Result / .Wait() / .GetAwaiter().GetResult()). So the <c>async</c> keyword,
+    /// <c>await</c>, and sync-over-async are REFUSED in owned component code.
+    ///
+    /// Async is permitted ONLY at a boundary the owner declares upfront is not his: the host/seam
+    /// (catalog <c>hostPaths</c> — the head, Services, the WebView side of the fence). Foreign generated code
+    /// (obj/) is exempt. The boundary ratchets by editing the catalog, never by a silent default and never by
+    /// a runtime override — the gate has none. — Scott: "we do not async, we own our runspace."
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class SS018BlockingWaitAnalyzer : DiagnosticAnalyzer
@@ -22,10 +28,10 @@ namespace Subsystem.Analyzers
         public const string DiagnosticId = "SS018";
 
         private static readonly DiagnosticDescriptor Rule = new DiagnosticDescriptor(
-            DiagnosticId, "Async in the core (the core is synchronous)",
-            "{0} in core component code — the core is synchronous (real threads + Fence handoff, push/best-effort); async colors callers, hides the owning thread, and enables the sync-over-async deadlock. Make it synchronous, or move it to the host/seam",
+            DiagnosticId, "Async in the runspace (the runspace is synchronous)",
+            "{0} in owned runspace code — Subsystem owns its runspace and is synchronous (real threads + Fence handoff, the fence value is the clock). async colors callers, hands the owning thread to the scheduler, allocates a state machine, and enables the sync-over-async deadlock. Make it synchronous, or move it to a declared host/seam boundary (catalog hostPaths)",
             "Subsystem.NT", DiagnosticSeverity.Warning, isEnabledByDefault: true,
-            "The VOM passes data via fences (best-effort push, copy-then-share), not Task continuations — so async buys nothing in the core and costs caller-coloring, a hidden thread model, state-machine allocations, and the sync-over-async deadlock. Host/seam (hostPaths) and generated code (obj/) are exempt. Census-pending ratchet.");
+            "The VOM passes data via fences (best-effort push, copy-then-share, futex wake) — async buys nothing in the runspace and costs caller-coloring, a lost thread model, state-machine allocations, and the sync-over-async deadlock. Permitted ONLY at declared host/seam boundaries (hostPaths); generated code (obj/) is exempt. The gate is fail-closed with no override — a RED gate is always fatal. Census-pending ratchet.");
 
         public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(Rule);
 
@@ -37,23 +43,47 @@ namespace Subsystem.Analyzers
             {
                 var cat = SystemCatalogFile.TryLoad(start.Options, out _);
                 if (cat == null) return;   // SS000 fail-closed; stay silent rather than guess
+                start.RegisterSyntaxNodeAction(ctx => AnalyzeAsyncKeyword(ctx, cat),
+                    SyntaxKind.MethodDeclaration, SyntaxKind.LocalFunctionStatement,
+                    SyntaxKind.ParenthesizedLambdaExpression, SyntaxKind.SimpleLambdaExpression,
+                    SyntaxKind.AnonymousMethodExpression);
                 start.RegisterSyntaxNodeAction(ctx => AnalyzeAwait(ctx, cat), SyntaxKind.AwaitExpression);
                 start.RegisterSyntaxNodeAction(ctx => AnalyzeInvocation(ctx, cat), SyntaxKind.InvocationExpression);
                 start.RegisterSyntaxNodeAction(ctx => AnalyzeMemberAccess(ctx, cat), SyntaxKind.SimpleMemberAccessExpression);
             });
         }
 
-        // In scope ONLY for the synchronous-core components (catalog `synchronousCore` — Vom/Cm/Pp/Dg today).
-        // The seams (Hb=LLM, Rs=pwsh, Host=web, Adb=network) and foreign generated code keep their async;
-        // the no-async boundary ratchets OUTWARD by editing the catalog, never by silent default.
+        // In scope for ALL owned components (the runspace). Exempt: foreign generated code (obj/) and the
+        // host/seam the owner declared not-his (catalog hostPaths — ComponentOfPath returns "(host)"). A path
+        // that maps to no component is unowned surface, also exempt. The no-async boundary ratchets OUTWARD by
+        // editing the catalog's hostPaths, never by a silent default.
         private static bool OutOfScope(SystemCatalogFile cat, string path)
         {
             if (SystemCatalogFile.IsGeneratedPath(path)) return true;
             var c = cat.ComponentOfPath(path);
-            return c == null || !cat.SynchronousCore.Contains(c);
+            return c == null || c == "(host)";
         }
 
-        // `await` — the universal async signal in source (an async method with no await is degenerate).
+        // The `async` keyword itself — the declaration that colors this method and every caller. Catches the
+        // async IAsyncEnumerable "costume" (yield, no await) that the await check alone would miss.
+        private static void AnalyzeAsyncKeyword(SyntaxNodeAnalysisContext ctx, SystemCatalogFile cat)
+        {
+            if (OutOfScope(cat, ctx.Node.SyntaxTree.FilePath)) return;
+            var mods = ctx.Node switch
+            {
+                MethodDeclarationSyntax m => m.Modifiers,
+                LocalFunctionStatementSyntax lf => lf.Modifiers,
+                ParenthesizedLambdaExpressionSyntax pl => pl.Modifiers,
+                SimpleLambdaExpressionSyntax sl => sl.Modifiers,
+                AnonymousMethodExpressionSyntax am => am.Modifiers,
+                _ => default,
+            };
+            var kw = mods.FirstOrDefault(t => t.IsKind(SyntaxKind.AsyncKeyword));
+            if (kw.IsKind(SyntaxKind.AsyncKeyword))
+                ctx.ReportDiagnostic(Diagnostic.Create(Rule, kw.GetLocation(), "the `async` keyword"));
+        }
+
+        // `await` — the universal async signal in source.
         private static void AnalyzeAwait(SyntaxNodeAnalysisContext ctx, SystemCatalogFile cat)
         {
             if (OutOfScope(cat, ctx.Node.SyntaxTree.FilePath)) return;

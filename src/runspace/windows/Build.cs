@@ -204,9 +204,9 @@ internal static class Build
         Console.WriteLine("ss build apk: compiled");
 
         // The build IS the gate: run the IN-PROC analyzer ratchet (no dotnet, no pre-published checker, no
-        // stale path). A RED gate is a HARD STOP — (Build Failed). --override/-o forces it (build-system dev ONLY).
+        // stale path). A RED gate is a HARD STOP — (Build Failed). There is no override; the gate cannot be forced.
         Console.WriteLine("ss build apk: gate — in-proc analyzer ratchet…");
-        var gateArgs = IsOverride(args) ? new[] { "--gate", "-o", "--path", root } : new[] { "--gate", "--path", root };
+        var gateArgs = new[] { "--gate", "--path", root };
         int g = InProcGate.Run(gateArgs);
         if (g != 0) return g;
 
@@ -239,25 +239,21 @@ internal static class Build
     internal static bool HasFlag(string[] args, string name) =>
         args.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
 
-    // --override / -o : force a RED gate through. ONLY for developing the build system itself.
-    internal static bool IsOverride(string[] args) => HasFlag(args, "--override") || HasFlag(args, "-o");
+    // The gate has NO override. A RED gate is ALWAYS a hard stop — the honor system was retired (a model
+    // flipped --override to force async/red gates through; the runspace owner takes no part in that). This
+    // is intentionally a dead flag, not a knob: build-system dev that must land past the gate edits SOURCE
+    // (the baseline / the analyzer), never a runtime bypass. — Scott: "i own my runspace."
+    internal static bool IsOverride(string[] args) => false;
 
     // --path / -p : point a verb at a source tree.
     internal static string? PathArg(string[] args) => ArgValue(args, "--path") ?? ArgValue(args, "-p");
 
-    // The gate verdict UX (shared by `ss build apk` and `ss check --gate`): a RED gate is a HARD STOP
-    // labeled (Build Failed). --override/-o downgrades it to a stern warning — build-system dev ONLY.
+    // The gate verdict (shared by `ss build apk` and `ss check --gate`): a RED gate is a HARD STOP,
+    // labeled (Build Failed). There is no downgrade — the gate cannot be forced through. `overridden` is
+    // retained only so callers compile; it is always false (see IsOverride).
     internal static int GateVerdict(int gateExit, bool overridden)
     {
         if (gateExit == 0) { Console.WriteLine("gate: passed"); return 0; }
-        if (overridden)
-        {
-            Console.WriteLine();
-            Console.WriteLine("!! --override / -o : the gate is RED but the build was FORCED through.");
-            Console.WriteLine("!! This is ONLY for developing the build system itself — NEVER during normal");
-            Console.WriteLine("!! development, and NEVER as a way to bypass locks. The findings above stand.");
-            return 0;
-        }
         Console.WriteLine();
         Console.WriteLine("(Build Failed)");
         return gateExit;
@@ -275,7 +271,7 @@ internal static class Build
 OPTIONS
   --path, -p <dir>    build from this source tree instead of the repo beside the exe / embedded source
   --no-sign           (apk) build without signing — faster, not installable
-  --override, -o      (apk) force a RED gate through — build-system dev ONLY, never to bypass locks
+                      (there is no gate override — a RED gate is always fatal; fix the finding or the baseline)
 
 The Windows head compiles with the on-drive dotnet (the last external dep on that road). The APK build
 needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) and drives them from here.");
