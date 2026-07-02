@@ -23,7 +23,7 @@ namespace Subsystem.Dpx
         private readonly string? _embedModelPath;
         private readonly string? _spmPath;
         private readonly string _unitId;
-        private readonly int _maxTokens;
+        private int _maxTokens;
         private readonly bool _split;
 
         private ModelProto? _model;
@@ -40,6 +40,11 @@ namespace Subsystem.Dpx
         public bool? WorkerIsThreadPoolThread { get; private set; }
         public bool Verbose { get; set; }
         public int PromptTokensCount { get; private set; }
+
+        // Per-turn decode cap. The constructor value seeds it; a resident host (e.g. ss mcp `query`)
+        // sets it between turns. Turns are serialized by _turnGate and the hosts are single-threaded,
+        // so a set never races an in-flight decode loop.
+        public int MaxTokens { get => _maxTokens; set { if (value > 0) _maxTokens = value; } }
 
         // Constructor 1: Injected for testing
         public DpxDecoder(ModelProto model, SentencePieceTokenizer tokenizer, string unitId, int maxTokens = 4096)
