@@ -825,6 +825,30 @@ public class Dp
     // one 4-bit nibble at logical index `idx` in a packed row starting at byte `rowOff` (low nibble = even idx).
     static unsafe int Nib4(byte* buf, int rowOff, int idx) => (buf[rowOff + (idx >> 1)] >> ((idx & 1) << 2)) & 0xF;
 
+    // GPU MatMulNBits: opt-in (mirrors --gpu-matmul / DPGPU_BACKEND). Routes the q4 contraction straight through
+    // GpuD3D12/GpuVulkan's GemmQ4 — the packed uint8 B/zp buffers and fp32 scales go to the GPU as-is; the
+    // dequantized fp32 weight is never materialized on the CPU. Fast path only (bits==4, no ONNX zero-point axis
+    // quirks beyond what MatMulNBits itself already assumes); any GPU fault latches _gpuQ4Dead and degrades to the
+    // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
+    public static bool UseGpuMatMulNBits = false;
+    static bool _gpuQ4Dead = false;
+    static Tensor GpuMatMulNBits(Tensor[] x, NodeProto n, int K, int N, int bs, int nBlk, int rowBytes, int zpRowBytes, bool hasZp, float[] a, float[] scsp, byte[] bArr, byte[] zpArr, int M)
+    {
+        var c = new float[(long)M * N];
+        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4());
+        _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
+        if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
+        var outShape0 = (int[])x[0].Shape.Clone(); outShape0[outShape0.Length - 1] = N;
+        return Tensor.F(c, outShape0);
+    }
+    static byte[] _gemmQ4Dxil;
+    static byte[] GemmDxilQ4()
+    {
+        if (_gemmQ4Dxil != null) return _gemmQ4Dxil;
+        string near = Path.Combine(AppContext.BaseDirectory, "gemm_q4.dxil");
+        return _gemmQ4Dxil = File.Exists(near) ? File.ReadAllBytes(near) : Array.Empty<byte>();
+    }
+
     // MatMulNBits: Y = A @ dequant(B)^T. B is uint8 [N, K/bs, bs*bits/8] (k-major nibbles, byte=k/2). scale/zp are
     // per (output-row n, block b=k/bs); 4-bit unsigned, dequant = (q - zp)·scale. zp defaults to 2^(bits-1) when absent.
     static unsafe Tensor MatMulNBits(Tensor[] x, NodeProto n)
@@ -833,6 +857,18 @@ public class Dp
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
         var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
+        if (UseGpuMatMulNBits && !_gpuQ4Dead && bits == 4)
+        {
+            try
+            {
+                return GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp, a.ToArray(), scsp.ToArray(), bSpan.ToArray(), hasZp ? zpSpan.ToArray() : Array.Empty<byte>(), M);
+            }
+            catch (Exception ex)
+            {
+                _gpuQ4Dead = true;
+                Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            }
+        }
         var y = TensorArena.AllocSpan((long)M * N);
         // pin: Span can't cross the lambda boundary (CS8175) - `fixed` transparently pins a managed
         // array OR no-ops over already-stable VOM-region memory, so B/zp being weight-load-time VOM
@@ -2203,6 +2239,18 @@ static class Gpu
             return GpuVulkan.Gemm(A, B, C, M, N, K, s_spv);
         }
         return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen);
+    }
+    static byte[] s_spvQ4;
+    // q4 seam: A/Scales fp32, Bq/Zp are the packed uint8 SEQUENTIAL-nibble buffers straight off the model (never
+    // dequantized to fp32 on the CPU side). dxil/spv resolved by the caller (mirrors dpgpu_gemm's dxil plumbing).
+    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil)
+    {
+        if (s_vk)
+        {
+            s_spvQ4 ??= System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "gemm_q4.spv"));
+            return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4);
+        }
+        return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length);
     }
     public static string DeviceName() { if (s_vk) { GpuVulkan.EnsureInit(); return GpuVulkan.Name; } GpuD3D12.EnsureInit(); return GpuD3D12.Name; }
 }

@@ -184,6 +184,7 @@ SS010|Dp.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm
 SS010|PeLoader.cs|Hardcoded POSIX path '/data/local/tmp' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm.d…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm.d…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
+SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm_q…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\reference\Kokoro-82M\config.json' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\reference\Kokoro-82M\voices' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS011|AdbCommands.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -262,12 +263,15 @@ SS013|Dp.cs|Method 'Release' starts with 'Release', which is not in the verb cat
 SS013|Dp.cs|Method 'TrackAlloc' starts with 'Track', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'TrackFree' starts with 'Track', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'dpgpu_gemm' starts with 'dpgpu_gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|Dp.cs|Method 'dpgpu_gemm_q4' starts with 'dpgpu_gemm_q4', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|DpxDecoder.cs|Method 'DisposeAsync' starts with 'Dispose', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|DpxDecoder.cs|Method 'DisposeAsync' starts with 'Dispose', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|DpxDecoder.cs|Method 'MoveNextAsync' starts with 'Move', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|DpxDecoder.cs|Method 'MoveNextAsync' starts with 'Move', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|GpuD3D12.cs|Method 'Gemm' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|GpuD3D12.cs|Method 'GemmQ4' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|GpuVulkan.cs|Method 'Gemm' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|GpuVulkan.cs|Method 'GemmQ4' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|LiteRt.cs|Method 'Deref' starts with 'Deref', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|LiteRt.cs|Method 'DumpSubgraph' starts with 'Dump', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|LiteRt.cs|Method 'F32' starts with 'F32', which is not in the verb catalog — register the verb deliberately or use an approved one
@@ -362,33 +366,44 @@ SS015|Dp.cs|Static field 'Prof' (readonly Dictionary — the reference is pinned
 SS015|Dp.cs|Static field 'Profile' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'QFbSeen' (readonly HashSet — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'UseGpuMatMul' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 'UseGpuMatMulNBits' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_active' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_currentAlloc' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_gemmDxil' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field '_gemmQ4Dxil' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_gpuDead' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field '_gpuQ4Dead' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_peakOffset' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_refCounts' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 's_spv' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 's_spvQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_dev' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fence' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fv' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_name' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_pso' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_psoLen' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_psoQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_psoQ4Len' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_q' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_root' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_rootQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_dev' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_dsl' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuVulkan.cs|Static field 's_dslQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_inst' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_memProps' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_memTypeCount' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_name' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_pd' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_pipe' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuVulkan.cs|Static field 's_pipeQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_playout' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuVulkan.cs|Static field 's_playoutQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_qfi' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_queue' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_spvLen' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuVulkan.cs|Static field 's_spvQ4Len' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|LiteRt.cs|Static field 'AttrFreeSafe' (readonly HashSet — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|LiteRt.cs|Static field 'Builtin' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|LiteRt.cs|Static field 'ToOnnx' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)

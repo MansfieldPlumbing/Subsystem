@@ -33,6 +33,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "emit" ? Emit(args)
      : args[0] == "run-compiled" ? RunCompiled(args)
      : args[0] == "gpu-test" ? GpuTest(args)
+     : args[0] == "gpu-test-q4" ? GpuTestQ4(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
      : args[0] == "db" ? ToDb(args)
      : args[0] == "db-stats" ? DbStats(args)
@@ -517,6 +518,41 @@ static int GpuTest(string[] args)
     return maxd < 1e-3 ? 0 : 2;
 }
 
+// gpu-test-q4 [dxil]: dispatch MatMulNBits's q4 contraction to the GPU (GemmQ4) and diff vs the CPU oracle
+// (Dp.MatMulNBits, reflected — the SAME kernel test.dpx.q4-packing-order.ps1 pins). Fixture mirrors that test:
+// SEQUENTIAL nibble layout (byte k>>1, low nibble = even k), K=64 (2 blocks of 32), N=2 rows, zp defaulted to 8.
+static int GpuTestQ4(string[] args)
+{
+    int Kd = 64, Nd = 2, bs = 32, nBlk = 2;
+    byte[] row0 = System.Linq.Enumerable.Repeat(new byte[] { 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE }, 4).SelectMany(a => a).ToArray();
+    byte[] row1 = System.Linq.Enumerable.Repeat(new byte[] { 0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E, 0x0F }, 2).SelectMany(a => a).ToArray();
+    byte[] packed = row0.Concat(row1).ToArray();
+    float[] scales = { 1.0f, 0.5f, 2.0f, 1.0f };   // sc[n*nBlk+b]
+
+    var ident = new float[Kd * Kd]; for (int i = 0; i < Kd; i++) ident[i * Kd + i] = 1.0f;   // A = I(64)
+
+    string dxilPath = args.Length > 1 ? args[1] : @"S:\qnn-project\workspace\onnx-interp\_gpu\gemm_q4.dxil";
+    byte[] dxil = File.Exists(dxilPath) ? File.ReadAllBytes(dxilPath) : Array.Empty<byte>();
+    var c = new float[Kd * Nd];
+    int rc = Gpu.dpgpu_gemm_q4(ident, packed, scales, Array.Empty<byte>(), c, (uint)Kd, (uint)Nd, (uint)Kd, (uint)bs, false, dxil);
+    if (rc != 0) { Console.WriteLine($"dpgpu_gemm_q4 failed rc={rc}"); return 1; }
+
+    // CPU oracle: same fixture through Dp.MatMulNBits (defZp=8, per-block scale sc[n*nBlk+b])
+    int DecodeSeq(byte[] b, int k) => (b[k >> 1] >> ((k & 1) * 4)) & 0xF;
+    var rows = new[] { row0, row1 };
+    double maxd = 0;
+    for (int nn = 0; nn < Nd; nn++)
+        for (int k = 0; k < Kd; k++)
+        {
+            float s = scales[nn * nBlk + (k / bs)];
+            float exp = (DecodeSeq(rows[nn], k) - 8.0f) * s;
+            float got = c[k * Nd + nn];
+            maxd = Math.Max(maxd, Math.Abs(got - exp));
+        }
+    Console.WriteLine($"GPU dpgpu_gemm_q4 [{Kd}x{Kd}]@dequant(q4)[{Kd}x{Nd}]  vs CPU oracle decode:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — GPU q4 GEMM dequants+multiplies+accumulates the SEQUENTIAL nibble layout correctly" : "MISMATCH")}");
+    return maxd < 1e-3 ? 0 : 2;
+}
+
 // gpu-bench [S]: time an SxSxS GEMM on GPU (naive kernel, incl per-call device-create) vs CPU (16-thread, double-acc).
 static int GpuBench(string[] args)
 {
@@ -752,6 +788,7 @@ int Run(string[] args)
             case "--compare": compareDir = args[++i]; break;
             case "--inject": injectNode = args[++i]; break;   // replace matching nodes' output w/ oracle (needs --compare <dir>)
             case "--gpu-matmul": Dp.UseGpuMatMul = true; break;   // offload every MatMul to dpgpu.dll (D3D12); CPU fallback on mount failure
+            case "--gpu-matmulnbits": Dp.UseGpuMatMulNBits = true; break;   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); CPU fallback on mount failure
             case "--prof": Dp.Profile = true; break;   // per-op-type wall-time breakdown
             case "--drop": Dp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
             case "--drop-scope": Dp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")

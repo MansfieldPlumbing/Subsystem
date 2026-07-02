@@ -1,0 +1,46 @@
+#version 450
+// gemm_q4.comp — q4-aware GPU GEMM for MatMulNBits (Vulkan/SPIR-V twin of gpu/gemm_q4.hlsl). Same SEQUENTIAL
+// nibble layout (byte = k>>1, low nibble = even k) pinned by tests/test.dpx.q4-packing-order.ps1 — do NOT
+// port ggml's split-nibble order. Dequant+multiply+accumulate happens per-k; the fp32 weight is never built.
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set=0, binding=0) readonly buffer ABuf   { float A[]; };
+layout(set=0, binding=1) readonly buffer BBuf   { uint8_t Bq[]; };
+layout(set=0, binding=2) readonly buffer SBuf   { float Scales[]; };
+layout(set=0, binding=3) readonly buffer ZBuf   { uint8_t Zp[]; };
+layout(set=0, binding=4)          buffer CBuf   { float C[]; };
+layout(push_constant) uniform PC { uint M; uint N; uint K; uint BlockSize; uint HasZp; } pc;
+
+uint nib4(uint rowOff, uint idx, bool useZp) {
+    uint b = useZp ? uint(Zp[rowOff + (idx >> 1)]) : uint(Bq[rowOff + (idx >> 1)]);
+    return (b >> ((idx & 1u) * 4u)) & 0xFu;
+}
+
+void main() {
+    uint m = gl_GlobalInvocationID.y;
+    uint n = gl_GlobalInvocationID.x;
+    if (m >= pc.M || n >= pc.N) return;
+
+    uint nBlk = pc.K / pc.BlockSize;
+    uint rowBytes = nBlk * (pc.BlockSize / 2u);
+    uint zpRowBytes = (nBlk + 1u) / 2u;
+    uint rowOff = n * rowBytes;
+    uint zRowOff = n * zpRowBytes;
+    uint aRowOff = m * pc.K;
+
+    float acc = 0.0;
+    for (uint b = 0u; b < nBlk; b++) {
+        float s = Scales[n * nBlk + b];
+        uint zp = pc.HasZp != 0u ? nib4(zRowOff, b, true) : 8u;
+        uint k0 = b * pc.BlockSize;
+        float aq = 0.0, asum = 0.0;
+        for (uint i = 0u; i < pc.BlockSize; i++) {
+            uint k = k0 + i;
+            uint q = nib4(rowOff, k, false);
+            float av = A[aRowOff + k];
+            aq += av * float(q);
+            asum += av;
+        }
+        acc += s * (aq - float(zp) * asum);
+    }
+    C[m * pc.N + n] = acc;
+}

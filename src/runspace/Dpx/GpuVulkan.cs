@@ -79,6 +79,9 @@ unsafe static class GpuVulkan
     static uint s_qfi, s_memTypeCount; static int s_spvLen = -1; static string s_name = "(none)";
     public static string Name => s_name;
 
+    // q4 GEMM: separate descriptor-set layout (5 bindings: A, Bq, Scales, Zp, C), pipeline layout (push {M,N,K,BlockSize,HasZp}), pipeline.
+    static IntPtr s_dslQ4, s_playoutQ4, s_pipeQ4; static int s_spvQ4Len = -1;
+
     public static void EnsureInit()
     {
         if (s_dev != IntPtr.Zero) return;
@@ -108,6 +111,15 @@ unsafe static class GpuVulkan
         PCR pcr = new PCR(); pcr.stage = 0x20; pcr.off = 0; pcr.size = 12;   // push {M,N,K}
         PLCI plci = new PLCI(); plci.sType = 30; plci.slc = 1; plci.pSL = PinH(s_dsl); plci.pcrc = 1; plci.pPCR = Pin(pcr);
         vkCreatePipelineLayout(s_dev, ref plci, IntPtr.Zero, out s_playout);
+
+        // q4 descriptor set layout: 5 storage buffers (A, Bq, Scales, Zp, C), stage COMPUTE
+        DSLB[] bindsQ = new DSLB[5];
+        for (uint i = 0; i < 5; i++) { bindsQ[i].binding = i; bindsQ[i].type = 7; bindsQ[i].count = 1; bindsQ[i].stage = 0x20; }
+        DSLCI dslciQ = new DSLCI(); dslciQ.sType = 32; dslciQ.bc = 5; dslciQ.pB = PinArr(bindsQ);
+        vkCreateDescriptorSetLayout(s_dev, ref dslciQ, IntPtr.Zero, out s_dslQ4);
+        PCR pcrQ = new PCR(); pcrQ.stage = 0x20; pcrQ.off = 0; pcrQ.size = 20;   // push {M,N,K,BlockSize,HasZp}
+        PLCI plciQ = new PLCI(); plciQ.sType = 30; plciQ.slc = 1; plciQ.pSL = PinH(s_dslQ4); plciQ.pcrc = 1; plciQ.pPCR = Pin(pcrQ);
+        vkCreatePipelineLayout(s_dev, ref plciQ, IntPtr.Zero, out s_playoutQ4);
     }
 
     static void EnsurePipeline(byte[] spv)
@@ -121,6 +133,19 @@ unsafe static class GpuVulkan
         cpci.layout = s_playout;
         vkCreateComputePipelines(s_dev, IntPtr.Zero, 1, ref cpci, IntPtr.Zero, out s_pipe);
         s_spvLen = spv.Length;
+    }
+
+    static void EnsurePipelineQ4(byte[] spv)
+    {
+        if (s_pipeQ4 != IntPtr.Zero && s_spvQ4Len == spv.Length) return;
+        IntPtr spvPtr = Marshal.AllocHGlobal(spv.Length); Marshal.Copy(spv, 0, spvPtr, spv.Length);
+        SMCI smci = new SMCI(); smci.sType = 16; smci.codeSize = (IntPtr)spv.Length; smci.pCode = spvPtr;
+        IntPtr shader; vkCreateShaderModule(s_dev, ref smci, IntPtr.Zero, out shader);
+        CPCI cpci = new CPCI(); cpci.sType = 29;
+        cpci.stage = new PSSCI(); cpci.stage.sType = 18; cpci.stage.stage = 0x20; cpci.stage.module = shader; cpci.stage.pName = Marshal.StringToHGlobalAnsi("main");
+        cpci.layout = s_playoutQ4;
+        vkCreateComputePipelines(s_dev, IntPtr.Zero, 1, ref cpci, IntPtr.Zero, out s_pipeQ4);
+        s_spvQ4Len = spv.Length;
     }
 
     static int FindMem(uint typeBits)
@@ -190,6 +215,69 @@ unsafe static class GpuVulkan
         vkDestroyDescriptorPool(s_dev, pool, IntPtr.Zero);
         vkDestroyBuffer(s_dev, aBuf, IntPtr.Zero); vkFreeMemory(s_dev, aMem, IntPtr.Zero);
         vkDestroyBuffer(s_dev, bBuf, IntPtr.Zero); vkFreeMemory(s_dev, bMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, cBuf, IntPtr.Zero); vkFreeMemory(s_dev, cMem, IntPtr.Zero);
+        return 0;
+    }
+
+    // GemmQ4: Y[M,N] = A[M,K] @ dequant(Bq)^T on the q4 SEQUENTIAL-nibble packed weight — same layout/formula as
+    // GpuD3D12.GemmQ4. Never materializes the dequantized fp32 weight on the CPU; dequant happens per-k on GPU.
+    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] spv)
+    {
+        EnsureInit();
+        EnsurePipelineQ4(spv);
+        ulong aB = (ulong)A.Length * 4, bqB = (ulong)Bq.Length, scB = (ulong)Scales.Length * 4, cB = (ulong)M * N * 4;
+        ulong zpB = (ulong)Math.Max(1, Zp?.Length ?? 1);
+        IntPtr aBuf, aMem, bqBuf, bqMem, scBuf, scMem, zpBuf, zpMem, cBuf, cMem;
+        MkBuf(aB, out aBuf, out aMem); MkBuf(bqB, out bqBuf, out bqMem); MkBuf(scB, out scBuf, out scMem);
+        MkBuf(zpB, out zpBuf, out zpMem); MkBuf(cB, out cBuf, out cMem);
+        IntPtr p;
+        vkMapMemory(s_dev, aMem, 0, aB, 0, out p); Marshal.Copy(A, 0, p, A.Length); vkUnmapMemory(s_dev, aMem);
+        vkMapMemory(s_dev, bqMem, 0, bqB, 0, out p); Marshal.Copy(Bq, 0, p, Bq.Length); vkUnmapMemory(s_dev, bqMem);
+        vkMapMemory(s_dev, scMem, 0, scB, 0, out p); Marshal.Copy(Scales, 0, p, Scales.Length); vkUnmapMemory(s_dev, scMem);
+        if (hasZp && Zp != null && Zp.Length > 0) { vkMapMemory(s_dev, zpMem, 0, zpB, 0, out p); Marshal.Copy(Zp, 0, p, Zp.Length); vkUnmapMemory(s_dev, zpMem); }
+
+        DPS[] ps = new DPS[] { new DPS { type = 7, count = 5 } };
+        DPCI dpci = new DPCI(); dpci.sType = 33; dpci.maxSets = 1; dpci.psc = 1; dpci.pPS = PinArr(ps);
+        IntPtr pool; vkCreateDescriptorPool(s_dev, ref dpci, IntPtr.Zero, out pool);
+        DSAI dsai = new DSAI(); dsai.sType = 34; dsai.pool = pool; dsai.sc = 1; dsai.pSL = PinH(s_dslQ4);
+        IntPtr dset; vkAllocateDescriptorSets(s_dev, ref dsai, out dset);
+        DBI ia = new DBI { buffer = aBuf, off = 0, range = aB }, ib = new DBI { buffer = bqBuf, off = 0, range = bqB },
+            isc = new DBI { buffer = scBuf, off = 0, range = scB }, iz = new DBI { buffer = zpBuf, off = 0, range = zpB },
+            ic = new DBI { buffer = cBuf, off = 0, range = cB };
+        WDS[] w = new WDS[5];
+        w[0].sType = 35; w[0].dstSet = dset; w[0].dstBind = 0; w[0].count = 1; w[0].type = 7; w[0].pBuf = Pin(ia);
+        w[1].sType = 35; w[1].dstSet = dset; w[1].dstBind = 1; w[1].count = 1; w[1].type = 7; w[1].pBuf = Pin(ib);
+        w[2].sType = 35; w[2].dstSet = dset; w[2].dstBind = 2; w[2].count = 1; w[2].type = 7; w[2].pBuf = Pin(isc);
+        w[3].sType = 35; w[3].dstSet = dset; w[3].dstBind = 3; w[3].count = 1; w[3].type = 7; w[3].pBuf = Pin(iz);
+        w[4].sType = 35; w[4].dstSet = dset; w[4].dstBind = 4; w[4].count = 1; w[4].type = 7; w[4].pBuf = Pin(ic);
+        vkUpdateDescriptorSets(s_dev, 5, w, 0, IntPtr.Zero);
+
+        CPoolCI cpci2 = new CPoolCI(); cpci2.sType = 39; cpci2.qfi = s_qfi;
+        IntPtr cpool; vkCreateCommandPool(s_dev, ref cpci2, IntPtr.Zero, out cpool);
+        CBAI cbai = new CBAI(); cbai.sType = 40; cbai.pool = cpool; cbai.level = 0; cbai.count = 1;
+        IntPtr cb; vkAllocateCommandBuffers(s_dev, ref cbai, out cb);
+        CBBI bi = new CBBI(); bi.sType = 42; bi.flags = 1;
+        vkBeginCommandBuffer(cb, ref bi);
+        vkCmdBindPipeline(cb, 1, s_pipeQ4);
+        IntPtr setH = dset; vkCmdBindDescriptorSets(cb, 1, s_playoutQ4, 0, 1, ref setH, 0, IntPtr.Zero);
+        vkCmdPushConstants(cb, s_playoutQ4, 0x20, 0, 20, new uint[] { M, N, K, blockSize, hasZp ? 1u : 0u });
+        vkCmdDispatch(cb, (N + 15) / 16, (M + 15) / 16, 1);
+        vkEndCommandBuffer(cb);
+
+        FenceCI fci = new FenceCI(); fci.sType = 8; IntPtr fence; vkCreateFence(s_dev, ref fci, IntPtr.Zero, out fence);
+        SubmitI si = new SubmitI(); si.sType = 4; si.cbc = 1; si.pCB = PinH(cb);
+        vkQueueSubmit(s_queue, 1, ref si, fence);
+        vkWaitForFences(s_dev, 1, ref fence, 1, ulong.MaxValue);
+
+        vkMapMemory(s_dev, cMem, 0, cB, 0, out p); Marshal.Copy(p, C, 0, (int)(M * N)); vkUnmapMemory(s_dev, cMem);
+
+        vkDestroyFence(s_dev, fence, IntPtr.Zero);
+        vkDestroyCommandPool(s_dev, cpool, IntPtr.Zero);
+        vkDestroyDescriptorPool(s_dev, pool, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, aBuf, IntPtr.Zero); vkFreeMemory(s_dev, aMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, bqBuf, IntPtr.Zero); vkFreeMemory(s_dev, bqMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, scBuf, IntPtr.Zero); vkFreeMemory(s_dev, scMem, IntPtr.Zero);
+        vkDestroyBuffer(s_dev, zpBuf, IntPtr.Zero); vkFreeMemory(s_dev, zpMem, IntPtr.Zero);
         vkDestroyBuffer(s_dev, cBuf, IntPtr.Zero); vkFreeMemory(s_dev, cMem, IntPtr.Zero);
         return 0;
     }

@@ -217,8 +217,12 @@ internal static class Build
 
     private static string? FindSignedApk(string drive, string root)
     {
-        // dev.psm1 emits to <drive>\build\Subsystem\bin\…\*-Signed.apk; fall back to the project's own bin.
-        foreach (var baseDir in new[] { Path.Combine(drive, "build"), Path.Combine(root, "src", "runspace") })
+        // Directory.Build.props redirects output to $(SS_BUILD), else a 'build' SIBLING of the repo root —
+        // search that first (a worktree's sibling is NOT <drive>\build; searching only the drive root once
+        // reported a two-day-stale APK as the fresh build). Then the legacy locations.
+        var ssBuild = Environment.GetEnvironmentVariable("SS_BUILD");
+        if (string.IsNullOrWhiteSpace(ssBuild)) ssBuild = Path.GetFullPath(Path.Combine(root, "..", "build"));
+        foreach (var baseDir in new[] { ssBuild, Path.Combine(drive, "build"), Path.Combine(root, "src", "runspace") })
         {
             try
             {
