@@ -942,6 +942,9 @@ public class Dp
     // the same code JITs to SSE on x64 and NEON on the Android arm64 head. Two per-call precomputes amortized
     // over all N output rows: activations deinterleaved into even/odd halves (so the nibble planes FMA against
     // contiguous loads), and per-(m,block) activation sums (the zero-point term drops out of the inner loop).
+    // On AVX-512 hardware a Vector512 rung takes over: one q4 block = 16 packed bytes, so a single 64-byte load
+    // carries 4 blocks; rows with nBlk % 4 != 0 (and NEON/SSE-only hardware) take the Vector128 rung unchanged.
+    // DPX_MMNB=128 pins the Vector128 rung so both rungs stay benchable on 512-capable hardware.
     internal static unsafe Tensor MatMulNBitsSimd(Tensor[] x, Span<float> a, Span<float> scsp, Span<byte> bSpan, Span<byte> zpSpan,
                                          int K, int N, int M, int nBlk, int rowBytes, int zpRowBytes, int defZp, int scLen)
     {
@@ -956,7 +959,9 @@ public class Dp
         {
             float* py = p_y; float* pa = p_a; float* psc = p_sc; float* pae = p_ae; float* pao = p_ao; float* pas = p_as;
             byte* pB = p_b; byte* pZp = p_zp; int yl = y.Length;
-            for (int m = 0; m < M; m++)
+            // per-row precompute is O(M·K): M=1 decode runs it inline, prefill (M rows) splits across cores
+            // like the main loop below (it was a serial stall ahead of the parallel region at prefill).
+            Action<int> preRow = m =>
             {
                 int ao0 = m * K, h0 = m * half;
                 for (int j = 0; j < half; j++) { pae[h0 + j] = pa[ao0 + 2 * j]; pao[h0 + j] = pa[ao0 + 2 * j + 1]; }
@@ -966,7 +971,54 @@ public class Dp
                     for (int i = 0; i < bs_32; i++) s += pa[ao0 + k0 + i];
                     pas[m * nBlk + b] = s;
                 }
+            };
+            if (M > 1) System.Threading.Tasks.Parallel.For(0, M, preRow); else preRow(0);
+            if (Vector512.IsHardwareAccelerated && (nBlk & 3) == 0
+                && Environment.GetEnvironmentVariable("DPX_MMNB") != "128")
+            {
+                var mask512 = Vector512.Create((byte)0x0F);
+                System.Threading.Tasks.Parallel.For(0, N, nn =>
+                {
+                    var sy = new Span<float>(py, yl); var sc = new Span<float>(psc, scLen);
+                    int rb = nn * rowBytes, zb = nn * zpRowBytes, scBase = nn * nBlk;
+                    for (int m = 0; m < M; m++)
+                    {
+                        int h0 = m * half, as0 = m * nBlk;
+                        var accv = Vector512<float>.Zero; float zpAcc = 0f;
+                        for (int b = 0; b < nBlk; b += 4)
+                        {
+                            var vb = Vector512.Load(pB + rb + (b << 4));             // 64 bytes = blocks b..b+3
+                            var lo = vb & mask512;                                   // even-k nibbles, j-order
+                            var hi = Vector512.ShiftRightLogical(vb, 4) & mask512;   // odd-k nibbles, j-order
+                            int e0 = h0 + (b << 4);
+                            // Widen keeps element order, so each uint quarter is exactly one block's 16 nibbles
+                            var (lo01, lo23) = Vector512.Widen(lo);
+                            var (hi01, hi23) = Vector512.Widen(hi);
+                            var (l0, l1) = Vector512.Widen(lo01); var (l2, l3) = Vector512.Widen(lo23);
+                            var (o0, o1) = Vector512.Widen(hi01); var (o2, o3) = Vector512.Widen(hi23);
+                            var aq0 = Vector512.ConvertToSingle(l0.AsInt32()) * Vector512.Load(pae + e0)
+                                    + Vector512.ConvertToSingle(o0.AsInt32()) * Vector512.Load(pao + e0);
+                            var aq1 = Vector512.ConvertToSingle(l1.AsInt32()) * Vector512.Load(pae + e0 + 16)
+                                    + Vector512.ConvertToSingle(o1.AsInt32()) * Vector512.Load(pao + e0 + 16);
+                            var aq2 = Vector512.ConvertToSingle(l2.AsInt32()) * Vector512.Load(pae + e0 + 32)
+                                    + Vector512.ConvertToSingle(o2.AsInt32()) * Vector512.Load(pao + e0 + 32);
+                            var aq3 = Vector512.ConvertToSingle(l3.AsInt32()) * Vector512.Load(pae + e0 + 48)
+                                    + Vector512.ConvertToSingle(o3.AsInt32()) * Vector512.Load(pao + e0 + 48);
+                            float s0 = sc[scBase + b], s1 = sc[scBase + b + 1], s2 = sc[scBase + b + 2], s3 = sc[scBase + b + 3];
+                            // scale in-lane, one horizontal Sum per (m,nn) after the loop; zp term stays scalar
+                            accv += aq0 * Vector512.Create(s0) + aq1 * Vector512.Create(s1)
+                                  + aq2 * Vector512.Create(s2) + aq3 * Vector512.Create(s3);
+                            int z0 = defZp, z1 = defZp, z2 = defZp, z3 = defZp;
+                            if (pZp != null) { z0 = Nib4(pZp, zb, b); z1 = Nib4(pZp, zb, b + 1); z2 = Nib4(pZp, zb, b + 2); z3 = Nib4(pZp, zb, b + 3); }
+                            zpAcc += s0 * z0 * pas[as0 + b] + s1 * z1 * pas[as0 + b + 1]
+                                   + s2 * z2 * pas[as0 + b + 2] + s3 * z3 * pas[as0 + b + 3];
+                        }
+                        sy[m * N + nn] = Vector512.Sum(accv) - zpAcc;
+                    }
+                });
             }
+            else
+            {
             var maskF = Vector128.Create((byte)0x0F);
             System.Threading.Tasks.Parallel.For(0, N, nn =>
             {
@@ -999,6 +1051,7 @@ public class Dp
                     sy[m * N + nn] = acc;
                 }
             });
+            }
         }
         var outShape = (int[])x[0].Shape.Clone(); outShape[outShape.Length - 1] = N;
         return Tensor.F(y, outShape);
