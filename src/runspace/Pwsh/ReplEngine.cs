@@ -25,7 +25,7 @@ public class ReplEngine
     {
         lock (_psLock)
         {
-            try { _activePowerShell?.Stop(); } catch { }
+            try { _activePowerShell?.Stop(); } catch (Exception ex) { Dg.Warn("repl", ex); }
         }
     }
 
@@ -45,14 +45,14 @@ public class ReplEngine
         _shouldExit = true;
         lock (_psLock)
         {
-            try { _activePowerShell?.Stop(); } catch { }
+            try { _activePowerShell?.Stop(); } catch (Exception ex) { Dg.Warn("repl", ex); }
         }
         try
         {
             var rawUi = (AndroidSubsystemRawUserInterface)_host.UI.RawUI;
             rawUi.InputQueue.Add(new KeyInfo(0, '\0', (ControlKeyStates)0, true));
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("repl", ex); }
     }
 
     private void RunLoop()
@@ -132,8 +132,8 @@ public class ReplEngine
         }
         finally
         {
-            try { _runspace?.Close(); } catch { }
-            try { _runspace?.Dispose(); } catch { }
+            try { _runspace?.Close(); } catch (Exception ex) { Dg.Warn("repl", ex); }
+            try { _runspace?.Dispose(); } catch (Exception ex) { Dg.Warn("repl", ex); }
         }
     }
 

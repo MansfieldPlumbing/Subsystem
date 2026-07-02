@@ -87,7 +87,7 @@ public static class SubsystemApi
     {
         if (ws.State != WebSocketState.Open) return;
         var bytes = Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(frame));
-        try { await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token); } catch { }
+        try { await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token); } catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); }
     }
 
     // Parse the `offer_choices` tool result (a JSON string array) into chip strings. Resilient to a
@@ -105,7 +105,7 @@ public static class SubsystemApi
             if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.String)
                 return new[] { doc.RootElement.GetString() };
         }
-        catch { }
+        catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); }
         return new[] { json.Trim() };
     }
 
@@ -189,7 +189,7 @@ public static class SubsystemApi
                         catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); }
                     }
                 }
-                catch { /* not JSON after all — treat as text */ }
+                catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); /* not JSON after all — treat as text */ }
             }
 
             try

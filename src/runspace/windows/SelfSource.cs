@@ -70,7 +70,7 @@ internal static class SelfSource
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.WriteAllBytes(target, ico);
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("selfsource", ex); }
     }
 
     private static byte[]? ReadResourceBytes(string logicalName)

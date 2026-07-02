@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -23,10 +24,11 @@ internal static class WinShellUi
         // so IsDoubleClick is false and we leave it alone.
         if (Interactive.IsDoubleClick()) Interactive.HideOwnConsole();
         int rc = 0;
-        var ui = new System.Threading.Thread(() => rc = RunUi(args));
-        ui.SetApartmentState(System.Threading.ApartmentState.STA);
-        ui.Start();
-        ui.Join();
+        var owner = Subsystem.Vom.Vom.CreateOwner("\\WinShellUi");
+        var exited = new ManualResetEventSlim(false);
+        Subsystem.Vom.Vom.Spawn(owner, "Ui", _ => { try { rc = RunUi(args); } finally { exited.Set(); } }, background: false, sta: true);
+        exited.Wait();
+        Subsystem.Vom.Vom.Terminate(owner);   // cascade reclaim of the \WinShellUi owner + its UI thread handle
         return rc;
     }
 

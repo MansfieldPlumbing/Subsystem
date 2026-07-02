@@ -11,7 +11,7 @@ public static class SqliteProbe
     {
         try
         {
-            try { SQLitePCL.Batteries_V2.Init(); } catch { /* newer bundles auto-init */ }
+            try { SQLitePCL.Batteries_V2.Init(); } catch (Exception ex) { Dg.Warn("sqlite", ex); }
 
             using var c = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
             c.Open();

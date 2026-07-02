@@ -100,7 +100,7 @@ internal static class Build
             catch   // the running image is locked — rename it aside (Windows allows it), then write.
             {
                 var old = t + "." + Guid.NewGuid().ToString("N").Substring(0, 4) + ".old";
-                try { if (File.Exists(old)) File.Delete(old); } catch { }
+                try { if (File.Exists(old)) File.Delete(old); } catch (Exception ex) { Dg.Warn("build", ex); }
                 try { File.Move(t, old); File.WriteAllBytes(t, exeBytes); Console.WriteLine($"  + {t}  (self-replaced; old → {old})"); }
                 catch (Exception ex) { Console.Error.WriteLine($"  ! {t}: {ex.Message}"); }
             }
@@ -227,7 +227,7 @@ internal static class Build
                     .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc).FirstOrDefault();
                 if (hit != null) return hit;
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("build", ex); }
         }
         return null;
     }
@@ -329,7 +329,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
             if (File.Exists(d)) return d;
         }
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-            try { var p = Path.Combine(dir, "dotnet.exe"); if (File.Exists(p)) return p; } catch { }
+            try { var p = Path.Combine(dir, "dotnet.exe"); if (File.Exists(p)) return p; } catch (Exception ex) { Dg.Warn("build", ex); }
         return null;
     }
 
@@ -361,7 +361,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
         {
             var dir = stack.Pop();
             if (blocked.Contains(Path.GetFileName(dir))) continue;
-            try { foreach (var d in Directory.GetDirectories(dir)) stack.Push(d); } catch { }
+            try { foreach (var d in Directory.GetDirectories(dir)) stack.Push(d); } catch (Exception ex) { Dg.Warn("build", ex); }
             try
             {
                 foreach (var f in Directory.GetFiles(dir))
@@ -372,7 +372,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("build", ex); }
         }
         found.Sort(StringComparer.OrdinalIgnoreCase);
 

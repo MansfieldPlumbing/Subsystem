@@ -44,7 +44,7 @@ public sealed class ManagedSession : IDisposable
         // session's owner table. Terminate(owner) now reclaims the managed runspace through the SAME
         // DropPrefix cascade as the session's native handles: onReclaim closes it, then the GCHandle frees.
         // One owner, one teardown — the split managed/native disposal (the duplicate truth) collapses.
-        Register(VomOwner, "Runspace", _rs, onReclaim: () => { try { _rs.Close(); _rs.Dispose(); } catch { } }, name: "Runspace");
+        Register(VomOwner, "Runspace", _rs, onReclaim: () => { try { _rs.Close(); _rs.Dispose(); } catch (Exception ex) { Dg.Warn("runspace", ex); } }, name: "Runspace");
     }
 
     // Runs a command in this session's persistent runspace. Serialized (single-threaded

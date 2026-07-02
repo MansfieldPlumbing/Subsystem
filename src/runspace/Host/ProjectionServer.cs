@@ -18,6 +18,11 @@ public class ProjectionServer
     private readonly MainActivity _mainActivity;
     private readonly ConcurrentDictionary<WebSocket, ClientState> _clients = new();
 
+    // The kernel-owned mount for every ambient background hop this host spawns (request handlers,
+    // send pumps, screen broadcast) — SS009: no free Task.Run/Thread outside the VOM kernel. Same
+    // idiom as Rs.VomOwner / BrokerHost / DirectPortProducer (CreateOwner once, Spawn per hop).
+    private readonly Subsystem.Vom.Owner _owner = Subsystem.Vom.Vom.CreateOwner("\\ProjectionServer");
+
     private sealed class ClientState
     {
         public WebSocket Ws = null!;
@@ -103,8 +108,8 @@ public class ProjectionServer
             _listener.Start();
             // Seed the registry from the APK assets so /apps + /shell-layout resolve from Cm, not the
             // filesystem (REGISTRY-SPEC §1). Idempotent + reconciling; guarded so it never blocks the server.
-            Task.Run(() => Registrar.SeedFromAssets(_mainActivity.Assets));
-            Task.Run(ListenLoop);
+            Subsystem.Vom.Vom.Spawn(_owner, "SeedFromAssets", _ => Registrar.SeedFromAssets(_mainActivity.Assets));
+            Subsystem.Vom.Vom.Spawn(_owner, "ListenLoop", _ => ListenLoop().GetAwaiter().GetResult());
         } catch (Exception ex) {
             Android.Util.Log.Error("Subsystem", "ProjectionServer Error: " + ex.ToString());
         }
@@ -115,7 +120,7 @@ public class ProjectionServer
             _listener?.Stop();
             _listener?.Close();
             _listener = null;
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
     }
 
     // BindGuard — the control-plane bind invariant (Se charter #1). Loopback
@@ -156,7 +161,7 @@ public class ProjectionServer
                 // whose zone has no allow rule is dropped HERE (default-deny; loopback/USB always pass).
                 if (!Firewall.Allow(context.Request.RemoteEndPoint, context.Request.LocalEndPoint))
                 {
-                    try { context.Response.StatusCode = 403; context.Response.Close(); } catch { }
+                    try { context.Response.StatusCode = 403; context.Response.Close(); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                     continue;
                 }
                 var req = context.Request;
@@ -173,29 +178,29 @@ public class ProjectionServer
                     }
                     else if (req.Url.AbsolutePath == "/api")
                     {
-                        _ = Task.Run(async () => {
+                        Subsystem.Vom.Vom.Spawn(_owner, "ApiWebSocket", _ => {
                             try {
-                                var wsContext = await context.AcceptWebSocketAsync(null);
-                                await SubsystemApi.ProcessApiWebSocket(wsContext.WebSocket, CancellationToken.None);
-                            } catch {}
+                                var wsContext = context.AcceptWebSocketAsync(null).GetAwaiter().GetResult();
+                                SubsystemApi.ProcessApiWebSocket(wsContext.WebSocket, CancellationToken.None).GetAwaiter().GetResult();
+                            } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                         });
                     }
                     else if (req.Url.AbsolutePath == "/agent" || req.Url.AbsolutePath == "/llm")
                     {
-                        _ = Task.Run(async () => {
+                        Subsystem.Vom.Vom.Spawn(_owner, "LlmWebSocket", _ => {
                             try {
-                                var wsContext = await context.AcceptWebSocketAsync(null);
-                                await SubsystemApi.ProcessLlmWebSocket(_mainActivity, wsContext.WebSocket, CancellationToken.None);
-                            } catch {}
+                                var wsContext = context.AcceptWebSocketAsync(null).GetAwaiter().GetResult();
+                                SubsystemApi.ProcessLlmWebSocket(_mainActivity, wsContext.WebSocket, CancellationToken.None).GetAwaiter().GetResult();
+                            } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                         });
                     }
                     else if (req.Url.AbsolutePath == "/models")
                     {
-                        _ = Task.Run(async () => {
+                        Subsystem.Vom.Vom.Spawn(_owner, "ModelsWebSocket", _ => {
                             try {
-                                var wsContext = await context.AcceptWebSocketAsync(null);
-                                await ModelsApi.ProcessModelsWebSocket(_mainActivity, wsContext.WebSocket, CancellationToken.None);
-                            } catch {}
+                                var wsContext = context.AcceptWebSocketAsync(null).GetAwaiter().GetResult();
+                                ModelsApi.ProcessModelsWebSocket(_mainActivity, wsContext.WebSocket, CancellationToken.None).GetAwaiter().GetResult();
+                            } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                         });
                     }
                     else if (req.Url.AbsolutePath == "/screen")
@@ -233,32 +238,32 @@ public class ProjectionServer
                 }
                 else if (context.Request.Url!.AbsolutePath == "/apps")
                 {
-                    _ = Task.Run(() => ServeAppsJson(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeApps", _ => ServeAppsJson(context));
                 }
                 else if (context.Request.Url!.AbsolutePath == "/shell-layout")
                 {
-                    _ = Task.Run(() => ServeShellLayout(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeShellLayout", _ => ServeShellLayout(context));
                 }
                 else if (context.Request.Url!.AbsolutePath == "/verbs")
                 {
-                    _ = Task.Run(() => ServeVerbs(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeVerbs", _ => ServeVerbs(context));
                 }
                 else if (context.Request.Url!.AbsolutePath == "/themes")
                 {
-                    _ = Task.Run(() => ServeThemes(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeThemes", _ => ServeThemes(context));
                 }
                 else if (context.Request.Url!.AbsolutePath.StartsWith("/api/config/"))
                 {
-                    _ = Task.Run(() => ServeConfig(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeConfig", _ => ServeConfig(context));
                 }
                 else if (context.Request.Url!.AbsolutePath == "/cards")
                 {
-                    _ = Task.Run(() => ServeCards(context));
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeCards", _ => ServeCards(context));
                 }
                 else if (context.Request.Url!.AbsolutePath == "/cli")
                 {
                     // The phone hands out its own PowerShell control module.
-                    _ = Task.Run(() => {
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeCli", _ => {
                         try {
                             var res = context.Response;
                             res.ContentType = "text/plain; charset=utf-8";
@@ -267,7 +272,7 @@ public class ProjectionServer
                                 ?? throw new System.IO.FileNotFoundException("Subsystem.psm1");
                             s.CopyTo(res.OutputStream);
                             res.OutputStream.Close();
-                        } catch { try { var b = System.Text.Encoding.UTF8.GetBytes("# Subsystem CLI module unavailable\n"); context.Response.OutputStream.Write(b, 0, b.Length); } catch { } try { context.Response.Close(); } catch { } }
+                        } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); try { var b = System.Text.Encoding.UTF8.GetBytes("# Subsystem CLI module unavailable\n"); context.Response.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); } try { context.Response.Close(); } catch (Exception ex3) { Subsystem.Dg.Warn("http", ex3); } }
                     });
                 }
                 else if (context.Request.Url!.AbsolutePath.StartsWith("/vom/"))
@@ -276,7 +281,7 @@ public class ProjectionServer
                     // SAME named Float32 region as the vom:// scheme (VomInterop — one truth, two
                     // schemes). fetch()-friendly where the custom scheme is not. Authority is the
                     // handle name (possession); empty region → empty 200, never a 404.
-                    _ = Task.Run(() => {
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeVomTexture", _ => {
                         try {
                             var res = context.Response;
                             res.ContentType = "application/octet-stream";
@@ -288,24 +293,24 @@ public class ProjectionServer
                             var bytes = VomInterop.GetTextureBytes(name);
                             res.OutputStream.Write(bytes, 0, bytes.Length);
                         } catch (Exception ex) { Subsystem.Dg.Log("http", "/vom error: " + ex.Message); }
-                        finally { try { context.Response.Close(); } catch { } }
+                        finally { try { context.Response.Close(); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); } }
                     });
                 }
                 else if (context.Request.Url!.AbsolutePath == "/diag")
                 {
-                    _ = Task.Run(() => {
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeDiag", _ => {
                         try {
                             var res = context.Response;
                             res.ContentType = "application/json";
                             var bytes = System.Text.Encoding.UTF8.GetBytes(Subsystem.Dg.Snapshot());
                             res.OutputStream.Write(bytes, 0, bytes.Length);
                             res.OutputStream.Close();
-                        } catch { }
+                        } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                     });
                 }
                 else
-                    _ = Task.Run(() => ServeStaticFile(context));
-            } catch { }
+                    Subsystem.Vom.Vom.Spawn(_owner, "ServeStaticFile", _ => ServeStaticFile(context));
+            } catch (Exception ex) { Subsystem.Dg.Error("http", ex); }
         }
     }
 
@@ -328,7 +333,7 @@ public class ProjectionServer
                 Cts = new CancellationTokenSource(),
             };
             _clients[ws] = state;
-            _ = Task.Run(() => SendPump(state));
+            Subsystem.Vom.Vom.Spawn(_owner, "SendPump", _ => SendPump(state).GetAwaiter().GetResult());
 
             var buffer = new byte[8192];
             while (ws.State == WebSocketState.Open)
@@ -340,14 +345,14 @@ public class ProjectionServer
                 _mainActivity.RouteInputEvent(msg);
             }
         }
-        catch { }
+        catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
         finally {
             if (ws != null && state != null) {
                 _clients.TryRemove(ws, out _);
                 state.Channel.Writer.TryComplete();
                 state.Cts.Cancel();
-                try { await Task.Delay(50); } catch { }
-                try { ws.Dispose(); } catch { }
+                try { await Task.Delay(50); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
+                try { ws.Dispose(); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                 state.Cts.Dispose();
             }
         }
@@ -379,7 +384,7 @@ public class ProjectionServer
             // a card, not an HTTP error page. The fumble is recorded, not surfaced.
             Subsystem.Dg.Log("http", $"/api/exec error: {ex.Message}");
             var bytes = Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message }));
-            try { await res.OutputStream.WriteAsync(bytes, 0, bytes.Length); } catch { }
+            try { await res.OutputStream.WriteAsync(bytes, 0, bytes.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         }
         finally {
             res.Close();
@@ -429,7 +434,7 @@ public class ProjectionServer
             try {
                 var bytes = Encoding.UTF8.GetBytes(System.Management.Automation.PSSerializer.Serialize(ex));
                 await res.OutputStream.WriteAsync(bytes, 0, bytes.Length);
-            } catch { }
+            } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         }
         finally {
             res.Close();
@@ -508,13 +513,13 @@ public class ProjectionServer
             // Typed refusal (busy / no-session / command-error / …) — a graceful 200 envelope; the
             // client reads `code` (e.g. "no-session" → reopen + retry). Recorded, not surfaced as HTTP.
             Subsystem.Dg.Log("http", $"/psrp {route} refused: {rex.Code}");
-            try { await WriteJson(res, JsonError(rex.Code, rex.Message)); } catch { }
+            try { await WriteJson(res, JsonError(rex.Code, rex.Message)); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         }
         catch (Exception ex)
         {
             // NEVER 404/500 (project rule): hand back a graceful error object; the fumble is recorded.
             Subsystem.Dg.Log("http", $"/psrp {route} error: {ex.Message}");
-            try { await WriteJson(res, JsonError("error", ex.Message)); } catch { }
+            try { await WriteJson(res, JsonError("error", ex.Message)); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         }
         finally
         {
@@ -578,7 +583,7 @@ public class ProjectionServer
                     await ws.SendAsync(seg, WebSocketMessageType.Text, true, token).ConfigureAwait(false);
                 } catch { break; }
             }
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
     }
 
     public void Broadcast(long tabId, byte[] rawAnsiBytes)
@@ -598,12 +603,12 @@ public class ProjectionServer
         if (_screenClients.IsEmpty) return;
         if (System.Threading.Interlocked.CompareExchange(ref _isSendingScreen, 1, 0) != 0) return; // Drop frame if busy
         
-        Task.Run(async () => {
+        Subsystem.Vom.Vom.Spawn(_owner, "BroadcastRdpFrame", _ => {
             try {
                 var seg = new ArraySegment<byte>(jpegBytes);
                 foreach (var ws in _screenClients.Keys) {
                     if (ws.State == System.Net.WebSockets.WebSocketState.Open) {
-                        try { await ws.SendAsync(seg, System.Net.WebSockets.WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false); } catch { }
+                        try { ws.SendAsync(seg, System.Net.WebSockets.WebSocketMessageType.Binary, true, CancellationToken.None).GetAwaiter().GetResult(); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                     }
                 }
             } finally {
@@ -631,15 +636,15 @@ public class ProjectionServer
                         var x = doc.RootElement.GetProperty("x").GetSingle();
                         var y = doc.RootElement.GetProperty("y").GetSingle();
                         TerminalAccessibilityService.Instance?.DispatchTap(x, y);
-                    } catch { }
+                    } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
         finally {
             if (ws != null) {
                 _screenClients.TryRemove(ws, out _);
-                try { ws.Dispose(); } catch { }
+                try { ws.Dispose(); } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
             }
         }
     }
@@ -670,7 +675,7 @@ public class ProjectionServer
                     // role rides through (e.g. "desktop" — the Shell's resting layer): launchers
                     // filter on it client-side; the projection stays ONE truth for all consumers.
                     rows.Add((id, Get("group"), Get("name"), Get("file"), Get("icon"), firstClass, Get("role")));
-                } catch { }
+                } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
             }
 
             var apps = rows
@@ -684,7 +689,7 @@ public class ProjectionServer
         } catch {
             // NEVER 500 (project rule): degrade to an empty manifest so the launcher just shows nothing.
             Subsystem.Dg.Log("http", "/apps build failed → empty manifest");
-            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         } finally {
             res.Close();
         }
@@ -704,7 +709,7 @@ public class ProjectionServer
                 try {
                     using var doc = System.Text.Json.JsonDocument.Parse(rec.ManifestJson);
                     if (doc.RootElement.TryGetProperty("order", out var ov) && ov.ValueKind == System.Text.Json.JsonValueKind.Number) order = ov.GetInt32();
-                } catch { }
+                } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
                 rows.Add((order, rec.ManifestJson!));
             }
             var json = "[" + string.Join(",", rows.OrderBy(r => r.order).Select(r => r.json)) + "]";
@@ -712,7 +717,7 @@ public class ProjectionServer
             res.OutputStream.Write(bytes, 0, bytes.Length);
         } catch {
             Subsystem.Dg.Log("http", "/shell-layout build failed → empty layout");
-            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         } finally {
             res.Close();
         }
@@ -740,14 +745,14 @@ public class ProjectionServer
                         && vals.TryGetProperty("menu", out var mv) && mv.ValueKind == System.Text.Json.JsonValueKind.String)
                         menu = mv.GetString() ?? "file";
                     rows.Add(new { path = rec.Path, scope, menu, label = Get("label"), icon = Get("icon"), command = Get("command") });
-                } catch { }
+                } catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
             }
             var json = System.Text.Json.JsonSerializer.Serialize(rows);
             var bytes = Encoding.UTF8.GetBytes(json);
             res.OutputStream.Write(bytes, 0, bytes.Length);
         } catch {
             Subsystem.Dg.Log("http", "/verbs build failed → empty");
-            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         } finally {
             res.Close();
         }
@@ -770,7 +775,7 @@ public class ProjectionServer
             res.OutputStream.Write(bytes, 0, bytes.Length);
         } catch {
             Subsystem.Dg.Log("http", "/themes build failed → empty");
-            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         } finally {
             res.Close();
         }
@@ -801,7 +806,7 @@ public class ProjectionServer
             res.OutputStream.Write(bytes, 0, bytes.Length);
         } catch {
             Subsystem.Dg.Log("http", "/cards build failed → empty");
-            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { var b = Encoding.UTF8.GetBytes("[]"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         } finally {
             res.Close();
         }
@@ -865,7 +870,7 @@ public class ProjectionServer
         catch (Exception ex)
         {
             Subsystem.Dg.Log("http", "/api/config error: " + ex.Message);
-            try { res.ContentType = "application/json"; var b = Encoding.UTF8.GetBytes("{\"error\":\"config failed\"}"); res.OutputStream.Write(b, 0, b.Length); } catch { }
+            try { res.ContentType = "application/json"; var b = Encoding.UTF8.GetBytes("{\"error\":\"config failed\"}"); res.OutputStream.Write(b, 0, b.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
         }
         finally { res.Close(); }
     }
@@ -930,7 +935,7 @@ public class ProjectionServer
                 var err = Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new { error = "no such api: " + path }));
                 res.OutputStream.Write(err, 0, err.Length);
             }
-            catch { }
+            catch (Exception ex) { Subsystem.Dg.Warn("http", ex); }
             finally { res.Close(); }
             return;
         }
@@ -968,7 +973,7 @@ public class ProjectionServer
             {
                 res.ContentType = "text/html";
                 var html = Encoding.UTF8.GetBytes("<!doctype html><meta charset=utf-8><body style='background:#000'></body>");
-                try { res.OutputStream.Write(html, 0, html.Length); } catch { }
+                try { res.OutputStream.Write(html, 0, html.Length); } catch (Exception ex2) { Subsystem.Dg.Warn("http", ex2); }
             }
         }
         finally

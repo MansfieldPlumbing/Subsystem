@@ -89,7 +89,10 @@ public class AdbConnection : IDisposable
         // TLS upgrade over the SAME socket (StartTLS). adbd authenticates by the client cert's public key,
         // matched against the keys stored at pairing — so the cert must carry the SAME RSA key.
         _stream = await _transport.UpgradeToTlsAsync(_rsaKey, host, port, cancellationToken);
-        _ = Task.Run(() => ReadLoopAsync(cancellationToken), cancellationToken);
+        // SS009: the read loop lives for the life of the connection — route it through the kernel's
+        // owned-thread primitive instead of a free Task.Run (no Sub-VOM, no quota, no termination token).
+        var readLoopOwner = Vom.Vom.CreateOwner($"\\Adb\\{host}:{port}");
+        Vom.Vom.Spawn(readLoopOwner, "ReadLoop", _ => ReadLoopAsync(cancellationToken).GetAwaiter().GetResult());
 
         // Post-TLS: per adbd source (adbd_wifi_secure_connect), after a successful TLS handshake the DAEMON
         // proactively send_connect()s its "device::..." CNXN once it has verified our client cert against the
@@ -291,7 +294,7 @@ public class AdbConnection : IDisposable
 
     public void Dispose()
     {
-        try { _stream?.Dispose(); } catch { }
-        try { _transport?.Dispose(); } catch { }
+        try { _stream?.Dispose(); } catch (Exception ex) { Dg.Warn("adb", ex); }
+        try { _transport?.Dispose(); } catch (Exception ex) { Dg.Warn("adb", ex); }
     }
 }

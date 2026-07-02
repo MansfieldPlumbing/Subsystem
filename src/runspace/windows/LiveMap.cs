@@ -259,7 +259,7 @@ internal static class LiveMap
                 foreach (var h in hp.EnumerateArray())
                     if (h.GetString() is string s) hostPaths.Add(s.Replace('\\', '/').TrimEnd('/'));
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("map", ex); }
         return list;
     }
 }

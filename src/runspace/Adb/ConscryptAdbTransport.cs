@@ -118,6 +118,6 @@ public sealed class ConscryptAdbTransport : IAdbTransport
         public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
-        protected override void Dispose(bool disposing) { if (disposing) { try { _in.Dispose(); } catch { } try { _out.Dispose(); } catch { } } }
+        protected override void Dispose(bool disposing) { if (disposing) { try { _in.Dispose(); } catch (Exception ex) { Dg.Warn("adb", ex); } try { _out.Dispose(); } catch (Exception ex) { Dg.Warn("adb", ex); } } }
     }
 }

@@ -66,8 +66,8 @@ public sealed class PsrpSession : IDisposable
     {
         // CoreCLR cannot force-abort a wedged managed thread; the deterministic kill here is
         // Stop → close the runspace → drop the pipe transport (the server side cleans up with it).
-        try { Current?.Stop(); } catch { }
-        try { Runspace.Close(); Runspace.Dispose(); } catch { }
+        try { Current?.Stop(); } catch (Exception ex) { Dg.Warn("rs", ex); }
+        try { Runspace.Close(); Runspace.Dispose(); } catch (Exception ex) { Dg.Warn("rs", ex); }
     }
 }
 

@@ -159,7 +159,7 @@ public static unsafe partial class Vom
 
     private static void FreeEntry(Owner owner, HandleEntry e)
     {
-        try { e.Reclaim?.Invoke(); } catch { }
+        try { e.Reclaim?.Invoke(); } catch (Exception ex) { Dg.Warn("vom", ex); }
         Interlocked.Add(ref owner.CurrentBytes, -e.Descriptor.ByteCount);
         Interlocked.Decrement(ref owner.CurrentElements);
     }
@@ -187,7 +187,7 @@ public static unsafe partial class Vom
     // next handle use fails. Idempotent (safe under the spawn-thread's self-cleanup). DOM records the autopsy.
     public static void Terminate(Owner owner)
     {
-        try { owner.Cts.Cancel(); } catch { }                 // linked child tokens cancel with us
+        try { owner.Cts.Cancel(); } catch (Exception ex) { Dg.Warn("vom", ex); } // linked child tokens cancel with us
         foreach (var child in owner.Children.Values.ToArray()) // cascade down the tree (depth-first)
             Terminate(child);
         owner.Parent?.Children.TryRemove(owner.Path, out _);

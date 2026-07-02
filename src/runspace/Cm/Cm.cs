@@ -32,16 +32,16 @@ public static class Cm
         lock (_initLock)
         {
             if (_initialized) return;
-            try { SQLitePCL.Batteries_V2.Init(); } catch { /* newer bundles auto-init */ }
+            try { SQLitePCL.Batteries_V2.Init(); } catch (Exception ex) { Dg.Warn("cm", ex); /* newer bundles auto-init */ }
             // Resolve a GUARANTEED-writable dir. SpecialFolder.Personal can resolve empty / non-writable
             // on .NET-Android at this early point (the Registrar inits Cm before HOME is set) → the DB opens
             // at "/" and throws SQLite error 14 CANTOPEN, preventing registry initialization (no /apps, no menu).
             // The app's private FilesDir is the same dir the models live in; always exists, always ours.
             string dir = null;
-            try { dir = Subsystem.MainActivity.Instance?.FilesDir?.AbsolutePath; } catch { }
-            if (string.IsNullOrEmpty(dir)) { try { dir = Environment.GetFolderPath(Environment.SpecialFolder.Personal); } catch { } }
+            try { dir = Subsystem.MainActivity.Instance?.FilesDir?.AbsolutePath; } catch (Exception ex) { Dg.Warn("cm", ex); }
+            if (string.IsNullOrEmpty(dir)) { try { dir = Environment.GetFolderPath(Environment.SpecialFolder.Personal); } catch (Exception ex) { Dg.Warn("cm", ex); } }
             if (string.IsNullOrEmpty(dir)) dir = Path.GetTempPath();   // last-ditch: the platform temp (app cache on Android) — always writable and ours, never a hardcoded device path
-            try { Directory.CreateDirectory(dir); } catch { }
+            try { Directory.CreateDirectory(dir); } catch (Exception ex) { Dg.Warn("cm", ex); }
             _dbPath = Path.Combine(dir, "subsystem-registry.db");
             using (var c = Open())
             {

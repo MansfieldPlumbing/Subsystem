@@ -96,7 +96,7 @@ public static class ObpHost
                 catch
                 {
                     var alias = AliasOf(virtualPath);
-                    if (alias != null) { try { return assets.Open(alias); } catch { } }
+                    if (alias != null) { try { return assets.Open(alias); } catch (Exception ex) { Dg.Warn("obp", ex); } }
                 }
             }
         }

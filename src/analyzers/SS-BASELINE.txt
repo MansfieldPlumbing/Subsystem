@@ -17,169 +17,21 @@ SS003|Registrar.cs|Static Dictionary — a parallel store of truth; live objects
 SS003|Rs.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|ScreenStreamCmdlets.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Sessions.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
-SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Actuators.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|AdbConnection.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|AgentSessionTable.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Build.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Build.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Build.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Build.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Build.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Cm.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Cm.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Cm.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Cm.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ConscryptAdbTransport.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ConscryptAdbTransport.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ConsoleHost.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ConsoleHost.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Git.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Hud.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Hud.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Hud.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Interactive.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Interactive.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|LiteRtRuntime.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|LiteRtRuntime.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|LiteRtRuntime.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|LiteRtRuntime.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|LiteRtRuntime.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|LiveMap.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|MainActivity.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ModelManager.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ModelManager.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ObQuery.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ObpHost.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|PackageInfoDb.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ProjectionServer.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Ps.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Ps.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Registrar.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Rs.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Rs.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ScreenStreamCmdlets.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|ScreenStreamReceiver.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SelfSource.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Sessions.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SpeechOutput.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SpeechOutput.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SqliteProbe.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SubsystemApi.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SubsystemApi.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SubsystemApi.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SubsystemRecognitionService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SubsystemService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Surfaces.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|SystemWallpaperCmdlets.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|View.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Vom.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|Vom.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|WebViewDirectPortAdapter.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|WebViewDirectPortAdapter.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|WinDg.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|WpService.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AdbConnection.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|AudioStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|MainActivity.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|MainActivity.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ReplEngine.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|RuntimeBroker.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ScreenStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ScreenStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|ScreenStreamReceiver.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|SubsystemApi.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|View.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|View.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|WinShellUi.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS010|Dp.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm.d…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|PeLoader.cs|Hardcoded POSIX path '/data/local/tmp' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm.d…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
@@ -407,8 +259,6 @@ SS015|Rs.cs|Static field '_appBaseGrounded' (mutable) — statics compute, never
 SS015|Rs.cs|Static field '_bootstrap' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Rs.cs|Static field '_sessions' (readonly ConcurrentDictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Vom.cs|Static field '_owners' (readonly ConcurrentDictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
-SS018|PackageInfoDb.cs|.GetAwaiter().GetResult() in core component code — the core is synchronous (real threads + Fence handoff, push/best-effort); async colors callers, hides the owning thread, and enables the sync-over-async deadlock. Make it synchronous, or move it to the host/seam
-SS019|Registrar.cs|Comment narrates a removal/rename ('renamed') — that keeps the dead name alive; delete it cleanly, the history lives in git + the records, not in source
 SS020|Tts.cs|Hardcoded model file 'models\kokoro-v1.0.onnx' — models and system prompts are registry contracts (\Capability\Model is discovered/projected; \Capability\Prompt is seeded from data); resolve by id from Cm or discover from disk, never a source literal
 SS020|Tts.cs|Hardcoded model file 'reference\Kokoro-82M\onnx\model.onnx' — models and system prompts are registry contracts (\Capability\Model is discovered/projected; \Capability\Prompt is seeded from data); resolve by id from Cm or discover from disk, never a source literal
 SS021|Cm.cs|'System.Environment.GetFolderPath()' reaches into the host OS for a directory — the core must stay host-agnostic; provide the path through the host seam at boot and resolve it from Cm (\System\Config\*), not the ambient environment

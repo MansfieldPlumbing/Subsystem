@@ -47,7 +47,10 @@ public static class PackageInfoDb
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            using var stream = http.GetStreamAsync(url).GetAwaiter().GetResult();
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            using var resp = http.Send(req);
+            resp.EnsureSuccessStatusCode();
+            using var stream = resp.Content.ReadAsStream();
             using var doc = JsonDocument.Parse(stream);
             lock (_lock)
             {
@@ -78,7 +81,7 @@ public static class PackageInfoDb
 
     private static SqliteConnection OpenAndEnsureSchema()
     {
-        try { SQLitePCL.Batteries_V2.Init(); } catch { }
+        try { SQLitePCL.Batteries_V2.Init(); } catch (Exception ex) { Dg.Warn("pkg", ex); }
         _dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "subsystem-pkginfo.db");
         var c = new SqliteConnection($"Data Source={_dbPath}");
         c.Open();

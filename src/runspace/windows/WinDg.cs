@@ -83,7 +83,10 @@ public static class Dg
                 File.Move(path, Path.Combine(_dir, "events.1.log"), overwrite: true);
             File.AppendAllText(path, $"{r.Time:yyyy-MM-dd HH:mm:ss} [{r.Level}] [{r.Source}] {r.Message}\n");
         }
-        catch { }
+        // Cannot route through Dg.Warn/Dg.Error here: this method is called from Write() under
+        // _gate, and Warn/Error re-enter Write() -> Append(), which would recurse forever if the
+        // file sink keeps failing. Fall back to stderr directly instead.
+        catch (Exception ex) { Console.Error.WriteLine($"[dg] log append failed: {ex.GetType().Name}: {ex.Message}"); }
     }
 
     public static void RecordCrash(Exception? ex, string source)

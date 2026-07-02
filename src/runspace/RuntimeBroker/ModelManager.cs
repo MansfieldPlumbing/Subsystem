@@ -337,7 +337,7 @@ public static class ModelCatalog
                 var dest = LocalPath(context, spec);
                 if (File.Exists(legacy) && !File.Exists(dest)) File.Move(legacy, dest);
             }
-            catch { /* best-effort */ }
+            catch (Exception ex) { Dg.Warn("model", ex); }
         }
     }
 
@@ -439,7 +439,7 @@ public static class ModelCatalog
             var p = LocalPath(context, spec);
             if (File.Exists(p)) { File.Delete(p); return true; }
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("model", ex); }
         return false;
     }
 

@@ -116,8 +116,7 @@ public static class Registrar
             // 2b. The BACKGROUND (bg) — the spatial PowerShell desktop (src/shell/bg/, outside presenters/).
             // role:"desktop" — the Shell's RESTING LAYER (mounted under every window), not a launchable
             // applet: launcher presenters (Menu/TaskView) skip desktop-role records; the Shell resolves
-            // it by role. Renamed from "surface" 2026-06-19 (Scott): "Surface" collides with Android's
-            // Android.Views.Surface / SurfaceView / SurfaceHolder.
+            // it by role.
             {
                 // The file field reflects whichever presenter actually shipped (.obp post-rename;
                 // ObpHost's extension alias covers the transition either way).
@@ -252,7 +251,7 @@ public static class Registrar
                     present.Add(tp);
                 }
             }
-            catch { }
+            catch (Exception ex) { Subsystem.Dg.Warn("registrar", ex); }
 
             // 3c-2. Gr's shader catalog — fragment-shader programs as PLAYLIST objects
             // (\Capability\Shader\<playlist>). "Shader" is the mechanism name (Cutler law); the

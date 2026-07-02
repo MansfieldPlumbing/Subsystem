@@ -47,7 +47,7 @@ public class TerminalSession : IDisposable {
         try {
             Repl?.Stop();
             Ps?.Dispose();
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("terminal", ex); }
     }
 
     public TerminalSession(long tabId, MainActivity main) {
@@ -125,7 +125,7 @@ Set-Alias ls dir -Force
                 var providerAttr = type.GetCustomAttribute<CmdletProviderAttribute>();
                 if (providerAttr != null) iss.Providers.Add(new SessionStateProviderEntry(providerAttr.ProviderName, type, ""));
             }
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("terminal", ex); }
     }
 
     public void FeedTerminal(byte[] rawAnsiBytes) {
@@ -167,11 +167,12 @@ Set-Alias ls dir -Force
                 char keyChar = key switch { ConsoleKey.Enter => '\r', ConsoleKey.Backspace => '\b', ConsoleKey.Tab => '\t', ConsoleKey.Escape => '\x1b', _ => ch };
                 rawUi.InputQueue.Add(new KeyInfo((int)key, keyChar, (ControlKeyStates)0, true));
             }
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("terminal", ex); }
     }
 
     public void ExecuteCommand(string command) {
-        Task.Run(() => {
+        var owner = Subsystem.Vom.Vom.CreateOwner($"\\Shell\\Terminal\\{TabId}");
+        Subsystem.Vom.Vom.Spawn(owner, "ExecuteCommand", _ => {
             try {
                 FeedTerminal(Encoding.UTF8.GetBytes($"{command}\r\n"));
                 Ps.Commands.Clear();
@@ -213,7 +214,7 @@ public class MainActivity : Activity
 
         // Move any pre-models/ flat model files (files/<name>) into files/models/ so a model
         // downloaded before this refactor is recognized as installed without re-downloading.
-        try { ModelCatalog.MigrateLegacyLayout(this); } catch { }
+        try { ModelCatalog.MigrateLegacyLayout(this); } catch (Exception ex) { Dg.Warn("boot", ex); }
 
         if (!Android.Provider.Settings.CanDrawOverlays(this)) {
             StartActivity(new Android.Content.Intent(Android.Provider.Settings.ActionManageOverlayPermission, Android.Net.Uri.Parse("package:" + PackageName)));
@@ -245,7 +246,7 @@ public class MainActivity : Activity
                 if (libraryName.Contains("libpsl-native")) return NativeLibrary.Load("libpsl-android.so", assembly, null);
                 return IntPtr.Zero;
             });
-        } catch (System.InvalidOperationException) { /* resolver already set earlier this process */ }
+        } catch (System.InvalidOperationException ex) { Dg.Warn("boot", ex); /* resolver already set earlier this process */ }
 
         _webView.AddJavascriptInterface(new PwshBridge(this), "AndroidBridge");
         _webView.AddJavascriptInterface(new VomBridgeJSInterface(this), "VomBridge");
@@ -274,7 +275,7 @@ public class MainActivity : Activity
         // OS-owned, so a left swipe fired BACK instead of Charms). Re-assert on every decor layout —
         // cheap, idempotent. (Android still caps exclusion at ~200dp/edge, granted bottom-up: the
         // LOWER part of each edge is ours; mid/upper edge stays the OS back gesture.)
-        try { if (Window?.DecorView is Android.Views.View _dv) _dv.LayoutChange += (s, e) => ApplyGestureExclusion(); } catch { }
+        try { if (Window?.DecorView is Android.Views.View _dv) _dv.LayoutChange += (s, e) => ApplyGestureExclusion(); } catch (Exception ex) { Dg.Warn("boot", ex); }
 
         // Bind the HTTP/WebSocket backend (8080) at launch. This MUST be unconditional —
         // it powers terminal/messenger/agent/files/settings. Previously it only started
@@ -310,7 +311,7 @@ public class MainActivity : Activity
     // (Presenters are standalone pages: they bring their own theme.css/themes.js.)
     private void LoadDoor(string presenterId)
     {
-        RunOnUiThread(() => { try { _webView?.LoadUrl(ProjectionServer.LoopbackBase + "/presenters/" + presenterId + ".obp"); } catch { } });
+        RunOnUiThread(() => { try { _webView?.LoadUrl(ProjectionServer.LoopbackBase + "/presenters/" + presenterId + ".obp"); } catch (Exception ex) { Dg.Warn("nav", ex); } });
     }
 
     // The presenter a launching intent asked us to open once the shell is up (flushed by
@@ -350,7 +351,7 @@ public class MainActivity : Activity
     // The single seam the renderer is driven through — callbacks to JS (permission results, deep links)
     // all funnel here so there is one place that talks to V8.
     public void EvaluateInWebView(string js) {
-        RunOnUiThread(() => { try { _webView?.EvaluateJavascript(js, null); } catch { } });
+        RunOnUiThread(() => { try { _webView?.EvaluateJavascript(js, null); } catch (Exception ex) { Dg.Warn("nav", ex); } });
     }
 
     // Runtime-permission request from the WebView (mic, etc.). getUserMedia in the WebView can only
@@ -410,7 +411,7 @@ public class MainActivity : Activity
             // the OS back-gesture so accidental edge swipes don't fire back — the taskbar + red-X are the
             // nav. (Android caps gesture exclusion at ~200dp/edge, so the lower part of each edge is what's
             // reliably covered; the back BUTTON / TerminalBackCallback still works for intentional back.)
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("bars", ex); }
     }
 
     // System BACK (gesture or button) → navigate BACK inside the app (the shell's window history), not out.
@@ -421,7 +422,7 @@ public class MainActivity : Activity
         RunOnUiThread(() => {
             try {
                 if (_webView != null && _webView.CanGoBack()) _webView.GoBack();
-            } catch { }
+            } catch (System.Exception ex) { Subsystem.Dg.Warn("nav", ex); }
         });
     }
 
@@ -437,7 +438,7 @@ public class MainActivity : Activity
                 new Android.Graphics.Rect(0, 0, edge, dv.Height),
                 new Android.Graphics.Rect(dv.Width - edge, 0, dv.Width, dv.Height),
             };
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("bars", ex); }
     }
 
     // Native window blur-behind for the assist popup / system mica (API 31+; S/Razr+ are 34). Best-effort:
@@ -461,7 +462,7 @@ public class MainActivity : Activity
                 var c = Window?.InsetsController; if (c == null) return;
                 if (hidden) c.Hide(WindowInsets.Type.StatusBars());
                 else c.Show(WindowInsets.Type.StatusBars());
-            } catch { }
+            } catch (System.Exception ex) { Subsystem.Dg.Warn("bars", ex); }
         });
     }
 
@@ -472,7 +473,7 @@ public class MainActivity : Activity
 
     public bool IsAccessibilityEnabled() {
         int accessibilityEnabled = 0;
-        try { accessibilityEnabled = Android.Provider.Settings.Secure.GetInt(ContentResolver, Android.Provider.Settings.Secure.AccessibilityEnabled); } catch { }
+        try { accessibilityEnabled = Android.Provider.Settings.Secure.GetInt(ContentResolver, Android.Provider.Settings.Secure.AccessibilityEnabled); } catch (System.Exception ex) { Subsystem.Dg.Warn("perm", ex); }
         if (accessibilityEnabled == 1) {
             string? settingValue = Android.Provider.Settings.Secure.GetString(ContentResolver, Android.Provider.Settings.Secure.EnabledAccessibilityServices);
             if (settingValue != null && settingValue.Contains(PackageName!)) return true;
@@ -484,7 +485,8 @@ public class MainActivity : Activity
         if (Sessions.ContainsKey(tabId)) return;
         var session = new TerminalSession(tabId, this);
         Sessions[tabId] = session;
-        Task.Run(() => session.Start(this.FilesDir!.AbsolutePath));
+        var owner = Subsystem.Vom.Vom.CreateOwner($"\\Shell\\Terminal\\{tabId}");
+        Subsystem.Vom.Vom.Spawn(owner, "Terminal.Start", _ => session.Start(this.FilesDir!.AbsolutePath));
     }
 
     public void CloseSession(long tabId) {
@@ -497,7 +499,7 @@ public class MainActivity : Activity
         void SeedAsset(string assetName, string destPath) {
             if (!System.IO.File.Exists(destPath)) {
                 // ObpHost: the shell tree is compiled into the assembly now (embedded -> asset fallback).
-                try { using var s = ObpHost.OpenRead(assetName); if (s != null) { using var d = System.IO.File.Create(destPath); s.CopyTo(d); } } catch { }
+                try { using var s = ObpHost.OpenRead(assetName); if (s != null) { using var d = System.IO.File.Create(destPath); s.CopyTo(d); } } catch (System.Exception ex) { Subsystem.Dg.Warn("boot", ex); }
             }
         }
         SeedAsset("shell/home/profile.ps1",  System.IO.Path.Combine(this.FilesDir!.AbsolutePath, "profile.ps1"));
@@ -572,7 +574,7 @@ public class MainActivity : Activity
                     }
                 }
             }
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("bridge", ex); }
     }
 
     public void BroadcastToProjection(long tabId, byte[] rawAnsiBytes) { _projectionServer?.Broadcast(tabId, rawAnsiBytes); }
@@ -588,7 +590,7 @@ public class MainActivity : Activity
     // Callable from JS (PwshBridge.reloadShell) and from the runspace (Invoke-ShellReload), so the
     // agent can switch doors herself: Register-Capability the new file, then reload.
     public void ReloadShell() {
-        RunOnUiThread(() => { try { _webView?.Reload(); } catch { } });
+        RunOnUiThread(() => { try { _webView?.Reload(); } catch (System.Exception ex) { Subsystem.Dg.Warn("nav", ex); } });
     }
 
     // The shared TTS engine (built-in, offline — airplane-safe). Lazily initialized on first Speak so
@@ -647,7 +649,7 @@ public class PwshBridge : Java.Lang.Object {
                 if (consoleKey == ConsoleKey.Enter) ch = '\r'; else if (consoleKey == ConsoleKey.Backspace) ch = '\b'; else if (consoleKey == ConsoleKey.Escape) ch = '\x1b'; else if (consoleKey == ConsoleKey.Tab) ch = '\t';
                 ((AndroidSubsystemRawUserInterface)si.Host.UI.RawUI).InputQueue.Add(new KeyInfo((int)consoleKey, ch, (ControlKeyStates)0, true));
             }
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "sendInput: " + ex.Message); }
     }
     [Export("notifyReady")]     [JavascriptInterface] public void NotifyReady()     { _activity.NotifyReactReady(); }
     [Export("reloadShell")]     [JavascriptInterface] public void ReloadShell()     { _activity.ReloadShell(); }
@@ -796,7 +798,7 @@ public class SubsystemWebViewClient : WebViewClient {
     // the chat head). The flush is a no-op when nothing is pending.
     public override void OnPageFinished(WebView? view, string? url) {
         base.OnPageFinished(view, url);
-        try { MainActivity.Instance?.FlushPendingOpen(); } catch { }
+        try { MainActivity.Instance?.FlushPendingOpen(); } catch (System.Exception ex) { Subsystem.Dg.Warn("v8", ex); }
     }
 
     public override WebResourceResponse? ShouldInterceptRequest(WebView? view, IWebResourceRequest? request) {
@@ -873,7 +875,7 @@ public class ImageAvailableListener : Java.Lang.Object, Android.Media.ImageReade
             using var cropped = Android.Graphics.Bitmap.CreateBitmap(bitmap, 0, 0, image.Width, image.Height);
             cropped.Compress(Android.Graphics.Bitmap.CompressFormat.Jpeg!, 30, ms);
             _server?.BroadcastRdpFrame(ms.ToArray());
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("rdp", ex); }
     }
 }
 

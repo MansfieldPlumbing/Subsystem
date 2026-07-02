@@ -109,9 +109,13 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
             // Log configuration metadata strictly to stderr so stdout remains clean
             Console.Error.WriteLine($"CONFIG:SessionId={sessionId};Width={width};Height={height};Codec={Codec}");
 
-            // Run P2P receiver and frame pumping loops
-            Task.Run(() => ReceiveLoopAsync(stdinStream, cts.Token), cts.Token);
-            Task.Run(() => PumpFramesPipe(encoder, imageReader, stdoutStream, width, height, cts.Token), cts.Token);
+            // Run P2P receiver and frame pumping loops — owned by the kernel (SS009): spawned as
+            // tracked, quota'd child Sub-VOMs instead of ambient Task.Run fire-and-forget work.
+            var streamOwner = Subsystem.Vom.Vom.CreateOwner("\\Device\\Android\\ScreenStream");
+            Subsystem.Vom.Vom.Spawn(streamOwner, $"Receive-{sessionId}",
+                _ => ReceiveLoopAsync(stdinStream, cts.Token).GetAwaiter().GetResult());
+            Subsystem.Vom.Vom.Spawn(streamOwner, $"Pump-{sessionId}",
+                _ => PumpFramesPipe(encoder, imageReader, stdoutStream, width, height, cts.Token).GetAwaiter().GetResult());
         }
         catch (Exception ex)
         {
@@ -225,7 +229,7 @@ public sealed class StartAndroidScreenStreamCmdlet : WrapperCmdlet
                 await Task.Delay(1, ct);
             }
         }
-        catch (OperationCanceledException) {}
+        catch (OperationCanceledException ex) { Dg.Warn("screen-stream", ex); }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"PumpFramesPipe error: {ex.Message}");

@@ -20,7 +20,7 @@ internal static class Interactive
             Console.Write("\nPress any key to close . . . ");
             Console.ReadKey(intercept: true);
         }
-        catch { /* no console / headless → nothing to keep open */ }
+        catch (Exception ex) { Dg.Warn("interactive", ex); /* no console / headless → nothing to keep open */ }
     }
 
     // A double-click from Explorer OWNS its console (only attached process) and is interactive (not piped).
@@ -41,7 +41,7 @@ internal static class Interactive
     public static void HideOwnConsole()
     {
         try { var h = GetConsoleWindow(); if (h != IntPtr.Zero) ShowWindow(h, SW_HIDE); }
-        catch { /* headless → nothing to hide */ }
+        catch (Exception ex) { Dg.Warn("interactive", ex); /* headless → nothing to hide */ }
     }
 
     private const int SW_HIDE = 0;

@@ -30,7 +30,7 @@ public static unsafe partial class Vom
         var t = new Thread(() =>
         {
             try { work(child); }
-            catch (OperationCanceledException) { }   // cooperative cancel — expected on Terminate
+            catch (OperationCanceledException ex) { Dg.Warn("vom", ex); }   // cooperative cancel — expected on Terminate
             catch (Exception ex) { Dg.Log("vom", $"SPAWN {path} faulted: {ex.GetType().Name}: {ex.Message}"); }
             finally { Terminate(child); }             // self-cleanup once work returns
         }) { IsBackground = background, Name = path };
@@ -73,7 +73,7 @@ public static unsafe partial class Vom
             {
                 Alloc(g, 1024, type: "GrandRegion");
                 ready.Set();                                   // whole tree exists + allocated
-                try { Thread.Sleep(Timeout.Infinite); } catch { }   // wedged leaf — cannot be aborted
+                try { Thread.Sleep(Timeout.Infinite); } catch (Exception ex) { Dg.Warn("vom", ex); }   // wedged leaf — cannot be aborted
             });
             try { c.Token.WaitHandle.WaitOne(); }              // park; cascade cancel wakes us
             finally { childWoke.Set(); }

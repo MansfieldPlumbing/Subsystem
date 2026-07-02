@@ -66,7 +66,7 @@ public static class Rb
                 return true;
             }
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("engine", ex); }
         return false;
     }
 
@@ -116,13 +116,13 @@ public static class Rb
             var fault = await Task.Run(() => broker.BringUp(), ct);
             if (fault != null)
             {
-                try { broker.Dispose(); } catch { }
+                try { broker.Dispose(); } catch (Exception ex) { Dg.Warn("engine", ex); }
                 ModelCatalog.Demote(ctx, spec.Id, fault);
                 throw new Subsystem.RuntimeBroker.RbFaultException(fault);
             }
 
             Subsystem.Vom.Vom.Register(owner, "Engine", broker,
-                onReclaim: () => { try { broker.Dispose(); } catch { } },
+                onReclaim: () => { try { broker.Dispose(); } catch (Exception ex) { Dg.Warn("engine", ex); } },
                 subdir: "Engine", name: spec.Id);
             Dg.Log("engine", $"PUBLISH {spec.Id} on {broker.BackendName} -> {path}");
             return broker;

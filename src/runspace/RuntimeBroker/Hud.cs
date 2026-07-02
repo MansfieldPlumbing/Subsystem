@@ -29,7 +29,7 @@ namespace Subsystem.RuntimeBroker
                     if (b.TryGetValue("IsCharging", out var c) && c is bool cb && cb) sb.Append(" charging");
                 }
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             try
             {
                 var n = Subsystem.Device.Network.GetNetworkInfo();
@@ -38,7 +38,7 @@ namespace Subsystem.RuntimeBroker
                 bool conn = n.TryGetValue("IsConnected", out var ic) && ic is bool icb && icb;
                 sb.Append(" | net ").Append(wifi ? "wifi" : cell ? "cellular" : conn ? "connected" : "offline");
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             try
             {
                 var m = Subsystem.Device.Memory.GetMemoryInfo();
@@ -47,7 +47,7 @@ namespace Subsystem.RuntimeBroker
                       .Append(Math.Round(Convert.ToInt64(av) / 1073741824.0, 1)).Append('/')
                       .Append(Math.Round(Convert.ToInt64(tt) / 1073741824.0, 1)).Append("GB free");
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             if (!string.IsNullOrEmpty(model)) sb.Append(" | model ").Append(model).Append('/').Append(backend);
             sb.Append(']');
             return sb.ToString();

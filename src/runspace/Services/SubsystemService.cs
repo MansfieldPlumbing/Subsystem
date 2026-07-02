@@ -184,7 +184,7 @@ public class SubsystemService : Service
                 try {
                     _floatingChat = new FloatingChatManager(this);
                     if (_isOverlayActive) _floatingChat.Show();
-                } catch { }
+                } catch (Exception ex) { Dg.Warn("svc", ex); }
             }, 1000);
         }
 

@@ -23,7 +23,7 @@ public static class Clipboard
                         text = item?.Text ?? "";
                     }
                 }
-            } catch { }
+            } catch (Exception ex) { Subsystem.Dg.Warn("clipboard", ex); }
         });
         System.Threading.Thread.Sleep(50);
         return text;
@@ -40,7 +40,7 @@ public static class Clipboard
                     using var clip = Android.Content.ClipData.NewPlainText("Subsystem", text);
                     cm.PrimaryClip = clip;
                 }
-            } catch { }
+            } catch (Exception ex) { Subsystem.Dg.Warn("clipboard", ex); }
         });
     }
 }
@@ -68,8 +68,8 @@ public static class Display
                 using var display = wm?.DefaultDisplay;
                 var rr = display?.RefreshRate;
                 if (rr.HasValue) dict["RefreshRate"] = System.Math.Round(rr.Value, 2);
-            } catch { }
-        } catch { }
+            } catch (Exception ex) { Subsystem.Dg.Warn("display", ex); }
+        } catch (Exception ex) { Subsystem.Dg.Warn("display", ex); }
         return dict;
     }
 
@@ -136,7 +136,7 @@ public static class Notifications
                 .SetContentType(Android.Media.AudioContentType.Sonification)!
                 .Build();
             ch.SetSound(sound, attrs);
-        } catch { /* no chirp resource — the channel still works with the default sound */ }
+        } catch (Exception ex) { Subsystem.Dg.Warn("notify", ex); /* no chirp resource — the channel still works with the default sound */ }
         nm.CreateNotificationChannel(ch);
         // Retire the superseded channel so it doesn't linger in the system notification settings.
         try { nm.DeleteNotificationChannel("broker_v1"); }
@@ -158,7 +158,7 @@ public static class Notifications
                     .SetAutoCancel(true);
                 nm.Notify(System.Threading.Interlocked.Increment(ref _notificationId), builder.Build());
             }
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("notify", ex); }
     }
 }
 
@@ -193,7 +193,7 @@ public static class Apps
                     app.Dispose(); // Dispose the individual AppInfo wrappers
                 }
             }
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("apps", ex); }
         return list;
     }
 }
@@ -213,7 +213,7 @@ public static class Shell
                 var length = isLong ? Android.Widget.ToastLength.Long : Android.Widget.ToastLength.Short;
                 using var toast = Android.Widget.Toast.MakeText(host, message, length);
                 toast?.Show();
-            } catch { }
+            } catch (Exception ex) { Subsystem.Dg.Warn("shell", ex); }
         });
     }
 
@@ -223,6 +223,6 @@ public static class Shell
             var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(uriString));
             intent.AddFlags(Android.Content.ActivityFlags.NewTask);
             ctx.StartActivity(intent);
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("shell", ex); }
     }
 }

@@ -89,7 +89,7 @@ namespace Subsystem.RuntimeBroker
                     if (s == null) continue;
                     list.Add((s.Updated, new { id = s.Id, title = s.Title, updated = s.Updated, turns = s.Turns.Count }));
                 }
-                catch { }
+                catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); }
             }
             return list.OrderByDescending(x => x.updated, StringComparer.Ordinal).Select(x => x.row).ToArray();
         }

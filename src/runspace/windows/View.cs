@@ -100,14 +100,14 @@ internal sealed class ViewWindow : IDisposable
         ShowWindow(_hwnd, 5 /*SW_SHOW*/); UpdateWindow(_hwnd);
 
         // Frame source runs off the UI thread; it InvalidateRect's the window per frame.
+        var owner = Subsystem.Vom.Vom.CreateOwner("\\View");
         if (_screencapSerial != null)
         {
-            var t = new Thread(() => ScreencapLoop(_cts.Token)) { IsBackground = true, Name = "screencap" };
-            t.Start();
+            Subsystem.Vom.Vom.Spawn(owner, "screencap", _ => ScreencapLoop(_cts.Token));
         }
         else
         {
-            _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+            Subsystem.Vom.Vom.Spawn(owner, "ReceiveLoop", _ => ReceiveLoopAsync(_cts.Token).GetAwaiter().GetResult());
         }
 
         // The classic Win32 message pump — this IS the window's lifetime.
@@ -200,7 +200,7 @@ internal sealed class ViewWindow : IDisposable
             if (_frames == 1) SetTitle($"ss view — {_host}  {w}x{h}");
             InvalidateRect(_hwnd, IntPtr.Zero, false);
         }
-        catch { /* a corrupt/partial frame just gets skipped */ }
+        catch (Exception ex) { Dg.Warn("view", ex); /* a corrupt/partial frame just gets skipped */ }
     }
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)

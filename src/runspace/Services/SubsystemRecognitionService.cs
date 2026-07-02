@@ -22,7 +22,7 @@ public class SubsystemRecognitionService : RecognitionService
 
     protected override void OnStartListening(Intent? recognizerIntent, RecognitionService.Callback? listener)
     {
-        try { listener?.Error(SpeechRecognizerError.Client); } catch { }
+        try { listener?.Error(SpeechRecognizerError.Client); } catch (Exception ex) { Dg.Warn("speech", ex); }
     }
 
     protected override void OnStopListening(RecognitionService.Callback? listener) { }
