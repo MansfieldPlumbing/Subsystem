@@ -1,4 +1,5 @@
 using Android.App;
+using Android.Hardware.Usb;
 using Android.OS;
 using Android.Views;
 using Android.Webkit;
@@ -190,6 +191,13 @@ Set-Alias ls dir -Force
 // Name is pinned (not crc-mangled) so AndroidManifest activity-aliases — the FEDERATION's per-door
 // launcher icons (Editor/Terminal/Settings/…) — can target this activity by a stable component name.
 [Activity(Name = "dev.mansfieldplumbing.subsystem.MainActivity", Label = "@string/app_name", Icon = "@mipmap/appicon", RoundIcon = "@mipmap/appicon_round", MainLauncher = true, Theme = "@android:style/Theme.DeviceDefault.NoActionBar", WindowSoftInputMode = Android.Views.SoftInput.AdjustResize, ConfigurationChanges = Android.Content.PM.ConfigChanges.Orientation | Android.Content.PM.ConfigChanges.ScreenSize | Android.Content.PM.ConfigChanges.KeyboardHidden | Android.Content.PM.ConfigChanges.ScreenLayout)]
+// ADB-free USB (CRQ185 rung 2 / DpAoa.cs): the OS relaunches THIS activity with the matching intent
+// when a host puts the phone into accessory mode (device role) or when a peer already in accessory
+// mode is plugged in via OTG (host role) — HandleUsbIntent (OnCreate/OnNewIntent) routes both to DpAoa.
+[IntentFilter(new[] { UsbManager.ActionUsbAccessoryAttached })]
+[MetaData(UsbManager.ActionUsbAccessoryAttached, Resource = "@xml/accessory_filter")]
+[IntentFilter(new[] { UsbManager.ActionUsbDeviceAttached })]
+[MetaData(UsbManager.ActionUsbDeviceAttached, Resource = "@xml/device_filter")]
 // SECURITY (history): the .ssr "open-to-import" ACTION_VIEW intent filters — and later the whole .ssr
 // file-format module — were REMOVED. Open-to-import let ANY app or browsable link inject capabilities/verbs
 // into Cm with no confirmation, reachable by the elevated uid=2000 adb channel. Verbs are Cm records,
@@ -202,10 +210,15 @@ public class MainActivity : Activity
     public ConcurrentDictionary<long, TerminalSession> Sessions { get; } = new();
     public static MainActivity? Instance { get; private set; }
 
+    // DpAoa — at most one active role at a time (device XOR host); re-attaching tears down the prior one.
+    private DpAoaDevice? _aoaDevice;
+    private DpAoaHost? _aoaHost;
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
         Instance = this;
+        HandleUsbIntent(Intent);   // cold start: the OS relaunched us with an already-attached accessory/device
 
         // SubsystemDom (Diagnostic Object Manager) — arm crash capture + persistent diag log
         // to /sdcard/SubsystemDom/ (survives reinstall) as early as possible.
@@ -331,11 +344,42 @@ public class MainActivity : Activity
     protected override void OnNewIntent(Android.Content.Intent? intent)
     {
         base.OnNewIntent(intent);
+        HandleUsbIntent(intent);   // hot attach: accessory/device plugged in while we're alive
         // Door alias tapped while we're alive (v1 = one task): become that door.
         var door = DoorFromIntent(intent);
         if (door != null) { LoadDoor(door); return; }
         var open = intent?.GetStringExtra("open");
         if (!string.IsNullOrEmpty(open)) OpenPresenter(open!);
+    }
+
+    // Route a USB accessory/device-attached intent to DpAoa. Permission is granted implicitly for the
+    // app named in the matching accessory_filter/device_filter resource (the OS asks the user once,
+    // "Open Subsystem when this USB accessory is connected?", before this activity is even launched) —
+    // HasPermission inside DpAoa.Open/DpAoaHost.Open still re-checks fail-closed for the hot-attach path
+    // where a filter match did NOT imply permission (e.g. a bare device attach with no matching filter).
+    private void HandleUsbIntent(Android.Content.Intent? intent)
+    {
+        try
+        {
+            if (intent == null) return;
+            if (intent.Action == UsbManager.ActionUsbAccessoryAttached)
+            {
+                var accessory = (UsbAccessory?)intent.GetParcelableExtra(UsbManager.ExtraAccessory);
+                if (accessory == null) return;
+                _aoaDevice?.Stop();
+                _aoaDevice = DpAoaDevice.Open(this, accessory, out var error);
+                if (_aoaDevice == null) Dg.Warn("dp-aoa", $"device open failed: {error}");
+            }
+            else if (intent.Action == UsbManager.ActionUsbDeviceAttached)
+            {
+                var device = (UsbDevice?)intent.GetParcelableExtra(UsbManager.ExtraDevice);
+                if (device == null) return;
+                _aoaHost?.Stop();
+                _aoaHost = DpAoaHost.Open(this, device, out var error);
+                if (_aoaHost == null) Dg.Log("dp-aoa", $"host open: {error}");   // "waiting for re-enumeration" is expected mid-handshake, not a failure
+            }
+        }
+        catch (System.Exception ex) { Dg.Warn("dp-aoa", ex); }
     }
 
     public void FlushPendingOpen()

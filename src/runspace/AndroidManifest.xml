@@ -20,6 +20,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- ADB-free USB (CRQ185 rung 2, DpAoa.cs): both AOA roles compile in on every device; the
+         android.hardware.usb.host feature check at runtime (DpAoaHost) tells whether a device can
+         drive another phone as host — required=false so a phone with no OTG support still installs. -->
+    <uses-feature android:name="android.hardware.usb.accessory" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- BLE discoverability + opt-in MCP relay (DpBleAdvert.cs) — gated \Capability\Mcp\RemoteAccept,
+         default-deny; declaring BLUETOOTH_ADVERTISE/CONNECT here only makes the permission REQUESTABLE. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <!-- DEV ONLY: debuggable enables `adb push` + `run-as` of model weights straight into
          private files/models/ (see tools/Push-SubsystemModel.ps1). Do not ship a debuggable build. -->
     <application android:usesCleartextTraffic="true"

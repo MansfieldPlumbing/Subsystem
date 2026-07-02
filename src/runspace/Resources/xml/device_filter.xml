@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Matches a peer already in AOA accessory mode (VID 0x18D1 "Google"/PID 0x2D00 "Android Accessory")
+     so the OS auto-launches Subsystem in HOST role (DpAoaHost) when another ss phone — or any AOA
+     accessory — is plugged in via USB OTG. CRQ173: the federated compute mesh, no PC required. -->
+<resources>
+    <usb-device vendor-id="6353" product-id="11520" />
+</resources>

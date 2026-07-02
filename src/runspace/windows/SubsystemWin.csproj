@@ -20,7 +20,12 @@
          (the WebView DirectPort adapter — a producer/consumer peer, no loopback). WinForms is on WITHOUT
          its ApplicationConfiguration source generator (the ouroboros runs none): WinShellUi sets visual
          styles by hand and builds the Form in code. -->
-    <TargetFramework>net11.0-windows</TargetFramework>
+    <!-- Versioned suffix (was bare net11.0-windows) unlocks the Windows.* WinRT projection via CsWinRT —
+         needed for DpBleScan.cs (Windows.Devices.Bluetooth.Advertisement — no public Win32 BLE scan API
+         exists). 19041 (2004) is the standard modern-BLE baseline; every existing P/Invoke/WinForms surface
+         is unaffected. UNVERIFIED: authored with no Android/net11 SDK available to build-check (see the
+         filing CRQ) — build this before relying on it. -->
+    <TargetFramework>net11.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -56,6 +61,9 @@
     <!-- VomInterop: the native Float32-region surface (256-aligned, row-major) — pure Vom + Marshal, no
          Android. The producer side of the WebView DirectPort adapter publishes/reads regions through it. -->
     <Compile Include="..\Device\VomInterop.cs" LinkBase="Device" />
+    <!-- McpRelay: pure fragmentation/reassembly for MCP-over-BLE-GATT (invariant 9's lowest transport
+         rung), shared verbatim with the Android head's DpBleAdvert.cs GATT server. -->
+    <Compile Include="..\Device\McpRelay.cs" LinkBase="Device" />
     <!-- The PORTABLE ADB protocol core, shared with the Android head: the IAdbTransport seam + the AdbConnection
          wire protocol (CNXN/STLS/AUTH/OPEN/WRTE) + the AndroidPubKey encoder — pure System.*. The Android-only
          Conscrypt binding is NOT included; the Windows binding is SslStreamAdbTransport.cs in this head. Wires

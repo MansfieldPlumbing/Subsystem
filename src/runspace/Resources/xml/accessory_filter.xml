@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Matches the AOA identity ss sends during the SEND_STRING handshake (DpWinUsb.FindAndSwitchToAoa /
+     DpAoa.IdentityStrings) so the OS offers to launch Subsystem when a host puts this phone into
+     accessory mode, instead of the generic "no app can handle this" dialog. -->
+<resources>
+    <usb-accessory manufacturer="Subsystem" model="ss" version="1.0" />
+</resources>

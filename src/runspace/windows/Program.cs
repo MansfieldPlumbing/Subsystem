@@ -50,6 +50,7 @@ public static class Program
             "view" or "-view" or "--view"                                    => View.Run(args[1..]),
             "ui" or "-ui" or "--ui"                                          => WinShellUi.Run(args[1..]),
             "mcp" or "-mcp" or "--mcp"                                       => Mcp.Run(args[1..]),
+            "ble" or "-ble" or "--ble"                                       => DpBleScan.Run(args[1..]),
             "git"                                                            => Git.Run(args[1..]),
             "status" or "st"                                                 => Status.Run(args[1..]),
             "refs"                                                           => Refs.Run(args[1..]),
