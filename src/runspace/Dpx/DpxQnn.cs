@@ -70,8 +70,13 @@ namespace Subsystem.Dpx
         }
 
         // Build the proof MatMul (y = x @ W), finalize on the chosen backend, emit the context binary,
-        // execute, and verify against an in-method reference. Returns a one-line receipt.
-        public string Project(string backendLibrary, string outputBinaryPath, uint featureK = 256, uint featureN = 256)
+        // execute, and verify against an in-method reference. weights/input default to a deterministic
+        // synthetic fill (the original CRQ158 proof-of-plumbing); pass a REAL dequantized tile (e.g. a
+        // gemma4-e2b MatMulNBits weight, decoded via the sequential-nibble layout in
+        // test.dpx.q4-packing-order.ps1) to carry actual model data through the HTP instead. Returns a
+        // one-line receipt.
+        public string Project(string backendLibrary, string outputBinaryPath, uint featureK = 256, uint featureN = 256,
+                               float[] weights = null, float[] input = null)
         {
             IntPtr h = NativeLibrary.Load(backendLibrary);
             var getProviders = (delegate* unmanaged<IntPtr*, uint*, ulong>)NativeLibrary.GetExport(h, "QnnInterface_getProviders");
@@ -85,11 +90,21 @@ namespace Subsystem.Dpx
             if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, IntPtr.Zero, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate 0x{rc:x}";
             if ((rc = ((delegate* unmanaged<IntPtr, byte*, IntPtr, IntPtr*, ulong>)fn[FnGraphCreate])(context, (byte*)AllocCString("matmul"), IntPtr.Zero, &graph)) != 0) return $"DpxQnn: graphCreate 0x{rc:x}";
 
-            var weights = new float[featureK * featureN]; var input = new float[featureK];
+            if (weights == null)
+            {
+                weights = new float[featureK * featureN];
+                ulong state = 88172645463325252UL;
+                for (int i = 0; i < weights.Length; i++) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; weights[i] = (float)(((double)(state % 2000000) / 1000000.0 - 1.0) * 0.05); }
+            }
+            if (input == null)
+            {
+                input = new float[featureK];
+                ulong state = 42;
+                for (int i = 0; i < input.Length; i++) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; input[i] = (float)((double)(state % 2000000) / 1000000.0 - 1.0); }
+            }
+            if (weights.Length != featureK * featureN) return $"DpxQnn: weights.Length={weights.Length} != featureK*featureN={featureK * featureN}";
+            if (input.Length != featureK) return $"DpxQnn: input.Length={input.Length} != featureK={featureK}";
             var reference = new float[featureN]; var output = new float[featureN];
-            ulong state = 88172645463325252UL;
-            for (int i = 0; i < weights.Length; i++) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; weights[i] = (float)(((double)(state % 2000000) / 1000000.0 - 1.0) * 0.05); }
-            for (int i = 0; i < input.Length; i++) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; input[i] = (float)((double)(state % 2000000) / 1000000.0 - 1.0); }
             for (int n = 0; n < featureN; n++) { double a = 0; for (int k = 0; k < featureK; k++) a += (double)input[k] * weights[k * featureN + n]; reference[n] = (float)a; }
 
             uint* dimsX = (uint*)Marshal.AllocHGlobal(8); dimsX[0] = 1; dimsX[1] = featureK;
