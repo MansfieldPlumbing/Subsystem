@@ -20,12 +20,7 @@
          (the WebView DirectPort adapter — a producer/consumer peer, no loopback). WinForms is on WITHOUT
          its ApplicationConfiguration source generator (the ouroboros runs none): WinShellUi sets visual
          styles by hand and builds the Form in code. -->
-    <!-- Versioned suffix (was bare net11.0-windows) unlocks the Windows.* WinRT projection via CsWinRT —
-         needed for DpBleScan.cs (Windows.Devices.Bluetooth.Advertisement — no public Win32 BLE scan API
-         exists). 19041 (2004) is the standard modern-BLE baseline; every existing P/Invoke/WinForms surface
-         is unaffected. UNVERIFIED: authored with no Android/net11 SDK available to build-check (see the
-         filing CRQ) — build this before relying on it. -->
-    <TargetFramework>net11.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net11.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
