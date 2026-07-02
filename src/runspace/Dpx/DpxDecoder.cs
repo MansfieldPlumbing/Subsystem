@@ -23,7 +23,7 @@ namespace Subsystem.Dpx
         private readonly string? _embedModelPath;
         private readonly string? _spmPath;
         private readonly string _unitId;
-        private readonly int _maxTokens;
+        private int _maxTokens;
         private readonly bool _split;
         private readonly bool _consolidated;
 
@@ -44,6 +44,11 @@ namespace Subsystem.Dpx
         // Ring receipt (CRQ190): present-KV outputs that came back ring-marked (appended in place inside
         // the persistent region) instead of needing the legacy per-token alloc/copy/close carry-forward.
         public long KvRingSteps { get; private set; }
+
+        // Per-turn decode cap. The constructor value seeds it; a resident host (e.g. ss mcp `query`)
+        // sets it between turns. Turns are serialized by _turnGate and the hosts are single-threaded,
+        // so a set never races an in-flight decode loop.
+        public int MaxTokens { get => _maxTokens; set { if (value > 0) _maxTokens = value; } }
 
         // Constructor 1: Injected for testing
         public DpxDecoder(ModelProto model, SentencePieceTokenizer tokenizer, string unitId, int maxTokens = 4096)

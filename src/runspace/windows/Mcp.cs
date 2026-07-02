@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
@@ -7,6 +8,8 @@ using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Subsystem.Dpx;
+using Subsystem.RuntimeBroker;
 
 namespace Subsystem.Windows;
 
@@ -81,6 +84,8 @@ internal static class Mcp
             // The reclaim must never turn a clean disconnect into a crash exit the client paints as an error.
             try { global::Subsystem.Vom.Vom.Terminate(pwshMount); }
             catch (Exception ex) { Console.Error.WriteLine("[ss mcp] shutdown reclaim: " + ex.Message); }
+            try { _queryDecoder?.Dispose(); }
+            catch (Exception ex) { Console.Error.WriteLine("[ss mcp] query decoder reclaim: " + ex.Message); }
         }
         return 0;
     }
@@ -174,6 +179,21 @@ internal static class Mcp
         },
         new
         {
+            name = "query",
+            description = "Interrogate the resident gemma4-e2b q4 decoder in-proc. One call = one COMPLETED reply: the turn is drained to completion server-side, no token stream crosses the wire. The FIRST call loads the split q4 model dbs once (~3.4GB, resident for the process lifetime); later calls reuse the loaded model. Returns the completed text plus a receipt line (token count, measured decode tok/s).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    prompt = new { type = "string", description = "The prompt for one completed turn." },
+                    max_tokens = new { type = "integer", description = "Max new tokens to decode this turn (default 64)." },
+                },
+                required = new[] { "prompt" },
+            },
+        },
+        new
+        {
             name = "ss_onboard",
             description = "The one-shot alignment package — telos, invariants, settled decisions, conventions, live state, the FULL file manifest (every file in the tree — a file not listed does not exist), and the contract. Call this FIRST on a cold session to understand the system from the binary.",
             inputSchema = new
@@ -206,8 +226,106 @@ internal static class Mcp
             "ss_git"           => Invoke($"Get-GitGraphContext{(GetArg("gitRoot") is string gr && gr.Length > 0 ? $" -GitRoot '{gr.Replace("'", "''")}'" : "")} | ConvertTo-Json -Depth 6", rs),
             "ss_map"           => CaptureConsole(() => LiveMap.Run(GetArg("path") ?? "", ReadContract())),
             "ss_onboard"       => CaptureConsole(() => Onboard.Run(GetArg("path") is string p && p.Length > 0 ? new[] { "--path", p } : Array.Empty<string>())),
+            "query"            => Query(a),
             _                  => "unknown tool: " + name,
         };
+    }
+
+    // query (CRQ183) — the e2b decode face over MCP. ONE resident DpxDecoder, constructed lazily on the
+    // first call (the multi-GB q4 load happens once, reused for the process lifetime). Each call is one
+    // COMPLETED turn (CRQ175): the existing BlockingTurnStream is drained to completion right here,
+    // synchronously — a token firehose never crosses the JSON-RPC wire. Decoder chatter is safe: protocol
+    // mode parks Console.Out on stderr before any tool runs.
+    private static DpxDecoder? _queryDecoder;
+
+    private static string Query(JsonElement a)
+    {
+        string? prompt = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("prompt", out var pv) && pv.ValueKind == JsonValueKind.String ? pv.GetString() : null;
+        if (string.IsNullOrWhiteSpace(prompt)) return "ERROR: query requires a non-empty 'prompt' string.";
+        int maxTokens = 64;
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("max_tokens", out var mt))
+        {
+            if (mt.ValueKind == JsonValueKind.Number && mt.TryGetInt32(out var n) && n > 0) maxTokens = n;
+            else if (mt.ValueKind == JsonValueKind.String && int.TryParse(mt.GetString(), out var s) && s > 0) maxTokens = s;   // `ss mcp call` shorthand passes strings
+        }
+
+        if (_queryDecoder == null)
+        {
+            var err = CreateQueryDecoder(maxTokens, out var d);
+            if (err != null) return err;   // ERROR: -> isError result; nothing cached, the next call retries
+            _queryDecoder = d;
+        }
+        var decoder = _queryDecoder!;
+        decoder.MaxTokens = maxTokens;
+
+        var sb = new StringBuilder();
+        string? faultText = null;
+        int tokens = 0;
+        long tFirst = 0;
+        var sw = Stopwatch.StartNew();
+        // Existing IAsyncEnumerable seam drained synchronously (BlockingTurnStream completes on the calling
+        // thread) — the DpxGenerate.cs consumption shape, never a new async surface.
+        var e = decoder.StreamTurnAsync(prompt!, null).GetAsyncEnumerator();
+        try
+        {
+            while (e.MoveNextAsync().GetAwaiter().GetResult())
+            {
+                var delta = e.Current;
+                if (delta.Kind == AgentDeltaKind.Token && !string.IsNullOrEmpty(delta.Text))
+                {
+                    if (tFirst == 0) tFirst = sw.ElapsedTicks;
+                    sb.Append(delta.Text);
+                    tokens++;
+                }
+                else if (delta.Kind == AgentDeltaKind.Error) faultText = delta.Text;
+            }
+        }
+        finally { e.DisposeAsync().GetAwaiter().GetResult(); }
+        sw.Stop();
+
+        if (faultText != null && tokens == 0) return "ERROR: decode faulted: " + faultText;
+
+        // First-token arrival splits prefill from decode — the same telemetry cut DpxGenerate prints.
+        double freq = Stopwatch.Frequency;
+        double prefillMs = (tFirst > 0 ? tFirst : sw.ElapsedTicks) * 1000.0 / freq;
+        double decodeMs = tFirst > 0 ? (sw.ElapsedTicks - tFirst) * 1000.0 / freq : 0;
+        double tokSec = decodeMs > 0 ? tokens / (decodeMs / 1000.0) : 0;
+        return sb.ToString()
+            + $"\n\n[query] tokens={tokens} prompt_tokens={decoder.PromptTokensCount} prefill_ms={prefillMs:F0} decode_ms={decodeMs:F0} decode_tok_s={tokSec:F1} (measured this call; provisional on a shared box)"
+            + (faultText != null ? $"\n[query] turn ended on a fault after {tokens} tokens: {faultText}" : "");
+    }
+
+    // Model discovery mirrors DpxGenerate.cs: SS_MODELS env override, else <exe drive>\modeldb — models are
+    // found, not baked in. Absent dbs return an ERROR string (a clean isError tool result, never a crash).
+    private static string? CreateQueryDecoder(int maxTokens, out DpxDecoder? decoder)
+    {
+        decoder = null;
+        string modelsDir = Environment.GetEnvironmentVariable("SS_MODELS") ?? "";
+        if (string.IsNullOrEmpty(modelsDir))
+        {
+            var driveRoot = Path.GetPathRoot(Environment.ProcessPath ?? AppContext.BaseDirectory) ?? "";
+            modelsDir = Path.Combine(driveRoot, "modeldb");
+        }
+        if (!Directory.Exists(modelsDir))
+            return $"ERROR: models dir not found: {modelsDir} — set SS_MODELS to the directory holding the gemma4 q4 .db pair + .spm tokenizer.";
+        string? embedDb = Directory.EnumerateFiles(modelsDir, "*-onnx-embed-q4.db").FirstOrDefault();
+        string? decoderDb = Directory.EnumerateFiles(modelsDir, "*-onnx-decoder-q4.db").FirstOrDefault();
+        string? spm = Directory.EnumerateFiles(modelsDir, "*.spm").FirstOrDefault();
+        if (embedDb == null || decoderDb == null || spm == null)
+            return $"ERROR: could not discover the model set under {modelsDir} — embed={embedDb ?? "MISSING (*-onnx-embed-q4.db)"} decoder={decoderDb ?? "MISSING (*-onnx-decoder-q4.db)"} spm={spm ?? "MISSING (*.spm)"}";
+
+        Console.Error.WriteLine($"[ss mcp] query: loading the resident decoder — embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)} (once per process)");
+        var swLoad = Stopwatch.StartNew();
+        var d = new DpxDecoder(embedDb, decoderDb, spm, Path.GetFileNameWithoutExtension(decoderDb), maxTokens: maxTokens);
+        var fault = d.BringUp();
+        if (fault != null)
+        {
+            try { d.Dispose(); } catch (Exception ex) { Console.Error.WriteLine("[ss mcp] query: dispose after failed BringUp: " + ex.Message); }
+            return $"ERROR: decoder BringUp failed — {fault.Class}: {fault.NativeDetail}";
+        }
+        Console.Error.WriteLine($"[ss mcp] query: resident decoder up in {swLoad.ElapsedMilliseconds} ms");
+        decoder = d;
+        return null;
     }
 
     // `ss mcp call <tool> [-key val ...]` — invoke one tool from the CLI, no protocol handshake. Prints the text.
@@ -215,7 +333,7 @@ internal static class Mcp
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: ss mcp call <tool> [-key val ...]\n  tools: ss_onboard · ss_contextualize · ss_cmdlets [-filter <wildcard>] · ss_map [-path <dir>] · ss_git [-gitRoot <dir>] · ss_run -command <cmd>");
+            Console.Error.WriteLine("usage: ss mcp call <tool> [-key val ...]\n  tools: ss_onboard · ss_contextualize · ss_cmdlets [-filter <wildcard>] · ss_map [-path <dir>] · ss_git [-gitRoot <dir>] · ss_run -command <cmd> · query -prompt <text> [-max_tokens <n>]");
             return 2;
         }
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
