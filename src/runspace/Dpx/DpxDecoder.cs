@@ -25,6 +25,7 @@ namespace Subsystem.Dpx
         private readonly string _unitId;
         private readonly int _maxTokens;
         private readonly bool _split;
+        private readonly bool _consolidated;
 
         private ModelProto? _model;
         private ModelProto? _embedModel;
@@ -77,6 +78,19 @@ namespace Subsystem.Dpx
             _split = true;
         }
 
+        // Constructor 4: ONE consolidated db (CRQ191) — embed + decoder faces resolved BY NAME from one file,
+        // the tokenizer read from its blob table. No loose sidecar, no per-face pair; still the split decode
+        // path (two graphs, dynamic KV), just sourced from a single self-describing db.
+        public DpxDecoder(string consolidatedDbPath, string unitId, int maxTokens = 4096)
+        {
+            _modelPath = consolidatedDbPath;
+            _embedModelPath = consolidatedDbPath;
+            _unitId = unitId;
+            _maxTokens = maxTokens > 0 ? maxTokens : 4096;
+            _split = true;
+            _consolidated = true;
+        }
+
         public bool IsAlive => _ready && _initFault == null;
         public string BackendName => _backendName;
 
@@ -92,6 +106,24 @@ namespace Subsystem.Dpx
 
                 try
                 {
+                    if (_consolidated)
+                    {
+                        if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
+                        {
+                            throw new FileNotFoundException($"Consolidated db not found: {_modelPath}");
+                        }
+                        // One db, faces by name: decoder + embed graphs, tokenizer from the blob table.
+                        if (_model == null) _model = ModelDb.LoadGraphFromDb("decoder", _modelPath);
+                        if (_embedModel == null) _embedModel = ModelDb.LoadGraphFromDb("embed", _modelPath);
+                        if (_tokenizer == null)
+                        {
+                            byte[] spm = ModelDb.ExtractTokenizerBlob(_modelPath, null)
+                                ?? throw new FileNotFoundException($"Consolidated db carries no tokenizer blob: {_modelPath}");
+                            _tokenizer = new SentencePieceTokenizer(SpModelProto.Parse(spm));
+                        }
+                    }
+                    else
+                    {
                     if (_model == null)
                     {
                         if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
@@ -119,6 +151,7 @@ namespace Subsystem.Dpx
                         }
                         var spm = SpModelProto.Parse(File.ReadAllBytes(_spmPath));
                         _tokenizer = new SentencePieceTokenizer(spm);
+                    }
                     }
 
                     _interp = new Dp(_model) { Verbose = this.Verbose };

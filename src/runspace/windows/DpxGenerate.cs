@@ -64,25 +64,49 @@ namespace Subsystem.Windows
                 return 1;
             }
 
-            string? embedDb = Directory.EnumerateFiles(modelsDir, "*-onnx-embed-q4.db").FirstOrDefault();
-            string? decoderDb = Directory.EnumerateFiles(modelsDir, "*-onnx-decoder-q4.db").FirstOrDefault();
-            string? spm = Directory.EnumerateFiles(modelsDir, "*.spm").FirstOrDefault();
-
-            if (embedDb == null || decoderDb == null || spm == null)
-            {
-                Console.Error.WriteLine($"Error: could not discover the embed/decoder .db pair + .spm tokenizer under {modelsDir}");
-                Console.Error.WriteLine($"  embed:   {embedDb ?? "MISSING (*-onnx-embed-q4.db)"}");
-                Console.Error.WriteLine($"  decoder: {decoderDb ?? "MISSING (*-onnx-decoder-q4.db)"}");
-                Console.Error.WriteLine($"  spm:     {spm ?? "MISSING (*.spm)"}");
-                return 1;
-            }
-
-            string unitId = Path.GetFileNameWithoutExtension(decoderDb);
-            Console.WriteLine($"[DPX] embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)}");
+            // Prefer a CONSOLIDATED db (ONE MODEL, ONE DB — CRQ191): a *.db that is NOT a per-face export or the
+            // litert deadpool and whose manifest names both the embed and decoder faces. Falls back to the
+            // per-face embed/decoder pair + loose .spm when no consolidated db is present.
+            string? consolidated = Directory.EnumerateFiles(modelsDir, "*.db")
+                .Where(f => !Path.GetFileName(f).Contains("-onnx-", StringComparison.OrdinalIgnoreCase)
+                         && !Path.GetFileName(f).Contains("litert", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(f =>
+                {
+                    var faces = ModelDb.QueryFaces(f);
+                    return faces.Contains("embed") && faces.Contains("decoder");
+                });
 
             Dg.ConsoleVerbose = verbose;
             if (profile) { Dp.Profile = true; Dp.Prof.Clear(); }
-            using var decoder = new DpxDecoder(embedDb, decoderDb, spm, unitId, maxTokens: maxNew) { Verbose = verbose };
+
+            DpxDecoder decoder;
+            if (consolidated != null)
+            {
+                string unitId = Path.GetFileNameWithoutExtension(consolidated);
+                Console.WriteLine($"[DPX] consolidated={Path.GetFileName(consolidated)} faces=[{string.Join(",", ModelDb.QueryFaces(consolidated))}] (embed+decoder+tokenizer in one db)");
+                decoder = new DpxDecoder(consolidated, unitId, maxTokens: maxNew) { Verbose = verbose };
+            }
+            else
+            {
+                string? embedDb = Directory.EnumerateFiles(modelsDir, "*-onnx-embed-q4.db").FirstOrDefault();
+                string? decoderDb = Directory.EnumerateFiles(modelsDir, "*-onnx-decoder-q4.db").FirstOrDefault();
+                string? spm = Directory.EnumerateFiles(modelsDir, "*.spm").FirstOrDefault();
+
+                if (embedDb == null || decoderDb == null || spm == null)
+                {
+                    Console.Error.WriteLine($"Error: could not discover a consolidated gemma4-e2b.db, nor the embed/decoder .db pair + .spm tokenizer under {modelsDir}");
+                    Console.Error.WriteLine($"  embed:   {embedDb ?? "MISSING (*-onnx-embed-q4.db)"}");
+                    Console.Error.WriteLine($"  decoder: {decoderDb ?? "MISSING (*-onnx-decoder-q4.db)"}");
+                    Console.Error.WriteLine($"  spm:     {spm ?? "MISSING (*.spm)"}");
+                    return 1;
+                }
+
+                string unitId = Path.GetFileNameWithoutExtension(decoderDb);
+                Console.WriteLine($"[DPX] embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)}");
+                decoder = new DpxDecoder(embedDb, decoderDb, spm, unitId, maxTokens: maxNew) { Verbose = verbose };
+            }
+            using var _decoderScope = decoder;
             var fault = decoder.BringUp();
             if (fault != null)
             {
