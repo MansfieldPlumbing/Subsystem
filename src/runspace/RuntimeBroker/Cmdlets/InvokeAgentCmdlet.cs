@@ -26,8 +26,8 @@ public class InvokeAgentCmdlet : PSCmdlet
         if (!AsText.IsPresent)
             Host.UI.WriteLine(ConsoleColor.DarkGray, Host.UI.RawUI.BackgroundColor, "[Agent Initializing...]");
 
-        // Synchronously fetch the shared RuntimeBroker (Rb) instance
-        var assistant = Subsystem.Rb.GetAsync(ctx).GetAwaiter().GetResult();
+        // Synchronously fetch the shared guest-mounted engine
+        var assistant = Subsystem.LiteRtGuest.GetAsync(ctx).GetAwaiter().GetResult();
 
         if (!AsText.IsPresent)
             Host.UI.WriteLine(ConsoleColor.DarkGray, Host.UI.RawUI.BackgroundColor, "[Agent Thinking...]");
@@ -46,8 +46,8 @@ public class InvokeAgentCmdlet : PSCmdlet
 
         var cts = new CancellationTokenSource();
         var stream = imageBytes != null
-            ? assistant.SendMessageStreamAsync(Prompt, null, imageBytes, ct: cts.Token)
-            : assistant.SendMessageStreamAsync(Prompt, ct: cts.Token);
+            ? assistant.StreamTurnAsync(Prompt, null, imageBytes, cts.Token)
+            : assistant.StreamTurnAsync(Prompt, null, cts.Token);
         var enumerator = stream.GetAsyncEnumerator(cts.Token);
         var acc = AsText.IsPresent ? new System.Text.StringBuilder() : null;
 
@@ -55,8 +55,9 @@ public class InvokeAgentCmdlet : PSCmdlet
         {
             while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
             {
-                var text = enumerator.Current;
-                if (string.IsNullOrEmpty(text)) continue;
+                var delta = enumerator.Current;
+                if (delta.Kind != Subsystem.AgentDeltaKind.Token || string.IsNullOrEmpty(delta.Text)) continue;
+                var text = delta.Text;
                 if (acc != null) acc.Append(text);
                 else Host.UI.Write(ConsoleColor.Cyan, Host.UI.RawUI.BackgroundColor, text);
             }

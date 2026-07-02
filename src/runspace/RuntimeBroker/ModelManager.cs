@@ -131,7 +131,7 @@ public static class ModelCatalog
 
     // §6 — transactional selection: (a) commit the single-active invariant; (b) rundown the
     // incumbent; (c)+(d) bring up the successor under admission control and verify; (e) on failure
-    // the unit is demoted (by Rb.GetAsync), the prior serviceable unit is restored, and the
+    // the unit is demoted (by LiteRtGuest.GetAsync), the prior serviceable unit is restored, and the
     // failover is journaled. Views read committed state only.
     public static async System.Threading.Tasks.Task<ModelSpec> SelectAsync(
         Context context, string id, Func<string, System.Threading.Tasks.Task>? report = null,
@@ -144,11 +144,22 @@ public static class ModelCatalog
 
         ClearDemotion(context, target.Id);          // explicit operator action clears the mark (§5)
         CommitSingleActive(context, target.Id);     // (a)
-        Rb.Reset();                                 // (b)
+        LiteRtGuest.Reset();                        // (b) rundown the incumbent guest engine regardless of the successor's format
         try
         {
-            var broker = await Rb.GetAsync(context, report, ct);   // (c)+(d)
-            Dg.Log("engine", $"SELECT {target.Id} committed; serviceable on {broker.BackendName}");
+            if (string.Equals(target.Format, "dpx", StringComparison.OrdinalIgnoreCase))
+            {
+                // DPX is the native citizen — no guest mount to bring up here (SubsystemApi constructs her
+                // fresh per turn, and Rb may not reach into Dpx per the component DAG). Verification at
+                // this layer is file presence/completeness; the per-turn bring-up surfaces any real fault.
+                await EnsureAsync(context, target, report ?? (_ => System.Threading.Tasks.Task.CompletedTask), ct);
+                Dg.Log("engine", $"SELECT {target.Id} committed; DPX file present, verified per-turn");
+            }
+            else
+            {
+                var runtime = await LiteRtGuest.GetAsync(context, report, ct);   // (c)+(d)
+                Dg.Log("engine", $"SELECT {target.Id} committed; serviceable on {runtime.BackendName}");
+            }
             return target;
         }
         catch (Subsystem.RbFaultException fx)
@@ -156,7 +167,7 @@ public static class ModelCatalog
             if (priorId.Length > 0 && !string.Equals(priorId, target.Id, StringComparison.OrdinalIgnoreCase))
             {
                 CommitSingleActive(context, priorId);              // (e) restore
-                Rb.Reset();
+                LiteRtGuest.Reset();
                 Dg.Log("engine", $"FAILOVER select {target.Id} ({fx.Fault.Class}) -> restored {priorId}");
             }
             throw;

@@ -99,7 +99,7 @@ public static class Dg
             sb.AppendLine($"source: {source}");
             sb.AppendLine($"build:  v{AppVersion()}");
             sb.AppendLine($"uptime: {(DateTime.Now - _start).TotalSeconds:F0}s");
-            sb.AppendLine($"model:  ready={Rb.IsReady}");
+            sb.AppendLine($"model:  ready={LiteRtGuest.IsReady}");
             sb.AppendLine("--- exception ---");
             sb.AppendLine(ex?.ToString() ?? "(null)");
             if (_dir != null)
@@ -119,7 +119,7 @@ public static class Dg
             o["time"]       = DateTime.Now.ToString("o");
             o["build"]      = AppVersion();
             o["uptimeSec"]  = (int)(DateTime.Now - _start).TotalSeconds;
-            o["modelReady"] = Rb.IsReady;
+            o["modelReady"] = LiteRtGuest.IsReady;
             // Resolves through the registry's active selection — absent records (fresh install,
             // pre-seed) degrade to false rather than voiding the whole snapshot.
             if (_ctx != null) { try { o["modelPresent"] = ModelManager.IsPresent(_ctx); } catch { o["modelPresent"] = false; } }
@@ -151,7 +151,7 @@ public static class Dg
             device     = Try(() => $"{Android.OS.Build.Manufacturer} {Android.OS.Build.Model}"),
             ramGb      = _ctx == null ? (double?)null : Math.Round(ModelCatalog.TotalRamBytes(_ctx) / 1_000_000_000.0, 1),
             activeModel = Try(() => _ctx == null ? null : ModelCatalog.Active(_ctx).DisplayName),
-            modelBackend = Try(() => Rb.BackendName),
+            modelBackend = Try(() => LiteRtGuest.BackendName),
             registryCount = Try(() => Subsystem.Cm.Cm.List().Length.ToString()),
         };
     }
@@ -193,7 +193,7 @@ public static class Dg
             state[0] = StateLayoutVersion;
             state[1] = (float)DateTimeOffset.Now.ToUnixTimeSeconds();
             state[2] = (float)(DateTime.Now - _start).TotalSeconds;
-            state[3] = Rb.IsReady ? 1f : 0f;
+            state[3] = LiteRtGuest.IsReady ? 1f : 0f;
 
             var (owners, handles, bytes) = global::Subsystem.Vom.Vom.Totals();
             state[4] = owners;

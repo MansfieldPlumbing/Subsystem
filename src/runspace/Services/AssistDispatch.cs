@@ -6,8 +6,8 @@ using Android.Util;
 
 namespace Subsystem;
 
-// The assist gesture's route into the RuntimeBroker (Rb). Captures the screen + audio and
-// dispatches them to the shared Rb, then speaks the reply via on-device TTS. First cold call loads
+// The assist gesture's route into the guest-mounted engine (LiteRtGuest). Captures the screen + audio
+// and dispatches them to the shared guest, then speaks the reply via on-device TTS. First cold call loads
 // the model (~10s; no re-download once in private storage). Fire-and-forget so the gesture never blocks.
 // NOTE (VOM-SPEC §4b): the audio path here still uses a managed byte[] — flagged for migration to a
 // fenced \Capture\Mic handle in Phase 2 (managed byte[] across JNI risks GC pauses + GREF exhaustion).
@@ -35,7 +35,7 @@ public static class AssistDispatch
                 string ctxText = screenContext.Length > 2000 ? screenContext.Substring(0, 2000) : screenContext;
                 string prompt = "You are the phone's on-device voice assistant. Screen Context:\n\n" + ctxText;
 
-                Log.Info(Tag, screenVision ? "Assist -> Rb (loading model if cold)…" : "Assist -> Rb (screen vision off)…");
+                Log.Info(Tag, screenVision ? "Assist -> LiteRtGuest (loading model if cold)…" : "Assist -> LiteRtGuest (screen vision off)…");
                 await SpeakStreaming(ctx, prompt, audioData);
             }
             catch (Exception ex) { Dg.Error("voice", "assist dispatch failed: " + ex.Message); }
@@ -52,12 +52,13 @@ public static class AssistDispatch
             bool speak = AgentSettings.SpeakReplies(ctx);
             if (speak && _tts == null) { _tts = new SpeechOutput(); await _tts.InitAsync(ctx); }
 
-            var assistant = await Rb.GetAsync(ctx);
+            var assistant = await LiteRtGuest.GetAsync(ctx);
             var sentenceBuffer = new System.Text.StringBuilder();
 
-            await foreach (var chunk in assistant.SendMessageStreamAsync(prompt, audioData))
+            await foreach (var delta in assistant.StreamTurnAsync(prompt, audioData))
             {
-                sentenceBuffer.Append(chunk);
+                if (delta.Kind != AgentDeltaKind.Token || string.IsNullOrEmpty(delta.Text)) continue;
+                sentenceBuffer.Append(delta.Text);
                 string currentStr = sentenceBuffer.ToString();
 
                 // naive sentence splitting

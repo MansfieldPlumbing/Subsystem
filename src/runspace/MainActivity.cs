@@ -5,6 +5,7 @@ using Android.Views;
 using Android.Webkit;
 using Android.Window;
 using Java.Interop;
+using Subsystem.Device;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;

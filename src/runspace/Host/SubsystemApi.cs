@@ -142,9 +142,10 @@ public static class SubsystemApi
             }
             else
             {
-                // GUEST engine (LiteRT) path. The guest mount was removed with RuntimeBroker (larp, errata);
-                // rebuild it as a LiteRt guest adapter. The DPX citizen is the default; LiteRT is opt-in.
-                throw new InvalidOperationException("Guest engine mount not wired (RuntimeBroker retired). Enable a DPX model or rebuild the LiteRt guest adapter.");
+                // GUEST engine (LiteRT) path — mounted through LiteRtGuest (construct + BringUp +
+                // register-as-VOM-object + cache), behind the same ITurnSource contract the DPX citizen
+                // signs above. DPX is the default; LiteRT is opt-in.
+                assistant = await LiteRtGuest.GetAsync(context, report, token);
             }
             await SendFrame(ws, new { type = "meta", model = activeSpec.DisplayName, backend = assistant.BackendName }, token);
             await SendFrame(ws, new { type = "status", state = "ready", text = "Ready." }, token);

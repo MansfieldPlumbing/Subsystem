@@ -86,8 +86,8 @@ public sealed class InvokeWebAgentCmdlet : WrapperCmdlet
         try
         {
             var ctx = Subsystem.MainActivity.Instance ?? Android.App.Application.Context;
-            var broker = Subsystem.Rb.GetAsync(ctx, null, ct).GetAwaiter().GetResult();
-            var sideOpt = broker.OpenSideConversation(ResolveWebAgentPrompt(), null);
+            var runtime = Subsystem.LiteRtGuest.GetAsync(ctx, null, ct).GetAwaiter().GetResult();
+            var sideOpt = runtime.OpenSideConversation(ResolveWebAgentPrompt(), null);
             if (sideOpt == null)
             {
                 // Degrade visibly (the error stream does not cross /clixml) — never vanish.

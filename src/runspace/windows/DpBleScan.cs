@@ -216,7 +216,7 @@ internal static class DpBleScan
             }
             finally { Marshal.FreeHGlobal(reg); }
         }
-        catch (ThreadInterruptedException) { }
+        catch (ThreadInterruptedException) { Dg.Log("dp-ble", "notify watch stopped (Terminate)"); }
         finally { CloseHandle(hDevice); GC.KeepAlive(cb); }
     }
 
