@@ -12,6 +12,10 @@ using VomClass = Subsystem.Vom.Vom;
 
 namespace Subsystem.Dpx;
 
+// The activation-arena seam. Alloc is PRIVATE: the raw pointer never crosses this class's boundary
+// (SS026) - kernels get a Span, Tensor carries the pointer internally and reclaims through Free() at
+// refcount zero. The slab port (one VOM region per run under an arena NODE, tensors as offsets, a
+// per-token cursor Reset) is the next rung - its state lives on the node, never in statics (SS015).
 public static unsafe class TensorArena
 {
     private static bool _active;
@@ -54,7 +58,7 @@ public static unsafe class TensorArena
         _currentAlloc -= padded;
     }
 
-    public static float* Alloc(long count)
+    private static float* Alloc(long count)
     {
         long bytes = count * sizeof(float);
         long padded = (bytes + 255) & ~255;
@@ -70,6 +74,16 @@ public static unsafe class TensorArena
             return new Span<float>(Alloc(count), (int)count);
         }
         return new float[count];
+    }
+
+    // Free-at-zero for a pointer this class (or Tensor.AllocNative) handed out: DecRef, reclaim on zero.
+    // Returns true when the memory was actually freed.
+    public static bool Free(float* ptr, long count)
+    {
+        if (ptr == null || !DecRef(ptr)) return false;
+        TrackFree(count);
+        NativeMemory.AlignedFree(ptr);
+        return true;
     }
 
     public static void AddRef(float* ptr)
@@ -102,7 +116,9 @@ public static unsafe class TensorArena
                 }
             }
         }
-        return true;
+        // untracked pointer: every freeable pointer was AddRef'd by the NativePtr setter, so an unknown
+        // (or post-Release stale) pointer must NOT be freed here - refusing is the safe side of the race.
+        return false;
     }
 }
 
@@ -186,11 +202,7 @@ public class Tensor
     {
         if (_nativePtr != null)
         {
-            if (TensorArena.DecRef(_nativePtr))
-            {
-                TensorArena.TrackFree(Count);
-                NativeMemory.AlignedFree(_nativePtr);
-            }
+            TensorArena.Free(_nativePtr, Count);   // free-at-zero: VOM region -> Vom.Close, legacy buffer -> AlignedFree
             _nativePtr = null;
         }
     }
