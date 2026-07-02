@@ -77,6 +77,8 @@ namespace Subsystem.Windows
 
             DpxStreamOutput(decoder, prompt, cts.Token);
             Console.WriteLine();
+            // stderr so stdout's emitted text stays byte-comparable across runs (determinism receipts).
+            Console.Error.WriteLine($"[DPX KV] ring steps={decoder.KvRingSteps} (present-KV outputs appended in place; 0 = every cache on the legacy copy path)");
             if (profile) PrintProfile();
             return 0;
         }

@@ -126,6 +126,10 @@ public static unsafe class TensorArena
 public class Tensor
 {
     public int[] Shape;
+    // >0: this tensor windows a persistent KV ring region laid out [B,Nkv,KvCap,H] (CRQ190) - Shape[2]
+    // rows are valid, the physical row stride per (batch,head) is KvCap. Ring-aware kernels (GQA, the
+    // seq-axis Concat) append in place at row Shape[2] instead of re-copying the whole cache.
+    public int KvCap;
     public float[] Fp;     // float payload (null if int)
     private unsafe float* _nativePtr;
     public unsafe float* NativePtr
@@ -213,6 +217,7 @@ public class Tensor
         var t = new Tensor
         {
             Shape = Shape,
+            KvCap = KvCap,
             Fp = Fp,
             Ip = Ip,
             Qb = Qb,
@@ -1132,16 +1137,32 @@ public class Dp
             Console.Error.WriteLine($"  PARAMS: Nq={Nq}, Nkv={Nkv}, win={win}, scaleAttr={scaleAttr}, softcap={softcap}, B={B}, past={past}, H={H}, S={S}, total={total}, scale={scale}");
         }
         var qf = x[0].AsF(); var kf = x[1].AsF(); var vf = x[2].AsF();
-        var pkf = pastK.Count > 0 ? pastK.AsF() : default; var pvf = pastV.Count > 0 ? pastV.AsF() : default;
-        var pk = TensorArena.AllocSpan((long)B * Nkv * total * H); var pv = TensorArena.AllocSpan((long)B * Nkv * total * H);
+        // KV ring lane (CRQ190): a ring-backed past (Tensor.KvCap = physical seq capacity of a persistent
+        // [B,Nkv,cap,H] region) skips the O(total) re-copy - past rows are read where they already live and
+        // this step's K/V land in place at row `past`. Everything else takes the original append-copy lane.
+        // Same loops, same scalar math either way; only the row stride and the backing storage differ.
+        bool ring = pastK.KvCap >= total && pastK.KvCap == pastV.KvCap
+            && pastK.NativePtr != null && pastV.NativePtr != null
+            && pastK.Shape.Length == 4 && pastV.Shape.Length == 4
+            && pastK.Shape[1] == Nkv && pastV.Shape[1] == Nkv
+            && pastV.Shape[0] == B && pastV.Shape[2] == past && pastV.Shape[3] == H;
+        int kvStride = ring ? pastK.KvCap : total;
+        long kvCount = (long)B * Nkv * kvStride * H;
+        Span<float> pk, pv;
+        if (ring) { pk = new Span<float>(pastK.NativePtr, (int)kvCount); pv = new Span<float>(pastV.NativePtr, (int)kvCount); }
+        else
+        {
+            pk = TensorArena.AllocSpan(kvCount); pv = TensorArena.AllocSpan(kvCount);
+            var pkf = pastK.Count > 0 ? pastK.AsF() : default; var pvf = pastV.Count > 0 ? pastV.AsF() : default;
+            for (int b = 0; b < B; b++)
+                for (int hh = 0; hh < Nkv; hh++)
+                    for (int t = 0; t < past; t++)
+                    { long d = (((long)b * Nkv + hh) * total + t) * H, sI = (((long)b * Nkv + hh) * past + t) * H; for (int e = 0; e < H; e++) { pk[(int)(d + e)] = pkf[(int)(sI + e)]; pv[(int)(d + e)] = pvf[(int)(sI + e)]; } }
+        }
         for (int b = 0; b < B; b++)
             for (int hh = 0; hh < Nkv; hh++)
-            {
-                for (int t = 0; t < past; t++)
-                { long d = (((long)b * Nkv + hh) * total + t) * H, sI = (((long)b * Nkv + hh) * past + t) * H; for (int e = 0; e < H; e++) { pk[(int)(d + e)] = pkf[(int)(sI + e)]; pv[(int)(d + e)] = pvf[(int)(sI + e)]; } }
                 for (int t = 0; t < S; t++)
-                { long d = (((long)b * Nkv + hh) * total + past + t) * H, sK = KvIdx(x[1], b, hh, t, S, Nkv, H), sV = KvIdx(x[2], b, hh, t, S, Nkv, H); for (int e = 0; e < H; e++) { pk[(int)(d + e)] = kf[(int)(sK + e)]; pv[(int)(d + e)] = vf[(int)(sV + e)]; } }
-            }
+                { long d = (((long)b * Nkv + hh) * kvStride + past + t) * H, sK = KvIdx(x[1], b, hh, t, S, Nkv, H), sV = KvIdx(x[2], b, hh, t, S, Nkv, H); for (int e = 0; e < H; e++) { pk[(int)(d + e)] = kf[(int)(sK + e)]; pv[(int)(d + e)] = vf[(int)(sV + e)]; } }
         var bias = x.Length > 10 ? x[10] : null; var bf = bias != null && bias.Count > 0 ? bias.AsF() : default; var bsh = bias != null && bias.Count > 0 ? bias.Shape : null;
         int g = Nq / Nkv; var outp = TensorArena.AllocSpan((long)B * S * Nq * H);
         int qfLen = qf.Length, pkLen = pk.Length, pvLen = pv.Length, outpLen = outp.Length, bfLen = bf.Length;
@@ -1167,7 +1188,7 @@ public class Dp
                     for (int kj = 0; kj < total; kj++)
                     {
                         if (kj > qpos || (win > 0 && qpos - kj >= win)) { scores[kj] = float.NegativeInfinity; continue; }
-                        long kBase = (((long)b * Nkv + kvh) * total + kj) * H; float dot = 0f;
+                        long kBase = (((long)b * Nkv + kvh) * kvStride + kj) * H; float dot = 0f;
                         for (int e = 0; e < H; e++) dot += qfL[(int)(qBase + e)] * pkL[(int)(kBase + e)];
                         dot *= scale; if (softcap > 0) dot = softcap * MathF.Tanh(dot / softcap);
                         dot += BiasAt(bfL, bsh, b, qh, qi, kj);
@@ -1175,12 +1196,21 @@ public class Dp
                     }
                     double sum = 0; for (int kj = 0; kj < total; kj++) { if (float.IsNegativeInfinity(scores[kj])) { scores[kj] = 0f; continue; } float e = MathF.Exp(scores[kj] - mx); scores[kj] = e; sum += e; }
                     float inv = sum > 0 ? (float)(1.0 / sum) : 0f; long oBase = (((long)b * S + qi) * Nq + qh) * H;
-                    for (int e = 0; e < H; e++) { float acc = 0f; for (int kj = 0; kj < total; kj++) if (scores[kj] != 0f) acc += scores[kj] * pvL[(int)((((long)b * Nkv + kvh) * total + kj) * H + e)]; outpL[(int)(oBase + e)] = acc * inv; }
+                    for (int e = 0; e < H; e++) { float acc = 0f; for (int kj = 0; kj < total; kj++) if (scores[kj] != 0f) acc += scores[kj] * pvL[(int)((((long)b * Nkv + kvh) * kvStride + kj) * H + e)]; outpL[(int)(oBase + e)] = acc * inv; }
                 }
                 return scores;
             }, _ => { });
         }
-        return new[] { Tensor.F(outp, B, S, Nq * H), Tensor.F(pk, B, Nkv, total, H), Tensor.F(pv, B, Nkv, total, H) };
+        Tensor presentK, presentV;
+        if (ring)
+        {
+            // present aliases the ring zero-copy: KvCap marks it so the decode loop knows the append
+            // already happened in place (and so a re-fed present keeps the ring lane engaged).
+            presentK = Tensor.F(pastK.NativePtr, B, Nkv, total, H); presentK.KvCap = pastK.KvCap;
+            presentV = Tensor.F(pastV.NativePtr, B, Nkv, total, H); presentV.KvCap = pastV.KvCap;
+        }
+        else { presentK = Tensor.F(pk, B, Nkv, total, H); presentV = Tensor.F(pv, B, Nkv, total, H); }
+        return new[] { Tensor.F(outp, B, S, Nq * H), presentK, presentV };
     }
 
     static unsafe Tensor Reshape(Tensor a, Tensor shapeT, int flattenAxis = -1, Tensor src = null)
@@ -1231,9 +1261,24 @@ public class Dp
         return Tensor.F(o, outShape);
     }
 
-    static Tensor Concat(Tensor[] xs, int axis)
+    static unsafe Tensor Concat(Tensor[] xs, int axis)
     {
         int r = xs[0].Shape.Length; if (axis < 0) axis += r;
+        // KV ring lane (CRQ190): the manual (non-GQA) attention layers carry KV as Concat(past, new) on
+        // the seq axis. With past ring-backed and a single (batch,head) lane, the new rows land in place
+        // at row `past` and the ring aliases back out - layout-identical to the copied result because the
+        // leading dims are 1, so downstream readers see the same contiguous bytes. Everything else
+        // (including any multi-lane concat) takes the general copy below.
+        if (xs.Length == 2 && r == 4 && axis == 2 && xs[0].KvCap > 0 && xs[0].NativePtr != null
+            && xs[0].Shape[0] == 1 && xs[0].Shape[1] == 1 && !xs[1].IsInt && !xs[1].IsQuant
+            && xs[1].Shape.Length == 4 && xs[1].Shape[0] == 1 && xs[1].Shape[1] == 1
+            && xs[1].Shape[3] == xs[0].Shape[3] && xs[0].Shape[2] + xs[1].Shape[2] <= xs[0].KvCap)
+        {
+            int past = xs[0].Shape[2], S = xs[1].Shape[2], H = xs[0].Shape[3];
+            xs[1].AsF().CopyTo(new Span<float>(xs[0].NativePtr + (long)past * H, S * H));
+            var appended = Tensor.F(xs[0].NativePtr, 1, 1, past + S, H); appended.KvCap = xs[0].KvCap;
+            return appended;
+        }
         var outShape = (int[])xs[0].Shape.Clone(); outShape[axis] = xs.Sum(t => t.Shape[axis]);
         long n = 1; foreach (var d in outShape) n *= d; var o = TensorArena.AllocSpan(n);
         long outStrAxis = 1; for (int k = axis + 1; k < r; k++) outStrAxis *= outShape[k];
