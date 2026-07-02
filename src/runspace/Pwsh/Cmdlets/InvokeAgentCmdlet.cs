@@ -26,8 +26,23 @@ public class InvokeAgentCmdlet : PSCmdlet
         if (!AsText.IsPresent)
             Host.UI.WriteLine(ConsoleColor.DarkGray, Host.UI.RawUI.BackgroundColor, "[Agent Initializing...]");
 
-        // Synchronously fetch the shared guest-mounted engine
-        var assistant = Subsystem.LiteRtGuest.GetAsync(ctx).GetAwaiter().GetResult();
+        // The active model picks the door: DPX is the native citizen (constructed for this one-shot,
+        // disposed with the turn — same presence rule as SubsystemApi's turn loop); anything else is
+        // a guest engine mounted through LiteRtGuest.
+        var activeSpec = Subsystem.ModelCatalog.Active(ctx);
+        Subsystem.ITurnSource assistant;
+        IDisposable? oneShot = null;
+        if (string.Equals(activeSpec.Format, "dpx", StringComparison.OrdinalIgnoreCase))
+        {
+            var dpx = new Subsystem.Dpx.DpxDecoder(Subsystem.ModelCatalog.LocalPath(ctx, activeSpec), activeSpec.Id);
+            var fault = dpx.BringUp();
+            if (fault != null) { dpx.Dispose(); throw new Subsystem.RbFaultException(fault); }
+            assistant = dpx; oneShot = dpx;
+        }
+        else
+        {
+            assistant = Subsystem.LiteRtGuest.GetAsync(ctx).GetAwaiter().GetResult();
+        }
 
         if (!AsText.IsPresent)
             Host.UI.WriteLine(ConsoleColor.DarkGray, Host.UI.RawUI.BackgroundColor, "[Agent Thinking...]");
@@ -71,6 +86,7 @@ public class InvokeAgentCmdlet : PSCmdlet
         finally
         {
             enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            oneShot?.Dispose();
         }
 
         if (acc != null) WriteObject(acc.ToString().Trim());
