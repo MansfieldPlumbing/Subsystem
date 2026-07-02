@@ -905,12 +905,17 @@ public class Dp
         byte[] dxil = GemmDxilQ4(); int tileN = 16, tileM = 16;
         if (bs == 32)
         {
-            if (M == 1 && (long)N <= 8L * 65535)   // D3D12 dispatch cap: 65535 groups of 8 rows
+            // Both variant kernels drop the naive kernel's per-thread bounds check in exchange for uniform,
+            // branch-free control flow (CRQ190) - safe ONLY when the dispatch is exactly tile-aligned, since an
+            // out-of-range Load on these root-descriptor SRVs is undefined, not guaranteed-zero. An unaligned
+            // shape falls back to the naive rung (which still bounds-checks every thread) until the tournament
+            // ships an aligned/peeled or padded variant (tracked, not yet built).
+            if (M == 1 && N % 8 == 0 && (long)N <= 8L * 65535)   // D3D12 dispatch cap: 65535 groups of 8 rows
             {
                 var v = Q4Dxil(1);
                 if (v.Length > 0) { dxil = v; tileN = 8; tileM = 1; }
             }
-            else if (M > 1)
+            else if (M > 1 && M % 16 == 0)
             {
                 var v = Q4Dxil(2);
                 if (v.Length > 0) dxil = v;
