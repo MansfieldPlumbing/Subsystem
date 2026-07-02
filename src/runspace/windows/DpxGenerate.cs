@@ -17,9 +17,30 @@ namespace Subsystem.Windows
     {
         public static int Run(string[] args)
         {
+            // `--gpu-matmul auto` (CRQ190 R0): per-shape CPU/GPU routing for MatMulNBits. The mode rides
+            // DPGPU_BACKEND, which Dp hoists into a static readonly on first touch - so the variable must
+            // be set HERE, before anything below initializes a Dp static. Bare `--gpu-matmul` stays the
+            // all-or-nothing q4 GPU knob.
+            for (int i = 0; i + 1 < args.Length; i++)
+                if (args[i] == "--gpu-matmul" && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase))
+                    Environment.SetEnvironmentVariable("DPGPU_BACKEND", "auto");
+
             bool verbose = args.Contains("--verbose") || args.Contains("-v") || args.Contains("-verbose");
             bool profile = args.Contains("--profile");
-            var cleanArgs = args.Where(a => a != "--verbose" && a != "-v" && a != "-verbose" && a != "--profile").ToArray();
+            var clean = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                var a = args[i];
+                if (a == "--verbose" || a == "-v" || a == "-verbose" || a == "--profile") continue;
+                if (a == "--gpu-matmul")
+                {
+                    if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
+                    else Dp.UseGpuMatMulNBits = true;
+                    continue;
+                }
+                clean.Add(a);
+            }
+            var cleanArgs = clean.ToArray();
 
             if (cleanArgs.Length == 0)
             {
