@@ -867,13 +867,27 @@ public class Dp
     // one 4-bit nibble at logical index `idx` in a packed row starting at byte `rowOff` (low nibble = even idx).
     static unsafe int Nib4(byte* buf, int rowOff, int idx) => (buf[rowOff + (idx >> 1)] >> ((idx & 1) << 2)) & 0xF;
 
-    // GPU MatMulNBits: opt-in (mirrors --gpu-matmul / DPGPU_BACKEND). Routes the q4 contraction straight through
-    // GpuD3D12/GpuVulkan's GemmQ4 — the packed uint8 B/zp buffers and fp32 scales go to the GPU as-is; the
-    // dequantized fp32 weight is never materialized on the CPU. Fast path only (bits==4, no ONNX zero-point axis
-    // quirks beyond what MatMulNBits itself already assumes); any GPU fault latches _gpuQ4Dead and degrades to the
-    // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
+    // GPU MatMulNBits: presence, not permission (invariant 8 — push work to the compute that is standing
+    // there; invariant 9 — absence/fault flows to the next rung, never a mode switch). The q4 contraction
+    // goes straight through GpuD3D12/GpuVulkan's GemmQ4 whenever the GPU seam initializes — the packed
+    // uint8 B/zp buffers and fp32 scales go to the GPU as-is; the dequantized fp32 weight is never
+    // materialized on the CPU. Any GPU fault latches _gpuQ4Dead and degrades to the CPU path, once,
+    // logged. ForceScalarMatMulNBits still bypasses the rung entirely — it pins the parity oracle.
+    // UseGpuMatMulNBits remains only as the dev-CLI's explicit override (redundant under presence-flow).
     public static bool UseGpuMatMulNBits = false;
     static bool _gpuQ4Dead = false;
+    // Absence and fault are the same rung behavior: an init failure latches _gpuQ4Dead (the gate
+    // short-circuits on it, so this probes at most once); a live seam answers from its memoized init.
+    static bool GpuPresent()
+    {
+        try { Gpu.DeviceName(); return true; }
+        catch (Exception ex)
+        {
+            _gpuQ4Dead = true;
+            Console.Error.WriteLine($"GPU rung absent ({ex.GetType().Name}: {ex.Message}); q4 flows to CPU.");
+            return false;
+        }
+    }
     // Auto-route mode (CRQ190 R0): DPGPU_BACKEND=auto (the CLI's `--gpu-matmul auto` sets the variable
     // before the first Dp touch). Hoisted to a static readonly so the router costs ONE env probe per
     // process, none per dispatch. Default (unset/other values) leaves behavior exactly the standing knobs.
@@ -1046,7 +1060,7 @@ public class Dp
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
         var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        if (UseGpuMatMulNBits && !_gpuQ4Dead && bits == 4)
+        if (bits == 4 && !_gpuQ4Dead && !ForceScalarMatMulNBits && (UseGpuMatMulNBits || GpuPresent()))
         {
             try
             {
