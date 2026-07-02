@@ -246,6 +246,15 @@ public class MainActivity : Activity
                 return IntPtr.Zero;
             });
         } catch (System.InvalidOperationException) { /* resolver already set earlier this process */ }
+        // The GPU q4 GEMM shaders (gemm.spv/gemm_q4.spv) ship as AndroidAssets, not loose files next to an
+        // exe — Gpu.ShaderAssetReader defaults to a filesystem read (fine on Windows); this is the ONE place
+        // allowed to touch Android.Content.Res.AssetManager, so the shared Dpx/GpuVulkan code stays platform-neutral.
+        Subsystem.Dpx.Gpu.ShaderAssetReader = name => {
+            using var s = Assets!.Open("shaders/" + name);
+            using var ms = new System.IO.MemoryStream();
+            s.CopyTo(ms);
+            return ms.ToArray();
+        };
 
         _webView.AddJavascriptInterface(new PwshBridge(this), "AndroidBridge");
         _webView.AddJavascriptInterface(new VomBridgeJSInterface(this), "VomBridge");

@@ -258,7 +258,10 @@ SS013|Dp.cs|Method 'F' starts with 'F', which is not in the verb catalog — reg
 SS013|Dp.cs|Method 'F' starts with 'F', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'F' starts with 'F', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'FromProto' starts with 'From', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|Dp.cs|Method 'GemmDxilQ4' starts with 'Gemm', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|Dp.cs|Method 'GpuMatMulNBits' starts with 'Gpu', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'I' starts with 'I', which is not in the verb catalog — register the verb deliberately or use an approved one
+SS013|Dp.cs|Method 'MatMulNBitsSimd' starts with 'Mat', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'QRow' starts with 'Q', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'Release' starts with 'Release', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS013|Dp.cs|Method 'TrackAlloc' starts with 'Track', which is not in the verb catalog — register the verb deliberately or use an approved one
@@ -368,6 +371,7 @@ SS015|Dp.cs|Static field 'Implemented' (readonly HashSet — the reference is pi
 SS015|Dp.cs|Static field 'Prof' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Profile' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'QFbSeen' (readonly HashSet — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 'ShaderAssetReader' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'UseGpuMatMul' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'UseGpuMatMulNBits' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field '_active' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
@@ -380,6 +384,12 @@ SS015|Dp.cs|Static field '_peakOffset' (mutable) — statics compute, never reme
 SS015|Dp.cs|Static field '_refCounts' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 's_spv' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 's_spvQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'CaptureLogits' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'CapturedLogits' (readonly List — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'DropEveryN' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'DropNodeContains' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'DroppedCalls' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|DpxExperiments.cs|Static field 'TargetCalls' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_dev' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fence' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fv' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)

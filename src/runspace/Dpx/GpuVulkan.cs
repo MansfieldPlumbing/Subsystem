@@ -2,6 +2,7 @@
 // (Android) via flat-C P/Invoke + precompiled SPIR-V. Same naive fp32 GEMM as the D3D12 path, so bit-parity holds.
 // Cross-platform spine: this exact code + gemm.spv run on the Adreno/Mali. Persistent instance/device/queue/
 // descriptor-layout/pipeline-layout/pipeline; per-call buffers/descriptors/command-buffer/fence destroyed.
+using System;
 using System.Runtime.InteropServices;
 
 namespace Subsystem.Dpx;
@@ -9,6 +10,24 @@ namespace Subsystem.Dpx;
 unsafe static class GpuVulkan
 {
     const string VK = "vulkan-1.dll";
+
+    // Android has no file named vulkan-1.dll — the loader ships libvulkan.so. Scoped to Android only (the
+    // Windows head shares this assembly with LiteRtRuntime's own resolver, which owns litert-lm.dll and
+    // falls through for anything else — vulkan-1.dll already resolves there via normal OS probing, so a
+    // second resolver on Windows would only risk racing that one for no reason). Same guarded-registration
+    // idiom as MainActivity.cs's libpsl resolver (one resolver per assembly per process; OnCreate can rerun).
+    static GpuVulkan()
+    {
+        if (OperatingSystem.IsAndroid())
+        {
+            try
+            {
+                NativeLibrary.SetDllImportResolver(typeof(GpuVulkan).Assembly, (name, asm, path) =>
+                    name == VK && NativeLibrary.TryLoad("libvulkan.so", asm, path, out var h) ? h : IntPtr.Zero);
+            }
+            catch (InvalidOperationException ex) { Subsystem.Dg.Log("dpx", $"GpuVulkan resolver already set: {ex.Message}"); }
+        }
+    }
     [DllImport(VK)] static extern int  vkCreateInstance(ref InstCI ci, IntPtr a, out IntPtr inst);
     [DllImport(VK)] static extern int  vkEnumeratePhysicalDevices(IntPtr inst, ref uint c, [Out] IntPtr[] d);
     [DllImport(VK)] static extern void vkGetPhysicalDeviceProperties(IntPtr pd, IntPtr props);

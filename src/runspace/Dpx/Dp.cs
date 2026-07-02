@@ -480,7 +480,7 @@ public class Dp
             case "Pack": return One(PackOp(x, n));
             case "Fill": return One(FillOp(x, n));
             // ---- Gemma-3n E2B q4 ONNX contrib ops (com.microsoft), grounded against the q4 .db export ----
-            case "MatMulNBits": return One(MatMulNBits(x, n));
+            case "MatMulNBits": { var r = MatMulNBits(x, n); DpxExperiments.RecordLogits(n, r); return One(r); }
             case "GatherBlockQuantized": return One(GatherBlockQuantized(x, n));
             case "RotaryEmbedding": return One(RotaryEmbedding(x, n));
             case "SimplifiedLayerNormalization": return One(SimplifiedLayerNorm(x, n));
@@ -847,7 +847,7 @@ public class Dp
     // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
     public static bool UseGpuMatMulNBits = false;
     static bool _gpuQ4Dead = false;
-    static Tensor GpuMatMulNBits(Tensor[] x, NodeProto n, int K, int N, int bs, int nBlk, int rowBytes, int zpRowBytes, bool hasZp, float[] a, float[] scsp, byte[] bArr, byte[] zpArr, int M)
+    internal static Tensor GpuMatMulNBits(Tensor[] x, NodeProto n, int K, int N, int bs, int nBlk, int rowBytes, int zpRowBytes, bool hasZp, float[] a, float[] scsp, byte[] bArr, byte[] zpArr, int M)
     {
         var c = new float[(long)M * N];
         int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4());
@@ -857,7 +857,7 @@ public class Dp
         return Tensor.F(c, outShape0);
     }
     static byte[] _gemmQ4Dxil;
-    static byte[] GemmDxilQ4()
+    internal static byte[] GemmDxilQ4()
     {
         if (_gemmQ4Dxil != null) return _gemmQ4Dxil;
         string near = Path.Combine(AppContext.BaseDirectory, "gemm_q4.dxil");
@@ -868,6 +868,7 @@ public class Dp
     // per (output-row n, block b=k/bs); 4-bit unsigned, dequant = (q - zp)·scale. zp defaults to 2^(bits-1) when absent.
     static unsafe Tensor MatMulNBits(Tensor[] x, NodeProto n)
     {
+        if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);   // deadline-drop hook: this correction missed its deadline -> residual carries forward with zeros
         int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
@@ -927,7 +928,7 @@ public class Dp
     // the same code JITs to SSE on x64 and NEON on the Android arm64 head. Two per-call precomputes amortized
     // over all N output rows: activations deinterleaved into even/odd halves (so the nibble planes FMA against
     // contiguous loads), and per-(m,block) activation sums (the zero-point term drops out of the inner loop).
-    static unsafe Tensor MatMulNBitsSimd(Tensor[] x, Span<float> a, Span<float> scsp, Span<byte> bSpan, Span<byte> zpSpan,
+    internal static unsafe Tensor MatMulNBitsSimd(Tensor[] x, Span<float> a, Span<float> scsp, Span<byte> bSpan, Span<byte> zpSpan,
                                          int K, int N, int M, int nBlk, int rowBytes, int zpRowBytes, int defZp, int scLen)
     {
         int half = K / 2;
@@ -2318,13 +2319,22 @@ public class Dp
 // default is D3D12 (reuses the caller's gemm DXIL). Both reproduce the CPU GEMM bit-for-bit.
 static class Gpu
 {
-    static readonly bool s_vk = string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "vulkan", StringComparison.OrdinalIgnoreCase);
+    // D3D12 doesn't exist off Windows, so Android always carries the GPU path over Vulkan (Adreno/Mali) -
+    // DPGPU_BACKEND can still force vulkan on Windows for the cross-platform-parity receipt.
+    static readonly bool s_vk = OperatingSystem.IsAndroid()
+        || string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "vulkan", StringComparison.OrdinalIgnoreCase);
+    // Shader blobs ship next to ss.exe as loose files on Windows; the APK has no such filesystem path -
+    // an Android-only bootstrap (MainActivity.cs, which alone references Android.Content.Res.AssetManager)
+    // swaps this to read from the AndroidAsset package. Neither this file nor GpuVulkan.cs may reference
+    // Android.* directly - both compile into the Windows head too, which has no binding to that assembly.
+    public static Func<string, byte[]> ShaderAssetReader =
+        name => System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, name));
     static byte[] s_spv;
     public static int dpgpu_gemm(float[] A, float[] B, float[] C, uint M, uint N, uint K, byte[] dxil, uint dxilLen, int threadM = 16, int threadN = 16)
     {
         if (s_vk)
         {
-            s_spv ??= System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "gemm.spv"));
+            s_spv ??= ShaderAssetReader("gemm.spv");
             return GpuVulkan.Gemm(A, B, C, M, N, K, s_spv);
         }
         return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen, threadM, threadN);
@@ -2336,7 +2346,7 @@ static class Gpu
     {
         if (s_vk)
         {
-            s_spvQ4 ??= System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "gemm_q4.spv"));
+            s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
             return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4);
         }
         return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length);
