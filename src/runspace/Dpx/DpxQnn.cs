@@ -52,12 +52,68 @@ namespace Subsystem.Dpx
         [StructLayout(LayoutKind.Sequential)]
         struct OpConfig { public int Version; public OpConfigV1 V1; }
 
-        // QnnInterface table indices (the function table sits at offset 40 in QnnInterface_t).
+        // QnnInterface table indices (the function table sits at offset 40 in QnnInterface_t). Ordered per
+        // QNN_INTERFACE_VER_TYPE in QnnInterface.h; deviceCreate/deviceFree counted there (errorGetVerboseMessage=49
+        // is the fixed landmark the dossier pinned, so this count is anchored).
         const int FnBackendCreate = 1, FnContextCreate = 9, FnContextGetBinarySize = 11, FnContextGetBinary = 12,
                   FnGraphCreate = 15, FnGraphAddNode = 18, FnGraphFinalize = 19, FnGraphExecute = 21,
-                  FnTensorCreateGraphTensor = 24;
+                  FnTensorCreateGraphTensor = 24, FnDeviceCreate = 40;
 
         static IntPtr AllocCString(string s) => Marshal.StringToHGlobalAnsi(s);
+
+        // Offline HTP device pinned to one SoC. Without a PlatformInfo the HTP backend prepares for a
+        // default/host target; a per-SoC context binary needs QnnDevice_create carrying socModel + arch
+        // (QnnHtpDevice.h / QnnDevice.h). Struct layouts are laid out by explicit x64 offset (the same
+        // discipline that pinned sizeof(Qnn_Tensor_t)=144); the nested PlatformInfo is consumed during
+        // deviceCreate, so its scratch is freed here and only the device handle escapes.
+        static IntPtr CreateOfflineHtpDevice(IntPtr* fn, uint socModel, uint dspArch, uint vtcmSizeMb)
+        {
+            // QnnHtpDevice_DeviceInfoExtension_t (32B): devType@0=ON_CHIP, union onChip{ vtcmSize@8, socModel@16, signedPd@20, dlbc@21, arch@24 }
+            IntPtr htpExt = Marshal.AllocHGlobal(32);
+            for (int i = 0; i < 32; i++) Marshal.WriteByte(htpExt, i, 0);
+            Marshal.WriteInt64(htpExt, 8, (long)vtcmSizeMb);
+            Marshal.WriteInt32(htpExt, 16, (int)socModel);
+            Marshal.WriteByte(htpExt, 20, 1);            // signedPdSupport
+            Marshal.WriteInt32(htpExt, 24, (int)dspArch);
+
+            // QnnDevice_CoreInfo_t (24B): version@0=1, v1{ coreId@8=0, coreType@12=0(NSP), coreInfoExtension@16=NULL }
+            IntPtr coreInfo = Marshal.AllocHGlobal(24);
+            for (int i = 0; i < 24; i++) Marshal.WriteByte(coreInfo, i, 0);
+            Marshal.WriteInt32(coreInfo, 0, 1);
+
+            // QnnDevice_HardwareDeviceInfo_t (40B): version@0=1, v1{ deviceId@8=0, deviceType@12=0(ON_CHIP), numCores@16=1, cores@24, ext@32 }
+            IntPtr hwDev = Marshal.AllocHGlobal(40);
+            for (int i = 0; i < 40; i++) Marshal.WriteByte(hwDev, i, 0);
+            Marshal.WriteInt32(hwDev, 0, 1);
+            Marshal.WriteInt32(hwDev, 16, 1);
+            Marshal.WriteIntPtr(hwDev, 24, coreInfo);
+            Marshal.WriteIntPtr(hwDev, 32, htpExt);
+
+            // QnnDevice_PlatformInfo_t (24B): version@0=1, v1{ numHwDevices@8=1, hwDevices@16 }
+            IntPtr platInfo = Marshal.AllocHGlobal(24);
+            for (int i = 0; i < 24; i++) Marshal.WriteByte(platInfo, i, 0);
+            Marshal.WriteInt32(platInfo, 0, 1);
+            Marshal.WriteInt32(platInfo, 8, 1);
+            Marshal.WriteIntPtr(platInfo, 16, hwDev);
+
+            // QnnDevice_Config_t (16B): option@0=PLATFORM_INFO(1), hardwareInfo@8
+            IntPtr devCfg = Marshal.AllocHGlobal(16);
+            Marshal.WriteInt64(devCfg, 0, 0);
+            Marshal.WriteInt32(devCfg, 0, 1);
+            Marshal.WriteIntPtr(devCfg, 8, platInfo);
+
+            // NULL-terminated array of config pointers.
+            IntPtr cfgArray = Marshal.AllocHGlobal(IntPtr.Size * 2);
+            Marshal.WriteIntPtr(cfgArray, 0, devCfg);
+            Marshal.WriteIntPtr(cfgArray, IntPtr.Size, IntPtr.Zero);
+
+            IntPtr device;
+            ulong rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnDeviceCreate])(IntPtr.Zero, cfgArray, &device);
+
+            Marshal.FreeHGlobal(cfgArray); Marshal.FreeHGlobal(devCfg); Marshal.FreeHGlobal(platInfo);
+            Marshal.FreeHGlobal(hwDev); Marshal.FreeHGlobal(coreInfo); Marshal.FreeHGlobal(htpExt);
+            return rc == 0 ? device : IntPtr.Zero;
+        }
 
         static Tensor CreateTensor(string name, int type, uint* dims, IntPtr data, uint bytes)
         {
@@ -75,8 +131,20 @@ namespace Subsystem.Dpx
         // gemma4-e2b MatMulNBits weight, decoded via the sequential-nibble layout in
         // test.dpx.q4-packing-order.ps1) to carry actual model data through the HTP instead. Returns a
         // one-line receipt.
+        //
+        // socModel != 0 requests a specific Qualcomm SoC (QNN_SOC_MODEL_*: SM8550=43, SM8635=68): a QnnDevice
+        // built from a PlatformInfo (socModel + arch) is threaded into contextCreate — the offline-operation
+        // path QnnDevice.h prescribes — so an SoC-honoring HTP backend prepares for that SoC. In that mode
+        // Project prepares + emits the context binary only (no host execute). MEASURED CAVEAT (x64 bring-up
+        // host, QAIRT 2.42): the offline HTP backend here does NOT stamp the requested socModel into the
+        // emitted binary (its graphBlobInfo reads socModel=0) and prepares NONDETERMINISTICALLY — two runs of
+        // the same SoC differ byte-wise — so host-emitted bins are not SoC-distinguishable. The SoC is bound
+        // by an on-device prepare (the dossier's proven path); this parameter is the correct API surface for
+        // an SoC-honoring backend, not a host-verifiable per-SoC stamp.
+        // socModel == 0 keeps the default in-process path: create-with-default-device, finalize, execute, diff.
         public string Project(string backendLibrary, string outputBinaryPath, uint featureK = 256, uint featureN = 256,
-                               float[] weights = null, float[] input = null)
+                               float[] weights = null, float[] input = null, uint socModel = 0, uint dspArch = 73,
+                               uint vtcmSizeMb = 8)
         {
             IntPtr h = NativeLibrary.Load(backendLibrary);
             var getProviders = (delegate* unmanaged<IntPtr*, uint*, ulong>)NativeLibrary.GetExport(h, "QnnInterface_getProviders");
@@ -87,7 +155,13 @@ namespace Subsystem.Dpx
 
             IntPtr backend, context, graph; ulong rc;
             if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnBackendCreate])(IntPtr.Zero, IntPtr.Zero, &backend)) != 0) return $"DpxQnn: backendCreate 0x{rc:x}";
-            if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, IntPtr.Zero, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate 0x{rc:x}";
+            IntPtr device = IntPtr.Zero;
+            if (socModel != 0)
+            {
+                device = CreateOfflineHtpDevice(fn, socModel, dspArch, vtcmSizeMb);
+                if (device == IntPtr.Zero) return $"DpxQnn: deviceCreate soc={socModel} failed";
+            }
+            if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, device, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate soc={socModel} 0x{rc:x}";
             if ((rc = ((delegate* unmanaged<IntPtr, byte*, IntPtr, IntPtr*, ulong>)fn[FnGraphCreate])(context, (byte*)AllocCString("matmul"), IntPtr.Zero, &graph)) != 0) return $"DpxQnn: graphCreate 0x{rc:x}";
 
             if (weights == null)
@@ -144,6 +218,18 @@ namespace Subsystem.Dpx
                 }
             }
 
+            if (socModel != 0)
+            {
+                // Offline projection for a foreign SoC: the bin is prepared+emitted above; the host cannot
+                // execute a graph prepared for a remote SoC, so parity is deferred to the target device.
+                Marshal.FreeHGlobal((IntPtr)dimsX); Marshal.FreeHGlobal((IntPtr)dimsW); Marshal.FreeHGlobal((IntPtr)dimsY);
+                Marshal.FreeHGlobal(weightMemory); Marshal.FreeHGlobal((IntPtr)inputs); Marshal.FreeHGlobal((IntPtr)outputs);
+                // The QnnDevice, like backend/context/graph, is left to the runtime (freed by the VOM cascade on
+                // owner Terminate, CRQ164) — freeing it here while the context is still associated is rejected.
+                string prep = emitted > 0 ? "prepared" : "NO-BIN";
+                return $"DpxQnn.Project: {backendLibrary} soc={socModel} arch=v{dspArch} K={featureK} N={featureN} bin={emitted}B {prep}";
+            }
+
             IntPtr inputMemory = Marshal.AllocHGlobal((int)(featureK * 4)); Marshal.Copy(input, 0, inputMemory, (int)featureK);
             IntPtr outputMemory = Marshal.AllocHGlobal((int)(featureN * 4));
             tx.V1.Buf.Data = inputMemory; tx.V1.Buf.DataSize = featureK * 4;
@@ -163,7 +249,7 @@ namespace Subsystem.Dpx
             Marshal.FreeHGlobal((IntPtr)executeInputs); Marshal.FreeHGlobal((IntPtr)executeOutputs);
 
             string verdict = maxRelative < 2e-2 ? "PASS" : "FAIL";
-            return $"DpxQnn.Project: {backendLibrary} K={featureK} N={featureN} bin={emitted}B maxRel={maxRelative:F5} {verdict}";
+            return $"DpxQnn.Project: {backendLibrary} soc={socModel} K={featureK} N={featureN} bin={emitted}B maxRel={maxRelative:F5} {verdict}";
         }
     }
 }

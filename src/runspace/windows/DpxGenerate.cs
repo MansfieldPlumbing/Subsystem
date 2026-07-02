@@ -17,9 +17,30 @@ namespace Subsystem.Windows
     {
         public static int Run(string[] args)
         {
+            // `--gpu-matmul auto` (CRQ190 R0): per-shape CPU/GPU routing for MatMulNBits. The mode rides
+            // DPGPU_BACKEND, which Dp hoists into a static readonly on first touch - so the variable must
+            // be set HERE, before anything below initializes a Dp static. Bare `--gpu-matmul` stays the
+            // all-or-nothing q4 GPU knob.
+            for (int i = 0; i + 1 < args.Length; i++)
+                if (args[i] == "--gpu-matmul" && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase))
+                    Environment.SetEnvironmentVariable("DPGPU_BACKEND", "auto");
+
             bool verbose = args.Contains("--verbose") || args.Contains("-v") || args.Contains("-verbose");
             bool profile = args.Contains("--profile");
-            var cleanArgs = args.Where(a => a != "--verbose" && a != "-v" && a != "-verbose" && a != "--profile").ToArray();
+            var clean = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                var a = args[i];
+                if (a == "--verbose" || a == "-v" || a == "-verbose" || a == "--profile") continue;
+                if (a == "--gpu-matmul")
+                {
+                    if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
+                    else Dp.UseGpuMatMulNBits = true;
+                    continue;
+                }
+                clean.Add(a);
+            }
+            var cleanArgs = clean.ToArray();
 
             if (cleanArgs.Length == 0)
             {
@@ -43,25 +64,49 @@ namespace Subsystem.Windows
                 return 1;
             }
 
-            string? embedDb = Directory.EnumerateFiles(modelsDir, "*-onnx-embed-q4.db").FirstOrDefault();
-            string? decoderDb = Directory.EnumerateFiles(modelsDir, "*-onnx-decoder-q4.db").FirstOrDefault();
-            string? spm = Directory.EnumerateFiles(modelsDir, "*.spm").FirstOrDefault();
-
-            if (embedDb == null || decoderDb == null || spm == null)
-            {
-                Console.Error.WriteLine($"Error: could not discover the embed/decoder .db pair + .spm tokenizer under {modelsDir}");
-                Console.Error.WriteLine($"  embed:   {embedDb ?? "MISSING (*-onnx-embed-q4.db)"}");
-                Console.Error.WriteLine($"  decoder: {decoderDb ?? "MISSING (*-onnx-decoder-q4.db)"}");
-                Console.Error.WriteLine($"  spm:     {spm ?? "MISSING (*.spm)"}");
-                return 1;
-            }
-
-            string unitId = Path.GetFileNameWithoutExtension(decoderDb);
-            Console.WriteLine($"[DPX] embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)}");
+            // Prefer a CONSOLIDATED db (ONE MODEL, ONE DB — CRQ191): a *.db that is NOT a per-face export or the
+            // litert deadpool and whose manifest names both the embed and decoder faces. Falls back to the
+            // per-face embed/decoder pair + loose .spm when no consolidated db is present.
+            string? consolidated = Directory.EnumerateFiles(modelsDir, "*.db")
+                .Where(f => !Path.GetFileName(f).Contains("-onnx-", StringComparison.OrdinalIgnoreCase)
+                         && !Path.GetFileName(f).Contains("litert", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(f =>
+                {
+                    var faces = ModelDb.QueryFaces(f);
+                    return faces.Contains("embed") && faces.Contains("decoder");
+                });
 
             Dg.ConsoleVerbose = verbose;
             if (profile) { Dp.Profile = true; Dp.Prof.Clear(); }
-            using var decoder = new DpxDecoder(embedDb, decoderDb, spm, unitId, maxTokens: maxNew) { Verbose = verbose };
+
+            DpxDecoder decoder;
+            if (consolidated != null)
+            {
+                string unitId = Path.GetFileNameWithoutExtension(consolidated);
+                Console.WriteLine($"[DPX] consolidated={Path.GetFileName(consolidated)} faces=[{string.Join(",", ModelDb.QueryFaces(consolidated))}] (embed+decoder+tokenizer in one db)");
+                decoder = new DpxDecoder(consolidated, unitId, maxTokens: maxNew) { Verbose = verbose };
+            }
+            else
+            {
+                string? embedDb = Directory.EnumerateFiles(modelsDir, "*-onnx-embed-q4.db").FirstOrDefault();
+                string? decoderDb = Directory.EnumerateFiles(modelsDir, "*-onnx-decoder-q4.db").FirstOrDefault();
+                string? spm = Directory.EnumerateFiles(modelsDir, "*.spm").FirstOrDefault();
+
+                if (embedDb == null || decoderDb == null || spm == null)
+                {
+                    Console.Error.WriteLine($"Error: could not discover a consolidated gemma4-e2b.db, nor the embed/decoder .db pair + .spm tokenizer under {modelsDir}");
+                    Console.Error.WriteLine($"  embed:   {embedDb ?? "MISSING (*-onnx-embed-q4.db)"}");
+                    Console.Error.WriteLine($"  decoder: {decoderDb ?? "MISSING (*-onnx-decoder-q4.db)"}");
+                    Console.Error.WriteLine($"  spm:     {spm ?? "MISSING (*.spm)"}");
+                    return 1;
+                }
+
+                string unitId = Path.GetFileNameWithoutExtension(decoderDb);
+                Console.WriteLine($"[DPX] embed={Path.GetFileName(embedDb)} decoder={Path.GetFileName(decoderDb)} spm={Path.GetFileName(spm)}");
+                decoder = new DpxDecoder(embedDb, decoderDb, spm, unitId, maxTokens: maxNew) { Verbose = verbose };
+            }
+            using var _decoderScope = decoder;
             var fault = decoder.BringUp();
             if (fault != null)
             {
@@ -77,6 +122,8 @@ namespace Subsystem.Windows
 
             DpxStreamOutput(decoder, prompt, cts.Token);
             Console.WriteLine();
+            // stderr so stdout's emitted text stays byte-comparable across runs (determinism receipts).
+            Console.Error.WriteLine($"[DPX KV] ring steps={decoder.KvRingSteps} (present-KV outputs appended in place; 0 = every cache on the legacy copy path)");
             if (profile) PrintProfile();
             return 0;
         }

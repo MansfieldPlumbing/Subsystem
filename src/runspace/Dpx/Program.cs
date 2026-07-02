@@ -36,6 +36,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "gpu-test-q4" ? GpuTestQ4(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
      : args[0] == "gpu-tune" ? GpuTune(args)
+     : args[0] == "gpu-tune-q4" ? ShaderTournament.ResolveQ4(args.Length > 1 ? args[1] : null)
      : args[0] == "db" ? ToDb(args)
      : args[0] == "db-stats" ? DbStats(args)
      : args[0] == "dumpsg" ? DumpSg(args)
@@ -134,92 +135,11 @@ static int GpuTune(string[] args)
     return ShaderTournament.RunTournament(args[1]);
 }
 
-// Write one or more signatures (sig, role, graph) into the SQLite model store. One writer for the ONNX and
-// litertlm paths (invariant 9). node/tensor ids are GLOBAL across signatures so node_attr.tensor_id stays
-// unique; the `signature` table is the section index. `sigs` is streamed — each graph is written then dropped.
+// Write one or more signatures into the SQLite model store. The writer now lives in ModelDb.cs — the SINGLE
+// writer shared by this dev-CLI, ss.exe's consolidation path, and both heads (invariant 9) — with chunked
+// tensor_blob restored so a >1GB tensor (the 1.17GB PLE embedding table) survives re-export instead of NULLing.
 static int WriteModelDb(string dbPath, IEnumerable<(int sig, string role, GraphProto g)> sigs)
-{
-    if (File.Exists(dbPath)) File.Delete(dbPath);
-    using var c = new SqliteConnection($"Data Source={dbPath}");
-    c.Open();
-    using (var ddl = c.CreateCommand())
-    {
-        ddl.CommandText = @"
-CREATE TABLE signature(sig INTEGER PRIMARY KEY, role TEXT, nodes INTEGER, tensors INTEGER, inputs INTEGER, outputs INTEGER);
-CREATE TABLE graph_io(sig INTEGER, kind TEXT, name TEXT, elem_type INTEGER, shape TEXT);
-CREATE TABLE node(id INTEGER PRIMARY KEY, sig INTEGER, ord INTEGER, op_type TEXT, name TEXT, backend TEXT);
-CREATE TABLE node_io(node_id INTEGER, slot INTEGER, kind TEXT, value_name TEXT);
-CREATE TABLE node_attr(node_id INTEGER, name TEXT, type INTEGER, i INTEGER, f REAL, s TEXT, ints TEXT, floats TEXT, tensor_id INTEGER);
-CREATE TABLE tensor(id INTEGER PRIMARY KEY, sig INTEGER, name TEXT, dtype INTEGER, dims TEXT, data BLOB);
-CREATE TABLE IF NOT EXISTS gpu_tactic_plan (
-    adapter_name TEXT,
-    op_type TEXT,
-    m INTEGER,
-    n INTEGER,
-    k INTEGER,
-    block_m INTEGER,
-    block_n INTEGER,
-    block_k INTEGER,
-    thread_m INTEGER,
-    thread_n INTEGER,
-    use_shared_mem INTEGER,
-    unroll_factor INTEGER,
-    dxil_bytecode BLOB,
-    latency_ms REAL,
-    PRIMARY KEY(adapter_name, op_type, m, n, k)
-);";
-        ddl.ExecuteNonQuery();
-    }
-    using var tx = c.BeginTransaction();
-    SqliteCommand P(string sql, params (string, object?)[] ps)
-    {
-        var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = sql;
-        foreach (var (k, v) in ps) cmd.Parameters.AddWithValue(k, v ?? DBNull.Value);
-        return cmd;
-    }
-    const long BlobCap = 1_000_000_000;   // SQLite default SQLITE_MAX_LENGTH; a larger native tensor is stored NULL + warned (chunked-BLOB is a later slice)
-    int tid = 0, nid = 0, sigCount = 0, totalNodes = 0;
-    int WriteTensor(int sig, TensorProto t)
-    {
-        int id = tid++;
-        byte[] data = t.RawData != null && t.RawData.Length > 0 ? t.RawData.ToByteArray() : TypedBytes(t);
-        if (data != null && data.LongLength >= BlobCap) { Console.Error.WriteLine($"  WARN tensor '{t.Name}' {data.LongLength}B >= blob cap — stored NULL (needs chunked BLOB)"); data = null; }
-        using var cmd = P("INSERT INTO tensor(id,sig,name,dtype,dims,data) VALUES($id,$sig,$n,$dt,$dm,$d)",
-            ("$id", id), ("$sig", sig), ("$n", t.Name ?? ""), ("$dt", t.DataType), ("$dm", string.Join(",", t.Dims)), ("$d", (object?)data));
-        cmd.ExecuteNonQuery();
-        return id;
-    }
-    foreach (var (sig, role, g) in sigs)
-    {
-        sigCount++;
-        foreach (var t in g.Initializer) WriteTensor(sig, t);
-        foreach (var vi in g.Input)  using (var cmd = P("INSERT INTO graph_io(sig,kind,name,elem_type,shape) VALUES($sig,'in',$n,$e,$s)",  ("$sig", sig), ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
-        foreach (var vi in g.Output) using (var cmd = P("INSERT INTO graph_io(sig,kind,name,elem_type,shape) VALUES($sig,'out',$n,$e,$s)", ("$sig", sig), ("$n", vi.Name ?? ""), ("$e", vi.Type?.TensorType?.ElemType ?? 0), ("$s", ShapeStr(vi)))) cmd.ExecuteNonQuery();
-        int sigNodes = 0;
-        foreach (var nd in g.Node)
-        {
-            int id = nid++;
-            using (var cmd = P("INSERT INTO node(id,sig,ord,op_type,name,backend) VALUES($id,$sig,$o,$op,$n,NULL)", ("$id", id), ("$sig", sig), ("$o", id), ("$op", nd.OpType ?? ""), ("$n", nd.Name ?? ""))) cmd.ExecuteNonQuery();
-            for (int k = 0; k < nd.Input.Count; k++)  using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'in',$v)",  ("$id", id), ("$s", k), ("$v", nd.Input[k] ?? ""))) cmd.ExecuteNonQuery();
-            for (int k = 0; k < nd.Output.Count; k++) using (var cmd = P("INSERT INTO node_io VALUES($id,$s,'out',$v)", ("$id", id), ("$s", k), ("$v", nd.Output[k] ?? ""))) cmd.ExecuteNonQuery();
-            foreach (var a in nd.Attribute)
-            {
-                object? aTid = a.T != null ? WriteTensor(sig, a.T) : null;
-                using var cmd = P("INSERT INTO node_attr(node_id,name,type,i,f,s,ints,floats,tensor_id) VALUES($id,$n,$t,$i,$f,$s,$ii,$ff,$tt)",
-                    ("$id", id), ("$n", a.Name ?? ""), ("$t", (int)a.Type), ("$i", a.I), ("$f", a.F),
-                    ("$s", a.S != null ? a.S.ToStringUtf8() : null), ("$ii", string.Join(",", a.Ints)), ("$ff", string.Join(",", a.Floats)), ("$tt", aTid));
-                cmd.ExecuteNonQuery();
-            }
-            sigNodes++;
-        }
-        using (var cmd = P("INSERT INTO signature(sig,role,nodes,tensors,inputs,outputs) VALUES($sig,$r,$n,$t,$i,$o)",
-            ("$sig", sig), ("$r", role), ("$n", sigNodes), ("$t", g.Initializer.Count), ("$i", g.Input.Count), ("$o", g.Output.Count))) cmd.ExecuteNonQuery();
-        totalNodes += sigNodes;
-    }
-    tx.Commit();
-    Console.WriteLine($"wrote {dbPath}  signatures={sigCount} nodes={totalNodes} tensors={tid}");
-    return 0;
-}
+    => ModelDb.WriteModelDb(dbPath, sigs);
 
 // Reverse of WriteModelDb: rebuild a runnable ModelProto from the SQLite model store (one signature).
 // Lets the engine RUN a graph that exists only as a .db (the ONNX q4 export) — no .onnx/.onnx_data on disk.
@@ -238,22 +158,6 @@ static int LoadDbTest(string[] args)
     int noData = m.Graph.Initializer.Count(t => t.RawData == null || t.RawData.Length == 0);
     Console.WriteLine($"initializers with empty data: {noData}");
     return 0;
-}
-
-static byte[] TypedBytes(TensorProto t)
-{
-    if (t.FloatData.Count > 0)  { var a = t.FloatData.ToArray();  var b = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
-    if (t.Int64Data.Count > 0)  { var a = t.Int64Data.ToArray();  var b = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
-    if (t.Int32Data.Count > 0)  { var a = t.Int32Data.ToArray();  var b = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
-    if (t.DoubleData.Count > 0) { var a = t.DoubleData.ToArray(); var b = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
-    return Array.Empty<byte>();
-}
-
-static string ShapeStr(ValueInfoProto vi)
-{
-    var dim = vi.Type?.TensorType?.Shape?.Dim;
-    if (dim == null) return "";
-    return string.Join(",", dim.Select(d => !string.IsNullOrEmpty(d.DimParam) ? d.DimParam : d.DimValue.ToString()));
 }
 
 // db-stats: op triage straight off the .db — the op histogram + the backend-unfriendly ops, as queries.
@@ -473,7 +377,7 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db>"); return 1; }
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db> | gpu-tune-q4 [srcRoot]"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
@@ -800,6 +704,11 @@ static int Probe(string path, bool stopOnMissing = true)
 //       completion, diff the waveform against ORT's oracle.bin) -----
 int Run(string[] args)
 {
+    // `--gpu-matmul auto` / `--gpu-matmulnbits auto` (CRQ190 R0): per-shape routing rides DPGPU_BACKEND,
+    // which Dp hoists on first static touch - set the variable BEFORE the parse loop touches any Dp knob.
+    for (int i = 1; i + 1 < args.Length; i++)
+        if ((args[i] == "--gpu-matmul" || args[i] == "--gpu-matmulnbits") && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase))
+            Environment.SetEnvironmentVariable("DPGPU_BACKEND", "auto");
     string path = null, inputsDir = null, outPath = null, dumpNode = null, compareDir = null, injectNode = null; bool trace = false; int stopAfter = 0; int sectionIx = -1;
     for (int i = 1; i < args.Length; i++)
         switch (args[i])
@@ -812,8 +721,14 @@ int Run(string[] args)
             case "--dump-node": dumpNode = args[++i]; break;
             case "--compare": compareDir = args[++i]; break;
             case "--inject": injectNode = args[++i]; break;   // replace matching nodes' output w/ oracle (needs --compare <dir>)
-            case "--gpu-matmul": Dp.UseGpuMatMul = true; break;   // offload every MatMul to dpgpu.dll (D3D12); CPU fallback on mount failure
-            case "--gpu-matmulnbits": Dp.UseGpuMatMulNBits = true; break;   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); CPU fallback on mount failure
+            case "--gpu-matmul":   // offload every MatMul to the GPU seam (D3D12); `auto` = per-shape router; CPU fallback on mount failure
+                if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
+                else Dp.UseGpuMatMul = true;
+                break;
+            case "--gpu-matmulnbits":   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); `auto` = per-shape router; CPU fallback on mount failure
+                if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;
+                else Dp.UseGpuMatMulNBits = true;
+                break;
             case "--prof": Dp.Profile = true; break;   // per-op-type wall-time breakdown
             case "--drop": Dp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
             case "--drop-scope": Dp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")

@@ -23,8 +23,9 @@ namespace Subsystem.Dpx
         private readonly string? _embedModelPath;
         private readonly string? _spmPath;
         private readonly string _unitId;
-        private readonly int _maxTokens;
+        private int _maxTokens;
         private readonly bool _split;
+        private readonly bool _consolidated;
 
         private ModelProto? _model;
         private ModelProto? _embedModel;
@@ -40,6 +41,14 @@ namespace Subsystem.Dpx
         public bool? WorkerIsThreadPoolThread { get; private set; }
         public bool Verbose { get; set; }
         public int PromptTokensCount { get; private set; }
+        // Ring receipt (CRQ190): present-KV outputs that came back ring-marked (appended in place inside
+        // the persistent region) instead of needing the legacy per-token alloc/copy/close carry-forward.
+        public long KvRingSteps { get; private set; }
+
+        // Per-turn decode cap. The constructor value seeds it; a resident host (e.g. ss mcp `query`)
+        // sets it between turns. Turns are serialized by _turnGate and the hosts are single-threaded,
+        // so a set never races an in-flight decode loop.
+        public int MaxTokens { get => _maxTokens; set { if (value > 0) _maxTokens = value; } }
 
         // Constructor 1: Injected for testing
         public DpxDecoder(ModelProto model, SentencePieceTokenizer tokenizer, string unitId, int maxTokens = 4096)
@@ -74,6 +83,19 @@ namespace Subsystem.Dpx
             _split = true;
         }
 
+        // Constructor 4: ONE consolidated db (CRQ191) — embed + decoder faces resolved BY NAME from one file,
+        // the tokenizer read from its blob table. No loose sidecar, no per-face pair; still the split decode
+        // path (two graphs, dynamic KV), just sourced from a single self-describing db.
+        public DpxDecoder(string consolidatedDbPath, string unitId, int maxTokens = 4096)
+        {
+            _modelPath = consolidatedDbPath;
+            _embedModelPath = consolidatedDbPath;
+            _unitId = unitId;
+            _maxTokens = maxTokens > 0 ? maxTokens : 4096;
+            _split = true;
+            _consolidated = true;
+        }
+
         public bool IsAlive => _ready && _initFault == null;
         public string BackendName => _backendName;
 
@@ -89,6 +111,24 @@ namespace Subsystem.Dpx
 
                 try
                 {
+                    if (_consolidated)
+                    {
+                        if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
+                        {
+                            throw new FileNotFoundException($"Consolidated db not found: {_modelPath}");
+                        }
+                        // One db, faces by name: decoder + embed graphs, tokenizer from the blob table.
+                        if (_model == null) _model = ModelDb.LoadGraphFromDb("decoder", _modelPath);
+                        if (_embedModel == null) _embedModel = ModelDb.LoadGraphFromDb("embed", _modelPath);
+                        if (_tokenizer == null)
+                        {
+                            byte[] spm = ModelDb.ExtractTokenizerBlob(_modelPath, null)
+                                ?? throw new FileNotFoundException($"Consolidated db carries no tokenizer blob: {_modelPath}");
+                            _tokenizer = new SentencePieceTokenizer(SpModelProto.Parse(spm));
+                        }
+                    }
+                    else
+                    {
                     if (_model == null)
                     {
                         if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
@@ -116,6 +156,7 @@ namespace Subsystem.Dpx
                         }
                         var spm = SpModelProto.Parse(File.ReadAllBytes(_spmPath));
                         _tokenizer = new SentencePieceTokenizer(spm);
+                    }
                     }
 
                     _interp = new Dp(_model) { Verbose = this.Verbose };
@@ -234,6 +275,17 @@ namespace Subsystem.Dpx
             int step = 0;
             var currentTokens = new List<int>(fullTokenIds);
 
+            // KV ring (CRQ190): same persistent-region scheme as DecodeLoopSplit - one VOM region per
+            // past-KV input for the whole turn, in-place append by the ring-aware kernels, demote-once
+            // to legacy copy-forward when a cache's present comes back unmarked.
+            int kvRingCap = fullTokenIds.Count + _maxTokens;
+            var ringLive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvInput in pastKvInputs)
+            {
+                kvCacheHandles[kvInput.Name] = DpTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
+                ringLive.Add(kvInput.Name);
+            }
+
             while (step < _maxTokens)
             {
                 ct.ThrowIfCancellationRequested();
@@ -255,9 +307,15 @@ namespace Subsystem.Dpx
                         if (kvCacheHandles.TryGetValue(kvInput.Name, out var kv))
                         {
                             // Zero-copy: alias the persisted VOM region directly as the feed tensor's
-                            // native backing (Dp.Run only reads it) - no managed array, no Marshal.Copy.
+                            // native backing - no managed array, no Marshal.Copy. A ring-live cache also
+                            // carries KvCap so the kernel appends this step's K/V in place.
                             int[] shape = GetKvInputShape(kvInput, step);
-                            unsafe { feed[kvInput.Name] = Tensor.F((float*)kv.Data.Resource, shape); }
+                            unsafe
+                            {
+                                var past = Tensor.F((float*)kv.Data.Resource, shape);
+                                if (ringLive.Contains(kvInput.Name)) past.KvCap = kvRingCap;
+                                feed[kvInput.Name] = past;
+                            }
                         }
                         else
                         {
@@ -275,7 +333,21 @@ namespace Subsystem.Dpx
                     foreach (var kvInput in pastKvInputs)
                     {
                         int[] shape = GetKvInputShape(kvInput, 0);
-                        feed[kvInput.Name] = Tensor.F(Array.Empty<float>(), shape);
+                        if (kvCacheHandles.TryGetValue(kvInput.Name, out var kv))
+                        {
+                            // Prefill sees an empty (0-row) window over the ring so the kernel writes the
+                            // whole prompt's K/V straight into the persistent region.
+                            unsafe
+                            {
+                                var past = Tensor.F((float*)kv.Data.Resource, shape);
+                                if (ringLive.Contains(kvInput.Name)) past.KvCap = kvRingCap;
+                                feed[kvInput.Name] = past;
+                            }
+                        }
+                        else
+                        {
+                            feed[kvInput.Name] = Tensor.F(Array.Empty<float>(), shape);
+                        }
                     }
                 }
 
@@ -316,36 +388,34 @@ namespace Subsystem.Dpx
 
                 if (pastKvInputs.Count > 0)
                 {
-                    var newCache = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
-
                     foreach (var kvOutput in outputs.Keys.Where(name => name.Contains("present")))
                     {
                         string pastName = kvOutput.Replace("present", pastPrefix);
                         var tensor = outputs[kvOutput];
 
-                        // Single copy straight into the persisted VOM region (source -> VOM), no
-                        // managed-array intermediate (was source -> GC array -> VOM, two copies).
+                        // Ring-marked present = the kernel already appended in place inside the
+                        // persistent region this handle points at; handle stays put, nothing to copy.
+                        if (tensor.KvCap > 0 && ringLive.Contains(pastName)) { KvRingSteps++; continue; }
+
+                        // Demoted / non-ring cache: legacy copy-forward - single copy straight into a
+                        // fresh persisted VOM region (source -> VOM), close the previous one.
+                        ringLive.Remove(pastName);
                         var kv = DpTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
                         tensor.AsF().CopyTo(kv.ReadF32());
-
-                        newCache[pastName] = kv;
+                        if (kvCacheHandles.TryGetValue(pastName, out var old))
+                        {
+                            if (Verbose)
+                            {
+                                Console.Error.WriteLine($"[DEBUG CACHE] Closing old cache: path={old.Data.Path}, pointer=0x{old.Data.Resource:X}");
+                            }
+                            old.Close();
+                        }
+                        kvCacheHandles[pastName] = kv;
                         if (Verbose)
                         {
                             Console.Error.WriteLine($"[DEBUG CACHE] Allocated new cache: key={pastName}, shape=[{string.Join(",", tensor.Shape)}], pointer=0x{kv.Data.Resource:X}");
                         }
                     }
-
-                    // Close old KV-cache regions
-                    foreach (var kv in kvCacheHandles.Values)
-                    {
-                        if (Verbose)
-                        {
-                            Console.Error.WriteLine($"[DEBUG CACHE] Closing old cache: path={kv.Data.Path}, pointer=0x{kv.Data.Resource:X}");
-                        }
-                        kv.Close();
-                    }
-
-                    kvCacheHandles = newCache;
                 }
 
                 step++;
@@ -372,6 +442,21 @@ namespace Subsystem.Dpx
             var seq = new List<int>(fullTokenIds);
             int pastLen = 0;
             int step = 0;
+
+            // KV ring (CRQ190): ONE VOM region per past-KV input, preallocated to the most rows this
+            // turn can reach (prompt + maxTokens) and kept for the whole turn - the ring-aware kernels
+            // append each step's K/V in place at row `pastLen` and alias the region back out as present,
+            // so there is no per-token alloc/copy/close here. KvCap on the feed tensor is the engage
+            // signal; a cache whose present comes back unmarked (no ring-capable producer in the graph)
+            // is demoted once to the legacy copy-forward below and stays there. Regions belong to the
+            // turn owner and cascade-terminate with it.
+            int kvRingCap = fullTokenIds.Count + _maxTokens;
+            var ringLive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvInput in pastKvInputs)
+            {
+                kvCacheHandles[kvInput.Name] = DpTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
+                ringLive.Add(kvInput.Name);
+            }
 
             while (step < _maxTokens)
             {
@@ -403,9 +488,15 @@ namespace Subsystem.Dpx
                     if (kvCacheHandles.TryGetValue(kvInput.Name, out var kv))
                     {
                         // Zero-copy: alias the persisted VOM region directly as the feed tensor's native
-                        // backing (Dp.Run only reads it) - no managed array, no Marshal.Copy.
+                        // backing - no managed array, no Marshal.Copy. A ring-live cache also carries
+                        // KvCap so the kernel writes this step's K/V in place at row `pastLen`.
                         int[] shape = GetKvInputShape(kvInput, pastLen);
-                        unsafe { feed[kvInput.Name] = Tensor.F((float*)kv.Data.Resource, shape); }
+                        unsafe
+                        {
+                            var past = Tensor.F((float*)kv.Data.Resource, shape);
+                            if (ringLive.Contains(kvInput.Name)) past.KvCap = kvRingCap;
+                            feed[kvInput.Name] = past;
+                        }
                     }
                     else
                     {
@@ -456,32 +547,34 @@ namespace Subsystem.Dpx
                     writer(new AgentDelta(AgentDeltaKind.Token, text));
                 }
 
-                var newCache = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
                 foreach (var kvOutput in outputs.Keys.Where(name => name.Contains("present")))
                 {
                     string pastName = kvOutput.Replace("present", pastPrefix);
                     var tensor = outputs[kvOutput];
 
+                    // Ring-marked present = the kernel already appended in place inside the persistent
+                    // region this handle points at; the handle stays put, nothing to copy or close.
+                    if (tensor.KvCap > 0 && ringLive.Contains(pastName)) { KvRingSteps++; continue; }
+
+                    // Demoted / non-ring cache: legacy copy-forward (alloc fresh, copy present, close old).
+                    ringLive.Remove(pastName);
                     var kv = DpTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
                     tensor.AsF().CopyTo(kv.ReadF32());
-
-                    newCache[pastName] = kv;
+                    if (kvCacheHandles.TryGetValue(pastName, out var old))
+                    {
+                        if (Verbose)
+                        {
+                            Console.Error.WriteLine($"[DEBUG CACHE] Closing old cache: path={old.Data.Path}, pointer=0x{old.Data.Resource:X}");
+                        }
+                        old.Close();
+                    }
+                    kvCacheHandles[pastName] = kv;
                     if (Verbose)
                     {
                         Console.Error.WriteLine($"[DEBUG CACHE] Allocated new cache: key={pastName}, shape=[{string.Join(",", tensor.Shape)}], pointer=0x{kv.Data.Resource:X}");
                     }
                 }
 
-                foreach (var kv in kvCacheHandles.Values)
-                {
-                    if (Verbose)
-                    {
-                        Console.Error.WriteLine($"[DEBUG CACHE] Closing old cache: path={kv.Data.Path}, pointer=0x{kv.Data.Resource:X}");
-                    }
-                    kv.Close();
-                }
-
-                kvCacheHandles = newCache;
                 step++;
             }
 
