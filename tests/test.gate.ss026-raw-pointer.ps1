@@ -10,9 +10,12 @@ $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }
 
-# the freshly-built analyzer assembly (Release)
-$dll = Get-ChildItem "S:\subsystem-project\build\Subsystem.Analyzers\bin\Release\netstandard2.0\Subsystem.Analyzers.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
-if(-not $dll){ Write-Host "Subsystem.Analyzers.dll (Release) not found — build src/analyzers first." -ForegroundColor Red; return }
+# the freshly-built analyzer assembly (Release preferred; SS_BUILD overrides the out-of-repo build root)
+$buildRoot = if ($env:SS_BUILD) { $env:SS_BUILD } else { 'S:\build' }
+$dll = @("$buildRoot\Subsystem.Analyzers\bin\Release\netstandard2.0\Subsystem.Analyzers.dll",
+         "$buildRoot\Subsystem.Analyzers\bin\Debug\netstandard2.0\Subsystem.Analyzers.dll") |
+       Where-Object { Test-Path $_ } | Select-Object -First 1 | ForEach-Object { Get-Item $_ }
+if(-not $dll){ Write-Host "Subsystem.Analyzers.dll not found under $buildRoot — build src/analyzers first." -ForegroundColor Red; return }
 $asm = [System.Reflection.Assembly]::LoadFrom($dll.FullName)
 $t = $asm.GetType('Subsystem.Analyzers.SS026RawPointerBoundaryAnalyzer')
 if(-not $t){ Write-Host "SS026 type not present in the assembly." -ForegroundColor Red; return }

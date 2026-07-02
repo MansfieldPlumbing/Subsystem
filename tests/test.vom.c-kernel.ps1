@@ -9,8 +9,8 @@ $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }
 
-$build = 'S:\subsystem-project\subsystem-main\src\native\vom\build.ps1'
-if (-not (Test-Path $build)) { Write-Host "build.ps1 not found." -ForegroundColor Red; return }
+$build = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\native\vom\build.ps1'
+if (-not (Test-Path $build)) { Write-Host "build.ps1 not found at $build." -ForegroundColor Red; return }
 
 $haveVc = @($env:SS_VCVARS, 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat',
             'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat') |
