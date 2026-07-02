@@ -8,7 +8,10 @@ A **push** IPC transport. It **owns the memory and the fences**; everything else
 primitive is an **NT shared handle + a value-based fence (timeline)** — Cutler's object manager
 meets a plumbing **Port**. It is the VOM at GPU / cross-process scope: producer writes a
 256-aligned shared texture/buffer, signals the fence, consumers `Wait` on the fence value. Zero
-copy, GPU→GPU, no OS scheduler in the hot path (~170 ns crossbar wait).
+copy same-adapter, no OS scheduler in the hot path. The wait latency is UNMEASURED — no receipt
+exists; a sub-microsecond hardware-crossbar wakeup is the theoretical ideal, never observed on
+this hardware. Do not cite a number until a bench prints one. (A "~170 ns" figure circulated in
+older copies of this doc; it was aspiration, not measurement — retired 2026-07-02, Scott.)
 
 ## The contract (read the spec)
 - **`DirectPort_Adapter_Protocol.md`** — THE spec. The `BroadcastManifest` (the descriptor in the

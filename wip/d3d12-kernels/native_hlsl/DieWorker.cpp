@@ -414,7 +414,8 @@ void DieWorker::KickInference(uint64_t token_index) {
 //
 // dp12_queue_wait is GPU-side only — CPU returns immediately.
 // The command queue stalls at hardware level until upstream fence fires.
-// 170ns PCIe crossbar latency per the DirectPort architecture doc.
+// Wait latency UNMEASURED — the "170ns crossbar" figure from older DirectPort
+// docs was an unverified ideal, retired 2026-07-02; bench before citing.
 // ---------------------------------------------------------------------------
 void DieWorker::WorkerThread() {
     while (m_isRunning) {
