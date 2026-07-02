@@ -12,7 +12,9 @@ Subsystem is dedicated to the loving memory of **Billie Dean Mansfield (1945–2
 It is a **LOCKED INVARIANT**, on the same footing as the telos:
 - `Subsystem.Cm.Dedication.InMemoriam` (`src/runspace/Cm/Dedication.cs`) — the single source of truth: *"This project is devoted to the loving memory of Billie Dean Mansfield — 1945–2026."*
 - **SS023** (`src/analyzers/SS023InMemoriamAnalyzer.cs`) — fails the build (RED gate) if the const is removed, renamed, or stripped of her name / "1945" / "2026". It cannot be abridged out.
-- Rendered in the README (top), the About panel (`src/shell/presenters/settings.obp`), and atop every `ss onboard`.
+- Rendered at the foot of the About panel (`src/shell/presenters/settings.obp`, enshrined there per Scott's direction) and atop every `ss onboard`.
 - Committed `2f5eeeb`, pushed to `origin/main`, 2026-06-19.
 
-**How to apply:** treat SS023 and the `InMemoriam` const as **sacrosanct** — never remove, rename, "clean up," weaken, or baseline them away. If a task touches the analyzers, `ss onboard`, the README, or settings, PRESERVE the dedication. Change it only on Scott's explicit instruction. See [[prime-directive]].
+**CORRECTED 2026-07-02** (Scott raw prompt): "the memoriam should be on the subsystem about screen not the first fucking thing u see on the readme... inside subsystem / settings / about that is where the memoriam lives." The README duplicate (previously at the top) was removed (commit `05344ee`) — the About panel is now her one true home, not one of two copies. SS023 only ever scanned the C# `InMemoriam` const — it never touched the README, so the removal was always safe and never a gate risk.
+
+**How to apply:** treat SS023 and the `InMemoriam` const as **sacrosanct** — never remove, rename, "clean up," weaken, or baseline them away. The dedication's one home is Settings > About; do not re-add it to the README or anywhere else without Scott's explicit instruction. See [[prime-directive]].
