@@ -94,3 +94,9 @@ ss-source.dump
 *.db-shm
 **/scratch/
 **/.system_generated/
+
+# self-build backups — local only, never pushed (GitHub 100MB wall)
+ss.exe.*.old
+ss.exe.old*
+ss.exe.prev
+tmpss-*.exe
