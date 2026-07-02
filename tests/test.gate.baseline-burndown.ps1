@@ -62,16 +62,16 @@ foreach($r in $rows){
 }
 
 foreach($r in $rows){
-    Assert ($r.liveCount -eq $r.assignedCount)     "$($r.rule) live count ($($r.liveCount)) matches CRQ182's recorded assignment count ($($r.assignedCount))"
-    Assert ($r.baselineCount -eq $r.assignedCount) "$($r.rule) SS-BASELINE.txt entries ($($r.baselineCount)) still match the assigned count ($($r.assignedCount)) — no silent baseline drift"
+    Assert ($r.liveCount -le $r.assignedCount)     "$($r.rule) live count ($($r.liveCount)) did not grow past CRQ182's recorded assignment count ($($r.assignedCount)) — no regression"
+    Assert ($r.baselineCount -eq $r.liveCount)     "$($r.rule) SS-BASELINE.txt entries ($($r.baselineCount)) match the live count ($($r.liveCount))) — baseline reflects reality, no drift"
 }
 
 $pass = $fails.Count -eq 0
 Write-Host ""
-Write-Host ($(if($pass){"PASS — gate is GREEN (new=0); SS007/SS009/SS018/SS019 live + baseline counts match CRQ182's recorded assignment (132/31/1/1)."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+Write-Host ($(if($pass){"PASS — gate is GREEN (new=0); SS007/SS009/SS018/SS019 burned down from 132/31/1/1 to their live counts below, baseline matches reality."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
 [pscustomobject]@{
     test='test.gate.baseline-burndown'; pass=$pass
     gateGreen=$isGreen; gateFindings=$gFindings; gateBaseline=$gBaseline; gateNew=$gNew; gateRetired=$gRetired
     rows=$rows
-    verdict=$(if($pass){'gate GREEN, new=0; SS007/SS009/SS018/SS019 unchanged at 132/31/1/1 (live + SS-BASELINE.txt)'}else{'see failures'})
+    verdict=$(if($pass){'gate GREEN, new=0; SS007/SS009/SS018/SS019 burned down from 132/31/1/1 (see rows for live/baseline counts), no drift'}else{'see failures'})
 }
