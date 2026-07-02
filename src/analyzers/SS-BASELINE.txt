@@ -117,9 +117,6 @@ SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to D
 SS007|ReplEngine.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Rs.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|Rs.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
-SS007|RuntimeBroker.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|ScreenStreamCmdlets.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|ScreenStreamReceiver.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
 SS007|SelfSource.cs|Empty catch block — a failure must degrade AND report to Dg (/diag), never vanish silently
@@ -173,7 +170,6 @@ SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-V
 SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ProjectionServer.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ReplEngine.cs|new Thread spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
-SS009|RuntimeBroker.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ScreenStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ScreenStreamCmdlets.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
 SS009|ScreenStreamReceiver.cs|Task.Run spawns work the VOM does not own — no Sub-VOM, quota, or termination token; route it through Vom.Spawn (Ps) so it is owned, quota'd, and cancellable
@@ -199,7 +195,6 @@ SS011|AgentSettings.cs|Namespace 'Subsystem' carries no component segment (root-
 SS011|AndroidPubKey.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AndroidSubsystemHost.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AnsiHighlighter.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
-SS011|Broker.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|ConscryptAdbTransport.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Dg.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|DumpsysTreeParser.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -207,7 +202,6 @@ SS011|Firewall.cs|Namespace 'Subsystem' carries no component segment (root-only 
 SS011|HelpSystem.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Hud.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|IAdbTransport.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
-SS011|InvokeAgentCmdlet.cs|Namespace 'Subsystem.RuntimeBroker.Cmdlets' segment 'RuntimeBroker' is not a registered component — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|LiteRt.cs|Namespace 'Onnx' does not start at the root ('Subsystem') — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|LiteRtGuest.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|LiteRtNative.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -225,7 +219,6 @@ SS011|Registrar.cs|Namespace 'Subsystem' carries no component segment (root-only
 SS011|ReplEngine.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Rs.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Runtime.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
-SS011|RuntimeBroker.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|ScheduledTaskTable.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|SentencePiece.cs|Namespace 'Onnx' does not start at the root ('Subsystem') — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|Sessions.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -332,11 +325,11 @@ SS013|SentencePiece.cs|Method 'FindPieceId' starts with 'Find', which is not in 
 SS013|SentencePiece.cs|Method 'Skip' starts with 'Skip', which is not in the verb catalog — register the verb deliberately or use an approved one
 SS014|Dg.cs|Dg may not reference component Cm ('Cm') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Cm ('Cm') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
+SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rb ('ModelSpec') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
-SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
-SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
-SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
-SS014|Dg.cs|Dg may not reference component Rb ('LiteRtGuest') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rs ('PsrpSession') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rs ('PsrpSession') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
 SS014|Dg.cs|Dg may not reference component Rs ('PsrpSession') — dependsOn: []; grant the dependency in SystemCatalog.json deliberately or route through a granted seam
