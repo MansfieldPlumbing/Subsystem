@@ -2,6 +2,7 @@ SS003|AudioStreamCmdlets.cs|Static ConcurrentDictionary — a parallel store of 
 SS003|Cm.cs|Static ConcurrentDictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Dp.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|Dp.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
+SS003|GpuD3D12.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|HelpSystem.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|LiteRt.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
 SS003|LiteRt.cs|Static Dictionary — a parallel store of truth; live objects belong in Vom handles, durable definitions in Cm rows
@@ -398,8 +399,18 @@ SS015|GpuD3D12.cs|Static field 's_name' (mutable) — statics compute, never rem
 SS015|GpuD3D12.cs|Static field 's_pso' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_psoLen' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_psoQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_psoQ4Hash' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_psoQ4Len' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_q' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4ABuf' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4ACap' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4Alloc' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4CBuf' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4CCap' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4Cache' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4List' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4RbBuf' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_q4RbCap' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_root' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_rootQ4' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuVulkan.cs|Static field 's_dev' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)

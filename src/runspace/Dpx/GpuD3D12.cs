@@ -4,6 +4,7 @@
 // engine is now managed + shader bytecode -> sovereign; the same shape ports to Vulkan (vulkan-1.dll / SPIR-V).
 // Persistent device/queue/root-sig/PSO/fence; per-call buffers released. MakeDevice = beefiest-by-VRAM
 // (V340 over P2000) with DPGPU_ADAPTER override, parity with dpgpu.cpp.
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace Subsystem.Dpx;
@@ -28,6 +29,8 @@ unsafe static class GpuD3D12
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int  DCreateRes(IntPtr d, ref HEAP h, int hf, ref RDESC rd, int st, IntPtr cv, byte[] r, out IntPtr o);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int  DCreateFence(IntPtr d, ulong v, int f, byte[] r, out IntPtr o);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int  DClose(IntPtr l);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int  DResetAlloc(IntPtr a);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int  DResetList(IntPtr l, IntPtr alloc, IntPtr pso);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate void DSetRS(IntPtr l, IntPtr rs);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate void DSetPSO(IntPtr l, IntPtr pso);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate void DSet32(IntPtr l, uint idx, uint num, void* data, uint off);
@@ -68,7 +71,25 @@ unsafe static class GpuD3D12
     public static string Name => s_name;
 
     // q4 GEMM root sig/PSO — separate from the fp32 GEMM (5 params: RootConstants(5) b0, SRV t0 A, SRV t1 Bq, SRV t2 Scales, SRV t3 Zp, UAV u0 C).
-    static IntPtr s_rootQ4, s_psoQ4; static int s_psoQ4Len = -1;
+    // PSO cache key is length+FNV-1a(bytes), not length alone (two different DXIL blobs of the same length used
+    // to silently reuse the wrong compiled PSO — CRQ-tournament shaders are exactly this size-collision shape).
+    static IntPtr s_rootQ4, s_psoQ4; static int s_psoQ4Len = -1; static ulong s_psoQ4Hash;
+
+    static ulong Fnv1a(byte[] data)
+    {
+        ulong h = 0xcbf29ce484222325UL;
+        for (int i = 0; i < data.Length; i++) { h ^= data[i]; h *= 0x100000001b3UL; }
+        return h;
+    }
+
+    // ---- resident weight cache (Bq/scales/zp uploaded once per distinct weightKey, reused every call) ----
+    // Persistent command allocator/list (Reset, not recreate) and grow-only A-upload/C-readback/C-default
+    // buffers round out the "no per-call D3D12 object churn" story for the q4 seam.
+    struct ResidentQ4 { public IntPtr Bq, Scales, Zp; public long BqVA, ScVA, ZpVA; public ulong BqB, ScB, ZpB; }
+    static readonly Dictionary<long, ResidentQ4> s_q4Cache = new();
+
+    static IntPtr s_q4Alloc, s_q4List;
+    static IntPtr s_q4ABuf, s_q4CBuf, s_q4RbBuf; static ulong s_q4ACap, s_q4CCap, s_q4RbCap;
 
     static IntPtr MakeDevice()
     {
@@ -196,50 +217,126 @@ unsafe static class GpuD3D12
         return 0;
     }
 
+    // Upload `bytes` bytes from managed `src` into a fresh DEFAULT-heap buffer, via a throwaway UPLOAD-heap
+    // staging buffer + CopyBufferRegion, then transition the default buffer COPY_DEST -> SRV-readable. This
+    // happens once per resident weight (first sight of a weightKey); the staging buffer + its own tiny
+    // alloc/list are local and released immediately - only the destination DEFAULT buffer is kept resident.
+    static IntPtr UploadResident(byte[] resIID, byte[] src, ulong lenBytes)
+    {
+        IntPtr staging = MkBuf(resIID, 2, lenBytes, 2755, 0);   // UPLOAD, GENERIC_READ
+        RANGE z = new RANGE(); void* p;
+        Fn<DMap>(staging, 8)(staging, 0, ref z, out p); Marshal.Copy(src, 0, (IntPtr)p, src.Length); Fn<DUnmap>(staging, 9)(staging, 0, IntPtr.Zero);
+        IntPtr dst = MkBuf(resIID, 1, lenBytes, 1024, 0);       // DEFAULT, COPY_DEST
+        IntPtr alloc; Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out alloc);
+        IntPtr list;  Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, alloc, IntPtr.Zero, G(IID_LIST), out list);
+        Fn<DCopy>(list, 15)(list, dst, 0, staging, 0, lenBytes);
+        BAR bar = new BAR { Type = 0, Res = dst, Before = 1024, After = 64 };   // COPY_DEST -> NON_PIXEL_SHADER_RESOURCE
+        Fn<DBarrier>(list, 26)(list, 1, ref bar);
+        Fn<DClose>(list, 9)(list);
+        IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+        ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+        var gcv = Fn<DGetCompl>(s_fence, 8); while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(64);
+        Marshal.Release(staging); Marshal.Release(list); Marshal.Release(alloc);
+        return dst;
+    }
+
+    // Grow-only persistent buffer: reallocates only when the requested size exceeds current capacity, so a
+    // decode loop that settles into a stable max shape (prefill once, then steady-state decode) allocates the
+    // A-upload/C-default/C-readback buffers exactly once and every subsequent call just Maps/Copies into them.
+    static void EnsureCap(byte[] resIID, ref IntPtr buf, ref ulong cap, ulong need, int heap, int state, int flags)
+    {
+        if (buf != IntPtr.Zero && cap >= need) return;
+        if (buf != IntPtr.Zero) Marshal.Release(buf);
+        buf = MkBuf(resIID, heap, need, state, flags);
+        cap = need;
+    }
+
     // GemmQ4: Y[M,N] = A[M,K] @ dequant(Bq)^T, q4 SEQUENTIAL-nibble packed weight, never expanded to fp32 on CPU.
     // A/Scales fp32, Bq/Zp raw packed uint8 nibbles (Zp may be empty when hasZp=false — dequant defaults zp=8 on GPU).
-    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, int dxilLen)
+    // weightKey>0: Bq/Scales/Zp are uploaded to a DEFAULT-heap buffer ONCE (keyed by weightKey) and reused on every
+    // subsequent call with the same key - the 33MB+ weight re-upload that made the naive per-call path slower than
+    // the CPU SIMD kernel is gone entirely; only A (tiny, M*K) and C (readback) still move host<->device per call.
+    // weightKey<=0 preserves the old fully-per-call upload/release behavior (no caching, no leaked resources).
+    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, int dxilLen, long weightKey = -1)
     {
         EnsureInit();
-        if (s_psoQ4 == IntPtr.Zero || s_psoQ4Len != dxilLen)
+        ulong dHash = Fnv1a(dxil);
+        if (s_psoQ4 == IntPtr.Zero || s_psoQ4Len != dxilLen || s_psoQ4Hash != dHash)
         {
+            if (s_psoQ4 != IntPtr.Zero) { Marshal.Release(s_psoQ4); s_psoQ4 = IntPtr.Zero; }
             IntPtr dp = Marshal.AllocHGlobal(dxilLen); Marshal.Copy(dxil, 0, dp, dxilLen);
             CPSO pd = new CPSO { RS = s_rootQ4, CS = new BC { p = dp, len = (IntPtr)dxilLen } };
-            if (Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out s_psoQ4) != 0) return -6;
-            s_psoQ4Len = dxilLen;
+            int rc = Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out s_psoQ4);
+            Marshal.FreeHGlobal(dp);
+            if (rc != 0) return -6;
+            s_psoQ4Len = dxilLen; s_psoQ4Hash = dHash;
         }
         byte[] resIID = G(IID_RES);
-        IntPtr alloc; Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out alloc);
-        IntPtr list;  Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, alloc, s_psoQ4, G(IID_LIST), out list);
+        bool cache = weightKey > 0;
         ulong aB = (ulong)M * K * 4, bqB = (ulong)Bq.Length, scB = (ulong)Scales.Length * 4, cB = (ulong)M * N * 4;
         ulong zpB = (ulong)Math.Max(1, Zp?.Length ?? 1);   // D3D12 disallows zero-size resources; alloc >=1 byte
-        IntPtr aBuf  = MkBuf(resIID, 2, aB, 2755, 0);
-        IntPtr bqBuf = MkBuf(resIID, 2, bqB, 2755, 0);
-        IntPtr scBuf = MkBuf(resIID, 2, scB, 2755, 0);
-        IntPtr zpBuf = MkBuf(resIID, 2, zpB, 2755, 0);
-        IntPtr cBuf  = MkBuf(resIID, 1, cB, 8, 4);      // DEFAULT, UNORDERED_ACCESS, ALLOW_UAV
-        IntPtr rbBuf = MkBuf(resIID, 3, cB, 1024, 0);   // READBACK, COPY_DEST
+
+        long bqVA, scVA, zpVA;
+        IntPtr bqBuf = IntPtr.Zero, scBuf = IntPtr.Zero, zpBuf = IntPtr.Zero;   // only set (and later released) on the no-cache path
+        if (cache)
+        {
+            if (!s_q4Cache.TryGetValue(weightKey, out var rw))
+            {
+                rw = new ResidentQ4();
+                rw.Bq = UploadResident(resIID, Bq, bqB); rw.BqB = bqB; rw.BqVA = Fn<DGpuVA>(rw.Bq, 11)(rw.Bq);
+                byte[] scBytes = MemoryMarshal.AsBytes<float>(Scales).ToArray();
+                rw.Scales = UploadResident(resIID, scBytes, scB); rw.ScB = scB; rw.ScVA = Fn<DGpuVA>(rw.Scales, 11)(rw.Scales);
+                byte[] zpBytes = (hasZp && Zp != null && Zp.Length > 0) ? Zp : new byte[Math.Max(1, Zp?.Length ?? 1)];
+                rw.Zp = UploadResident(resIID, zpBytes, zpB); rw.ZpB = zpB; rw.ZpVA = Fn<DGpuVA>(rw.Zp, 11)(rw.Zp);
+                s_q4Cache[weightKey] = rw;
+            }
+            bqVA = rw.BqVA; scVA = rw.ScVA; zpVA = rw.ZpVA;
+        }
+        else
+        {
+            bqBuf = MkBuf(resIID, 2, bqB, 2755, 0);
+            scBuf = MkBuf(resIID, 2, scB, 2755, 0);
+            zpBuf = MkBuf(resIID, 2, zpB, 2755, 0);
+            RANGE z0 = new RANGE(); void* p0;
+            Fn<DMap>(bqBuf, 8)(bqBuf, 0, ref z0, out p0); Marshal.Copy(Bq, 0, (IntPtr)p0, Bq.Length); Fn<DUnmap>(bqBuf, 9)(bqBuf, 0, IntPtr.Zero);
+            Fn<DMap>(scBuf, 8)(scBuf, 0, ref z0, out p0); Marshal.Copy(Scales, 0, (IntPtr)p0, Scales.Length); Fn<DUnmap>(scBuf, 9)(scBuf, 0, IntPtr.Zero);
+            if (hasZp && Zp != null && Zp.Length > 0) { Fn<DMap>(zpBuf, 8)(zpBuf, 0, ref z0, out p0); Marshal.Copy(Zp, 0, (IntPtr)p0, Zp.Length); Fn<DUnmap>(zpBuf, 9)(zpBuf, 0, IntPtr.Zero); }
+            bqVA = Fn<DGpuVA>(bqBuf, 11)(bqBuf); scVA = Fn<DGpuVA>(scBuf, 11)(scBuf); zpVA = Fn<DGpuVA>(zpBuf, 11)(zpBuf);
+        }
+
+        // A-upload/C-default/C-readback: persistent, grow-only, reused across every call regardless of caching -
+        // these are per-token-shaped (tiny relative to the weight) so residency here is about avoiding create/destroy
+        // churn per call, not avoiding a big transfer.
+        EnsureCap(resIID, ref s_q4ABuf, ref s_q4ACap, aB, 2, 2755, 0);            // UPLOAD, GENERIC_READ
+        EnsureCap(resIID, ref s_q4CBuf, ref s_q4CCap, cB, 1, 8, 4);               // DEFAULT, UNORDERED_ACCESS, ALLOW_UAV (state 8 == UAV)
+        EnsureCap(resIID, ref s_q4RbBuf, ref s_q4RbCap, cB, 3, 1024, 0);          // READBACK, COPY_DEST
+        IntPtr aBuf = s_q4ABuf, cBuf = s_q4CBuf, rbBuf = s_q4RbBuf;
         RANGE z = new RANGE(); void* p;
         Fn<DMap>(aBuf, 8)(aBuf, 0, ref z, out p); Marshal.Copy(A, 0, (IntPtr)p, A.Length); Fn<DUnmap>(aBuf, 9)(aBuf, 0, IntPtr.Zero);
-        Fn<DMap>(bqBuf, 8)(bqBuf, 0, ref z, out p); Marshal.Copy(Bq, 0, (IntPtr)p, Bq.Length); Fn<DUnmap>(bqBuf, 9)(bqBuf, 0, IntPtr.Zero);
-        Fn<DMap>(scBuf, 8)(scBuf, 0, ref z, out p); Marshal.Copy(Scales, 0, (IntPtr)p, Scales.Length); Fn<DUnmap>(scBuf, 9)(scBuf, 0, IntPtr.Zero);
-        if (hasZp && Zp != null && Zp.Length > 0) { Fn<DMap>(zpBuf, 8)(zpBuf, 0, ref z, out p); Marshal.Copy(Zp, 0, (IntPtr)p, Zp.Length); Fn<DUnmap>(zpBuf, 9)(zpBuf, 0, IntPtr.Zero); }
-        long aVA = Fn<DGpuVA>(aBuf, 11)(aBuf), bqVA = Fn<DGpuVA>(bqBuf, 11)(bqBuf), scVA = Fn<DGpuVA>(scBuf, 11)(scBuf), zpVA = Fn<DGpuVA>(zpBuf, 11)(zpBuf), cVA = Fn<DGpuVA>(cBuf, 11)(cBuf);
+        long aVA = Fn<DGpuVA>(aBuf, 11)(aBuf), cVA = Fn<DGpuVA>(cBuf, 11)(cBuf);
+
+        // persistent command allocator/list: Reset instead of create/destroy every call.
+        if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+        else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, s_psoQ4, G(IID_LIST), out s_q4List);
+        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, s_psoQ4);
+        IntPtr list = s_q4List;
+
         Fn<DSetPSO>(list, 25)(list, s_psoQ4); Fn<DSetRS>(list, 29)(list, s_rootQ4);
         uint* gc = stackalloc uint[5]; gc[0] = M; gc[1] = N; gc[2] = K; gc[3] = blockSize; gc[4] = hasZp ? 1u : 0u;
         Fn<DSet32>(list, 35)(list, 0, 5, gc, 0);
         Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bqVA); Fn<DSetSRV>(list, 39)(list, 3, scVA); Fn<DSetSRV>(list, 39)(list, 4, zpVA); Fn<DSetUAV>(list, 41)(list, 5, cVA);
         Fn<DDispatch>(list, 14)(list, (N + 15) / 16, (M + 15) / 16, 1);
-        BAR bar = new BAR { Type = 0, Res = cBuf, Before = 8, After = 2048 }; Fn<DBarrier>(list, 26)(list, 1, ref bar);
+        BAR bar2 = new BAR { Type = 0, Res = cBuf, Before = 8, After = 2048 }; Fn<DBarrier>(list, 26)(list, 1, ref bar2);
         Fn<DCopy>(list, 15)(list, rbBuf, 0, cBuf, 0, cB);
+        BAR bar3 = new BAR { Type = 0, Res = cBuf, Before = 2048, After = 8 }; Fn<DBarrier>(list, 26)(list, 1, ref bar3);   // back to UAV for the next call's dispatch
         Fn<DClose>(list, 9)(list);
         IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
         ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
         var gcv = Fn<DGetCompl>(s_fence, 8); while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(64);
         RANGE rr = new RANGE { End = (IntPtr)(long)cB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, C, 0, (int)(M * N)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
-        Marshal.Release(aBuf); Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); Marshal.Release(cBuf); Marshal.Release(rbBuf);
-        Marshal.Release(list); Marshal.Release(alloc);
+        if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
         return 0;
     }
 }

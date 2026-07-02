@@ -847,10 +847,24 @@ public class Dp
     // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
     public static bool UseGpuMatMulNBits = false;
     static bool _gpuQ4Dead = false;
+    // Resident-weight cache key: stable per weight Tensor object for the lifetime of the process (weights are
+    // loaded once at model-load time and reused every decode step). RuntimeHelpers.GetHashCode is the object's
+    // IDENTITY hash (never overridden, ignores Tensor's own Equals/GetHashCode), so it stays fixed across calls
+    // and two distinct Tensor objects essentially never collide; folded together with the byte length in the
+    // low bits so an (unlikely) identity-hash collision across two different-sized weights still disambiguates.
+    // key<=0 means "don't cache" (GpuD3D12 old per-call behavior) - the sign bit is cleared so the token space
+    // stays strictly positive and unambiguous.
+    static long GpuWeightKey(Tensor bTensor, int byteLen)
+    {
+        long h = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(bTensor);
+        long key = (h << 20) ^ (uint)byteLen;
+        return key & long.MaxValue;   // clear sign bit: negative/zero are reserved for "no cache"
+    }
     internal static Tensor GpuMatMulNBits(Tensor[] x, NodeProto n, int K, int N, int bs, int nBlk, int rowBytes, int zpRowBytes, bool hasZp, float[] a, float[] scsp, byte[] bArr, byte[] zpArr, int M)
     {
         var c = new float[(long)M * N];
-        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4());
+        long key = GpuWeightKey(x[1], bArr.Length);
+        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4(), key);
         _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
         if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
         var outShape0 = (int[])x[0].Shape.Clone(); outShape0[outShape0.Length - 1] = N;
@@ -2342,14 +2356,17 @@ static class Gpu
     static byte[] s_spvQ4;
     // q4 seam: A/Scales fp32, Bq/Zp are the packed uint8 SEQUENTIAL-nibble buffers straight off the model (never
     // dequantized to fp32 on the CPU side). dxil/spv resolved by the caller (mirrors dpgpu_gemm's dxil plumbing).
-    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil)
+    // weightKey: stable per-weight-tensor cache token (Dp.GpuWeightKey) so GpuD3D12 can keep Bq/scales/zp resident
+    // in a default-heap buffer across calls instead of re-uploading 33MB+ of weight bytes every single GEMM.
+    // key<=0 disables residency (old per-call upload behavior) - Vulkan backend doesn't take the key yet.
+    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, long weightKey = -1)
     {
         if (s_vk)
         {
             s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
             return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4);
         }
-        return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length);
+        return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey);
     }
     public static string DeviceName() { if (s_vk) { GpuVulkan.EnsureInit(); return GpuVulkan.Name; } GpuD3D12.EnsureInit(); return GpuD3D12.Name; }
 }
