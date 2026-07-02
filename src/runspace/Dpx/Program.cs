@@ -36,6 +36,7 @@ return args.Length == 0 ? Usage()
      : args[0] == "gpu-test-q4" ? GpuTestQ4(args)
      : args[0] == "gpu-bench" ? GpuBench(args)
      : args[0] == "gpu-tune" ? GpuTune(args)
+     : args[0] == "gpu-tune-q4" ? ShaderTournament.ResolveQ4(args.Length > 1 ? args[1] : null)
      : args[0] == "db" ? ToDb(args)
      : args[0] == "db-stats" ? DbStats(args)
      : args[0] == "dumpsg" ? DumpSg(args)
@@ -473,7 +474,7 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db>"); return 1; }
+static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db> | gpu-tune-q4 [srcRoot]"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Onnx;
 
@@ -405,6 +406,173 @@ void main(uint3 tid : SV_DispatchThreadID)
             public int BlockK { get; set; }
             public int UseSharedMem { get; set; }
             public int UnrollFactor { get; set; }
+        }
+
+        // ===== q4 MatMulNBits kernel tournament (CRQ190's acquisition mechanism) =====
+        // ResolveQ4 picks the q4 GEMM kernel by MEASUREMENT on the real adapter: it compiles every q4 kernel
+        // variant found in the source tree (gemm_q4.hlsl = the naive one-thread-per-element rung,
+        // gemm_q4_gemv.hlsl = the M==1 decode GEMV, gemm_q4_tiled.hlsl = the M>1 16x16 tile), diffs each
+        // against the scalar MatMulNBits oracle (Dp.ForceScalarMatMulNBits — the law), times the survivors
+        // over decode/prefill bench shapes, and places the winners' DXIL beside the exe where Dp's variant
+        // rungs load them:
+        //   gemm_q4.dxil       — always rewritten from the naive kernel (the fallback rung)
+        //   gemm_q4_gemv.dxil  — kept only if the GEMV beats naive across the M==1 shapes with parity intact
+        //   gemm_q4_tiled.dxil — kept only if the tile beats naive across the M>1 shapes with parity intact
+        // A losing or parity-failing variant's file is DELETED so the runtime falls back by absence. Timing on
+        // a shared box is PROVISIONAL (printed as such); the parity verdicts are binding.
+        public static int ResolveQ4(string srcRoot)
+        {
+            string dxcPath = FindDxcPath();
+            if (dxcPath == null) { Console.Error.WriteLine("ERROR: dxc.exe not found in Windows Kits. Cannot compile q4 kernel variants."); return 1; }
+            string root = string.IsNullOrEmpty(srcRoot) ? AppContext.BaseDirectory : srcRoot;
+            string srcDir = Path.Combine(root, "src");
+            string kernelDir = Directory.Exists(srcDir)
+                ? Directory.GetFiles(srcDir, "gemm_q4.hlsl", SearchOption.AllDirectories).Select(Path.GetDirectoryName).FirstOrDefault()
+                : null;
+            if (kernelDir == null) { Console.Error.WriteLine($"ERROR: gemm_q4.hlsl not found under {srcDir}."); return 1; }
+
+            GpuD3D12.EnsureInit();
+            string outDir = AppContext.BaseDirectory;
+            Console.WriteLine($"=== q4 KERNEL TOURNAMENT ===");
+            Console.WriteLine($"adapter: {Gpu.DeviceName()}   compiler: {dxcPath}");
+            Console.WriteLine("timing is wall-clock on a shared box — ms are PROVISIONAL; parity verdicts are binding.");
+
+            byte[] naive = CompileQ4(dxcPath, Path.Combine(kernelDir, "gemm_q4.hlsl"), Path.Combine(outDir, "gemm_q4.dxil"));
+            if (naive == null) { Console.Error.WriteLine("ERROR: naive gemm_q4.hlsl failed to compile — no fallback rung, aborting."); return 1; }
+            string gemvPath = Path.Combine(outDir, "gemm_q4_gemv.dxil");
+            string tiledPath = Path.Combine(outDir, "gemm_q4_tiled.dxil");
+            string gemvHlsl = Path.Combine(kernelDir, "gemm_q4_gemv.hlsl");
+            string tiledHlsl = Path.Combine(kernelDir, "gemm_q4_tiled.hlsl");
+            byte[] gemv = File.Exists(gemvHlsl) ? CompileQ4(dxcPath, gemvHlsl, gemvPath) : null;
+            byte[] tiled = File.Exists(tiledHlsl) ? CompileQ4(dxcPath, tiledHlsl, tiledPath) : null;
+
+            // (M, N, K) — the decode shapes mirror tests/bench.dpx.matmulnbits-gpu.ps1; prefill is the same
+            // projections at a 64-token chunk. block_size=32, no zero-point (the e2b export's shape).
+            var decodeShapes = new[] { (1, 2048, 2048), (1, 8192, 2048), (1, 32768, 2048) };
+            var prefillShapes = new[] { (64, 2048, 2048), (64, 8192, 2048) };
+
+            bool gemvAlive = gemv != null, tiledAlive = tiled != null;
+            double naiveDecode = 0, gemvDecode = 0, naivePrefill = 0, tiledPrefill = 0;
+            foreach (var (M, N, K) in decodeShapes.Concat(prefillShapes))
+            {
+                bool isDecode = M == 1;
+                var (A, Bq, Scales, key) = FixtureQ4(M, N, K);
+                var oracle = OracleQ4(A, Bq, Scales, M, N, K);
+                var (nMs, nMaxd, nOk) = MeasureQ4(naive, 16, 16, A, Bq, Scales, oracle, M, N, K, key);
+                if (!nOk) { Console.Error.WriteLine($"ERROR: naive kernel failed parity at M={M} N={N} K={K} (max|diff|={nMaxd:E1}) — GPU q4 seam is broken, aborting."); return 1; }
+                string line = $"  M={M,-3} N={N,-6} K={K,-5} | naive {nMs,8:F3} ms  max|diff|={nMaxd:E1}";
+                if (isDecode)
+                {
+                    naiveDecode += nMs;
+                    if (gemvAlive)
+                    {
+                        var (vMs, vMaxd, vOk) = MeasureQ4(gemv, 8, 1, A, Bq, Scales, oracle, M, N, K, key);
+                        gemvAlive = vOk; gemvDecode += vMs;
+                        line += vOk ? $" | gemv {vMs,8:F3} ms  max|diff|={vMaxd:E1}" : $" | gemv PARITY FAIL max|diff|={vMaxd:E1}";
+                    }
+                }
+                else
+                {
+                    naivePrefill += nMs;
+                    if (tiledAlive)
+                    {
+                        var (vMs, vMaxd, vOk) = MeasureQ4(tiled, 16, 16, A, Bq, Scales, oracle, M, N, K, key);
+                        tiledAlive = vOk; tiledPrefill += vMs;
+                        line += vOk ? $" | tiled {vMs,8:F3} ms  max|diff|={vMaxd:E1}" : $" | tiled PARITY FAIL max|diff|={vMaxd:E1}";
+                    }
+                }
+                Console.WriteLine(line);
+            }
+
+            bool gemvWins = gemvAlive && gemvDecode < naiveDecode;
+            bool tiledWins = tiledAlive && tiledPrefill < naivePrefill;
+            if (!gemvWins && File.Exists(gemvPath)) File.Delete(gemvPath);
+            if (!tiledWins && File.Exists(tiledPath)) File.Delete(tiledPath);
+            Console.WriteLine(gemvWins
+                ? $"q4 decode  (M=1) winner: gemv  {gemvDecode:F3} ms total vs naive {naiveDecode:F3} ms -> gemm_q4_gemv.dxil placed"
+                : $"q4 decode  (M=1) winner: naive {naiveDecode:F3} ms total{(gemv == null ? " (no gemv candidate)" : gemvAlive ? $" (gemv {gemvDecode:F3} ms lost)" : " (gemv disqualified)")} — variant file absent");
+            Console.WriteLine(tiledWins
+                ? $"q4 prefill (M>1) winner: tiled {tiledPrefill:F3} ms total vs naive {naivePrefill:F3} ms -> gemm_q4_tiled.dxil placed"
+                : $"q4 prefill (M>1) winner: naive {naivePrefill:F3} ms total{(tiled == null ? " (no tiled candidate)" : tiledAlive ? $" (tiled {tiledPrefill:F3} ms lost)" : " (tiled disqualified)")} — variant file absent");
+
+            // Dp memoizes the loaded dxil per variant; the files just changed underneath it.
+            typeof(Dp).GetField("_gemmQ4Dxil", BindingFlags.NonPublic | BindingFlags.Static)?.SetValue(null, null);
+            return 0;
+        }
+
+        static byte[] CompileQ4(string dxcPath, string hlslPath, string outPath)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = dxcPath,
+                Arguments = $"-T cs_6_2 -E main -Fo \"{outPath}\" \"{hlslPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null) return null;
+            string err = proc.StandardError.ReadToEnd() + proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit();
+            if (proc.ExitCode != 0)
+            {
+                Console.Error.WriteLine($"  {Path.GetFileName(hlslPath)}: compile FAILED: {err.Replace("\r", "").Replace("\n", " ").Trim()}");
+                return null;
+            }
+            return File.ReadAllBytes(outPath);
+        }
+
+        // Random fixture in the q4 export's layout: packed SEQUENTIAL nibbles [N, K/32, 16], per-block fp32
+        // scales, no zero-point. The weight-residency key is the Bq array's identity hash (unique per fixture,
+        // never colliding with a real weight's key) so timing includes the resident-weight fast path — the
+        // shape decode actually runs, not the 33MB-reupload one.
+        static (float[] A, byte[] Bq, float[] Scales, long key) FixtureQ4(int M, int N, int K)
+        {
+            int nBlk = K / 32;
+            var A = new float[(long)M * K]; for (int i = 0; i < A.Length; i++) A[i] = (float)(s_rnd.NextDouble() * 2 - 1);
+            var Bq = new byte[(long)N * nBlk * 16]; s_rnd.NextBytes(Bq);
+            var Scales = new float[(long)N * nBlk]; for (int i = 0; i < Scales.Length; i++) Scales[i] = (float)(s_rnd.NextDouble() * 2 - 1);
+            long key = (long)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Bq) & long.MaxValue | 1L;
+            return (A, Bq, Scales, key);
+        }
+
+        // The oracle: Dp's scalar MatMulNBits (ForceScalarMatMulNBits pins the exact path every faster
+        // variant is diffed against), reflected because the kernel is deliberately private to Dp.
+        static float[] OracleQ4(float[] A, byte[] Bq, float[] Scales, int M, int N, int K)
+        {
+            var tA = new Tensor { Fp = A, Shape = new[] { M, K } };
+            var tB = new Tensor { Rawb = Bq, Shape = new[] { N, K / 32, 16 } };
+            var tS = new Tensor { Fp = Scales, Shape = new[] { N, K / 32 } };
+            var node = new NodeProto { OpType = "MatMulNBits" };
+            foreach (var (nm, v) in new[] { ("K", (long)K), ("N", (long)N), ("bits", 4L), ("block_size", 32L) })
+                node.Attribute.Add(new AttributeProto { Name = nm, I = v });
+            var mm = typeof(Dp).GetMethod("MatMulNBits", BindingFlags.NonPublic | BindingFlags.Static);
+            bool prevScalar = Dp.ForceScalarMatMulNBits; bool prevGpu = Dp.UseGpuMatMulNBits;
+            Dp.ForceScalarMatMulNBits = true; Dp.UseGpuMatMulNBits = false;
+            try { return ((Tensor)mm.Invoke(null, new object[] { new[] { tA, tB, tS }, node })).AsF().ToArray(); }
+            finally { Dp.ForceScalarMatMulNBits = prevScalar; Dp.UseGpuMatMulNBits = prevGpu; }
+        }
+
+        // One warmup call carries the PSO compile and the parity sample; the timed reps ride the resident
+        // weights + persistent buffers, best-of-10 to shed shared-box scheduling noise.
+        static (double ms, double maxd, bool ok) MeasureQ4(byte[] dxil, int tileN, int tileM, float[] A, byte[] Bq, float[] Scales, float[] oracle, int M, int N, int K, long key)
+        {
+            var c = new float[(long)M * N];
+            int rc = GpuD3D12.GemmQ4(A, Bq, Scales, Array.Empty<byte>(), c, (uint)M, (uint)N, (uint)K, 32u, false, dxil, dxil.Length, key, tileN, tileM);
+            if (rc != 0) return (double.MaxValue, double.MaxValue, false);
+            double maxd = 0;
+            for (int i = 0; i < c.Length; i++) { double d = Math.Abs(c[i] - oracle[i]); if (d > maxd) maxd = d; }
+            double best = double.MaxValue;
+            var sw = new Stopwatch();
+            for (int r = 0; r < 10; r++)
+            {
+                sw.Restart();
+                GpuD3D12.GemmQ4(A, Bq, Scales, Array.Empty<byte>(), c, (uint)M, (uint)N, (uint)K, 32u, false, dxil, dxil.Length, key, tileN, tileM);
+                sw.Stop();
+                if (sw.Elapsed.TotalMilliseconds < best) best = sw.Elapsed.TotalMilliseconds;
+            }
+            return (best, maxd, maxd < 1e-3);
         }
     }
 }
