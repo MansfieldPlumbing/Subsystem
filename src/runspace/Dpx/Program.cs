@@ -1,4 +1,4 @@
-// dp-onnx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
+﻿// dp-onnx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
 //
 // "ONNX is protobuf": Onnx.dll already decomposes a .onnx into walkable objects.
 // This walks graph.Node in topological order over a Dictionary<string,Tensor>,
@@ -130,7 +130,7 @@ static int ToDb(string[] args)
 
 static int GpuTune(string[] args)
 {
-    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx gpu-tune <model.db>"); return 1; }
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dpx gpu-tune <model.db>"); return 1; }
     return ShaderTournament.RunTournament(args[1]);
 }
 

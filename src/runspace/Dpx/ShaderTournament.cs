@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -10,6 +10,9 @@ namespace Subsystem.Dpx
 {
     public static class ShaderTournament
     {
+        // fixed seed: a tournament must be reproducible run to run (and SS006: shared, never per-call)
+        private static readonly Random s_rnd = new Random(42);
+
         private static string FindDxcPath()
         {
             string baseDir = @"C:\Program Files (x86)\Windows Kits\10\bin";
@@ -116,7 +119,7 @@ WHERE n.op_type IN ('MatMul', 'Gemm')";
             }
             finally
             {
-                try { Directory.Delete(tmpDir, true); } catch {}
+                try { Directory.Delete(tmpDir, true); } catch (Exception ex) { Subsystem.Dg.Log("dpx", $"tournament tmp cleanup failed: {ex.Message}"); }
             }
 
             Console.WriteLine("=== TOURNAMENT COMPLETE ===");
@@ -128,7 +131,7 @@ WHERE n.op_type IN ('MatMul', 'Gemm')";
             Console.WriteLine($"\nTuning shape: M={M}, N={N}, K={K} ({M * N * K * 2.0 / 1e6:F2} MFLOP)");
 
             // Generate CPU reference for validation
-            var rnd = new Random(42);
+            var rnd = s_rnd;
             float[] A = new float[M * K]; for (int i = 0; i < A.Length; i++) A[i] = (float)(rnd.NextDouble() * 2 - 1);
             float[] B = new float[K * N]; for (int i = 0; i < B.Length; i++) B[i] = (float)(rnd.NextDouble() * 2 - 1);
             float[] C_ref = new float[M * N];
@@ -247,7 +250,7 @@ WHERE n.op_type IN ('MatMul', 'Gemm')";
             if (bestDxil != null)
             {
                 Console.WriteLine($"Winner: {bestTacticName} in {bestTimeMs:F3} ms");
-                ModelDb.SaveTunedShader(dbPath, adapterName, "Gemm", M, N, K, 
+                ModelDb.WriteTunedShader(dbPath, adapterName, "Gemm", M, N, K, 
                     bestBlockM, bestBlockN, bestBlockK, bestThreadM, bestThreadN, 
                     bestShared, bestUnroll, bestDxil, bestTimeMs);
             }

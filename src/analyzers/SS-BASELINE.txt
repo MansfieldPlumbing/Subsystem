@@ -187,6 +187,7 @@ SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu
 SS010|Program.cs|Hardcoded drive path 'S:\qnn-project\workspace\onnx-interp\_gpu\gemm_q…' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\reference\Kokoro-82M\config.json' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS010|Program.cs|Hardcoded drive path 'S:\reference\Kokoro-82M\voices' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
+SS010|ShaderTournament.cs|Hardcoded drive path 'C:\Program Files (x86)\Windows Kits\10\bin' — absolute paths and endpoints are truth outside the registry; resolve by id from Cm (or a config record), not a literal
 SS011|AdbCommands.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AdbConnection.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
 SS011|AdbMdnsDiscoverer.cs|Namespace 'Subsystem' carries no component segment (root-only — the R1 folder=namespace debt) — registering a component in SystemCatalog.json is a deliberate event, never a PR side effect
@@ -357,6 +358,7 @@ SS015|Dg.cs|Static field '_ctx' (mutable) — statics compute, never remember/au
 SS015|Dg.cs|Static field '_dir' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dg.cs|Static field '_ring' (readonly Queue — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dg.cs|Static field '_stateRefreshedAt' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 'ActiveModelDbPath' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'ActiveVerbose' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'DropP' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'DropScope' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
@@ -381,6 +383,7 @@ SS015|Dp.cs|Static field 's_spvQ4' (mutable) — statics compute, never remember
 SS015|GpuD3D12.cs|Static field 's_dev' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fence' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_fv' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|GpuD3D12.cs|Static field 's_lastDxil' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_name' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_pso' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|GpuD3D12.cs|Static field 's_psoLen' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
@@ -432,6 +435,7 @@ SS021|Cm.cs|'System.IO.Path.GetTempPath()' reaches into the host OS for a direct
 SS021|PackageInfoDb.cs|'System.Environment.GetFolderPath()' reaches into the host OS for a directory — the core must stay host-agnostic; provide the path through the host seam at boot and resolve it from Cm (\System\Config\*), not the ambient environment
 SS021|Rs.cs|'System.IO.Path.GetTempPath()' reaches into the host OS for a directory — the core must stay host-agnostic; provide the path through the host seam at boot and resolve it from Cm (\System\Config\*), not the ambient environment
 SS021|Rs.cs|'System.IO.Path.GetTempPath()' reaches into the host OS for a directory — the core must stay host-agnostic; provide the path through the host seam at boot and resolve it from Cm (\System\Config\*), not the ambient environment
+SS021|ShaderTournament.cs|'System.IO.Path.GetTempPath()' reaches into the host OS for a directory — the core must stay host-agnostic; provide the path through the host seam at boot and resolve it from Cm (\System\Config\*), not the ambient environment
 SS022|ProjectionServer.cs|HttpListener serves the UI over a localhost port reachable by any app — a security antipattern; carry the UI on the DirectPort region + fence (→ postMessage → base64), never HTTP
 SS024|AgentSessionTable.cs|string literal contains the retired word 'session' — a renamed-away word must not survive one layer down as a db/table/SQL string (SystemCatalog.json banned.stringLiterals)
 SS024|AgentSessionTable.cs|string literal contains the retired word 'session' — a renamed-away word must not survive one layer down as a db/table/SQL string (SystemCatalog.json banned.stringLiterals)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Data.Sqlite;
@@ -137,7 +137,7 @@ namespace Subsystem.Dpx
             return null;
         }
 
-        public static void SaveTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, int blockM, int blockN, int blockK, int threadM, int threadN, int useSharedMem, int unrollFactor, byte[] dxil, double latencyMs)
+        public static void WriteTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, int blockM, int blockN, int blockK, int threadM, int threadN, int useSharedMem, int unrollFactor, byte[] dxil, double latencyMs)
         {
             try
             {
