@@ -190,6 +190,53 @@ namespace Subsystem.Dpx
         public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default)
             => StreamTurnAsync(prompt, audioBytes, null, ct);
 
+        // Strips literal turn markers from the VISIBLE token stream. The model sometimes emits
+        // "<end_of_turn>"/"<start_of_turn>" as ordinary word pieces (text) before the real control id
+        // lands — the stop check catches the id, but the literal pieces would reach the UI. Tokens
+        // accumulate here; complete markers are dropped, a trailing partial marker is held back until
+        // it resolves, everything else flows through in order. Non-token deltas flush and pass through.
+        private sealed class TurnMarkerFilter
+        {
+            // Instance state (SS015: no static mutable). Gemma's turn delimiters — the model sometimes spells
+            // them as ordinary word-pieces (TEXT), so the tokenizer's special-id skip never sees them.
+            private readonly string[] _markers = { "<end_of_turn>", "<start_of_turn>" };
+            private readonly Action<AgentDelta> _out;
+            private string _pending = "";
+
+            public TurnMarkerFilter(Action<AgentDelta> sink) { _out = sink; }
+
+            public void Push(AgentDelta d)
+            {
+                if (d.Kind != AgentDeltaKind.Token || string.IsNullOrEmpty(d.Text)) { Flush(); _out(d); return; }
+                _pending += d.Text;
+                foreach (var mk in _markers) _pending = _pending.Replace(mk, "");
+                int hold = TrailingPartial(_pending);
+                if (_pending.Length > hold)
+                {
+                    _out(new AgentDelta(AgentDeltaKind.Token, _pending.Substring(0, _pending.Length - hold)));
+                    _pending = _pending.Substring(_pending.Length - hold);
+                }
+            }
+
+            // Length of the longest pending suffix that could still become a marker. A pure marker
+            // prefix at turn end is dropped by Flush — it was never going to be prose.
+            private int TrailingPartial(string s)
+            {
+                foreach (var mk in _markers)
+                    for (int len = Math.Min(mk.Length - 1, s.Length); len > 0; len--)
+                        if (s.EndsWith(mk.Substring(0, len), StringComparison.Ordinal)) return len;
+                return 0;
+            }
+
+            public void Flush()
+            {
+                if (_pending.Length == 0) return;
+                var text = _pending; _pending = "";
+                if (TrailingPartial(text) == text.Length) return;   // pure partial marker — drop
+                _out(new AgentDelta(AgentDeltaKind.Token, text));
+            }
+        }
+
         public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, byte[]? imageBytes, CancellationToken ct = default)
         {
             var fault = BringUp();
@@ -211,9 +258,11 @@ namespace Subsystem.Dpx
 
                 VomClass.Spawn(owner, "worker", (childOwner) =>
                 {
+                    var marker = new TurnMarkerFilter(delta => queue.Add(delta));
                     try
                     {
-                        DecodeLoop(prompt, delta => queue.Add(delta), childOwner, ct);
+                        DecodeLoop(prompt, marker.Push, childOwner, ct);
+                        marker.Flush();
                     }
                     catch (OperationCanceledException ex)
                     {
