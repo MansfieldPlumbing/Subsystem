@@ -361,6 +361,7 @@ SS015|Dp.cs|Static field 'ActiveVerbose' (mutable) — statics compute, never re
 SS015|Dp.cs|Static field 'DropP' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'DropScope' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Dropped' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
+SS015|Dp.cs|Static field 'ForceScalarMatMulNBits' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Implemented' (readonly HashSet — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Prof' (readonly Dictionary — the reference is pinned, the state is not) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)
 SS015|Dp.cs|Static field 'Profile' (mutable) — statics compute, never remember/authorize/rendezvous; state belongs in a node (axiom 8, ratchet R2)

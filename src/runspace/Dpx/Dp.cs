@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Threading.Tasks;
 using Onnx;
 using Subsystem.Vom;
@@ -869,6 +870,8 @@ public class Dp
                 Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
             }
         }
+        if (!ForceScalarMatMulNBits && bits == 4 && bs == 32 && Vector128.IsHardwareAccelerated)
+            return MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
         var y = TensorArena.AllocSpan((long)M * N);
         // pin: Span can't cross the lambda boundary (CS8175) - `fixed` transparently pins a managed
         // array OR no-ops over already-stable VOM-region memory, so B/zp being weight-load-time VOM
@@ -900,6 +903,78 @@ public class Dp
         var outShape = (int[])x[0].Shape.Clone(); outShape[outShape.Length - 1] = N;
         return Tensor.F(y, outShape);
     }
+
+    // Force the scalar MatMulNBits path - the numerical oracle every faster variant is diffed against.
+    public static bool ForceScalarMatMulNBits = false;
+
+    // SIMD MatMulNBits inner loop (recipe: ggml-org/llama.cpp ggml_vec_dot_q4_0_q8_0's f32-activation shape -
+    // reimplemented, not linked; thank you ggml). Unpack order stays OURS: sequential nibbles, byte k>>1, low
+    // nibble = even k (test.dpx.q4-packing-order.ps1) - NEVER ggml's split order. Portable Vector128 lanes so
+    // the same code JITs to SSE on x64 and NEON on the Android arm64 head. Two per-call precomputes amortized
+    // over all N output rows: activations deinterleaved into even/odd halves (so the nibble planes FMA against
+    // contiguous loads), and per-(m,block) activation sums (the zero-point term drops out of the inner loop).
+    static unsafe Tensor MatMulNBitsSimd(Tensor[] x, Span<float> a, Span<float> scsp, Span<byte> bSpan, Span<byte> zpSpan,
+                                         int K, int N, int M, int nBlk, int rowBytes, int zpRowBytes, int defZp, int scLen)
+    {
+        int half = K / 2;
+        var y = TensorArena.AllocSpan((long)M * N);
+        var ae = TensorArena.AllocSpan((long)M * half);    // a[m, even k], contiguous per (m, block): 16 floats/block
+        var ao = TensorArena.AllocSpan((long)M * half);    // a[m, odd k]
+        var asums = TensorArena.AllocSpan((long)M * nBlk); // per-(m, block) activation sum for the zp term
+        fixed (float* p_y = y) fixed (float* p_a = a) fixed (float* p_sc = scsp)
+        fixed (float* p_ae = ae) fixed (float* p_ao = ao) fixed (float* p_as = asums)
+        fixed (byte* p_b = bSpan) fixed (byte* p_zp = zpSpan)
+        {
+            float* py = p_y; float* pa = p_a; float* psc = p_sc; float* pae = p_ae; float* pao = p_ao; float* pas = p_as;
+            byte* pB = p_b; byte* pZp = p_zp; int yl = y.Length;
+            for (int m = 0; m < M; m++)
+            {
+                int ao0 = m * K, h0 = m * half;
+                for (int j = 0; j < half; j++) { pae[h0 + j] = pa[ao0 + 2 * j]; pao[h0 + j] = pa[ao0 + 2 * j + 1]; }
+                for (int b = 0; b < nBlk; b++)
+                {
+                    float s = 0f; int k0 = b * bs_32;
+                    for (int i = 0; i < bs_32; i++) s += pa[ao0 + k0 + i];
+                    pas[m * nBlk + b] = s;
+                }
+            }
+            var maskF = Vector128.Create((byte)0x0F);
+            System.Threading.Tasks.Parallel.For(0, N, nn =>
+            {
+                var sy = new Span<float>(py, yl); var sc = new Span<float>(psc, scLen);
+                int rb = nn * rowBytes, zb = nn * zpRowBytes, scBase = nn * nBlk;
+                for (int m = 0; m < M; m++)
+                {
+                    int h0 = m * half, as0 = m * nBlk; float acc = 0f;
+                    for (int b = 0; b < nBlk; b++)
+                    {
+                        var vb = Vector128.Load(pB + rb + (b << 4));
+                        var lo = vb & maskF;                                     // even-k nibbles, j-order
+                        var hi = Vector128.ShiftRightLogical(vb, 4) & maskF;     // odd-k nibbles, j-order
+                        int e0 = h0 + (b << 4);
+                        var (lo01, lo23) = Vector128.Widen(lo);
+                        var (hi01, hi23) = Vector128.Widen(hi);
+                        var (l0, l1) = Vector128.Widen(lo01); var (l2, l3) = Vector128.Widen(lo23);
+                        var (h1_, h2_) = Vector128.Widen(hi01); var (h3_, h4_) = Vector128.Widen(hi23);
+                        var aqv = Vector128.ConvertToSingle(l0.AsInt32()) * Vector128.Load(pae + e0)
+                                + Vector128.ConvertToSingle(l1.AsInt32()) * Vector128.Load(pae + e0 + 4)
+                                + Vector128.ConvertToSingle(l2.AsInt32()) * Vector128.Load(pae + e0 + 8)
+                                + Vector128.ConvertToSingle(l3.AsInt32()) * Vector128.Load(pae + e0 + 12)
+                                + Vector128.ConvertToSingle(h1_.AsInt32()) * Vector128.Load(pao + e0)
+                                + Vector128.ConvertToSingle(h2_.AsInt32()) * Vector128.Load(pao + e0 + 4)
+                                + Vector128.ConvertToSingle(h3_.AsInt32()) * Vector128.Load(pao + e0 + 8)
+                                + Vector128.ConvertToSingle(h4_.AsInt32()) * Vector128.Load(pao + e0 + 12);
+                        int zp = pZp != null ? Nib4(pZp, zb, b) : defZp;
+                        acc += sc[scBase + b] * (Vector128.Sum(aqv) - zp * pas[as0 + b]);
+                    }
+                    sy[m * N + nn] = acc;
+                }
+            });
+        }
+        var outShape = (int[])x[0].Shape.Clone(); outShape[outShape.Length - 1] = N;
+        return Tensor.F(y, outShape);
+    }
+    const int bs_32 = 32;   // the SIMD path is gated to block_size == 32 (gemma4 q4 export); other sizes stay scalar
 
     // GatherBlockQuantized: gather rows of a block-q4 table by indices, dequant inline (gemma embed: data uint8
     // [V, H·bits/8], quantize_axis=1 along H, gather_axis=0). out = dequant(data[indices]) -> [*indices.shape, H].
