@@ -88,6 +88,10 @@ unsafe static class GpuD3D12
     struct ResidentQ4 { public IntPtr Bq, Scales, Zp; public long BqVA, ScVA, ZpVA; public ulong BqB, ScB, ZpB; }
     static readonly Dictionary<long, ResidentQ4> s_q4Cache = new();
 
+    // True when this weightKey's Bq/scales/zp already live in the resident cache - the caller may then
+    // skip materializing the managed copies GemmQ4 would ignore on a cache hit.
+    public static bool QueryResidentQ4(long weightKey) => weightKey > 0 && s_q4Cache.ContainsKey(weightKey);
+
     static IntPtr s_q4Alloc, s_q4List;
     static IntPtr s_q4ABuf, s_q4CBuf, s_q4RbBuf; static ulong s_q4ACap, s_q4CCap, s_q4RbCap;
 

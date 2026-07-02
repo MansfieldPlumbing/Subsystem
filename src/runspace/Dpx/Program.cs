@@ -800,6 +800,11 @@ static int Probe(string path, bool stopOnMissing = true)
 //       completion, diff the waveform against ORT's oracle.bin) -----
 int Run(string[] args)
 {
+    // `--gpu-matmul auto` / `--gpu-matmulnbits auto` (CRQ190 R0): per-shape routing rides DPGPU_BACKEND,
+    // which Dp hoists on first static touch - set the variable BEFORE the parse loop touches any Dp knob.
+    for (int i = 1; i + 1 < args.Length; i++)
+        if ((args[i] == "--gpu-matmul" || args[i] == "--gpu-matmulnbits") && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase))
+            Environment.SetEnvironmentVariable("DPGPU_BACKEND", "auto");
     string path = null, inputsDir = null, outPath = null, dumpNode = null, compareDir = null, injectNode = null; bool trace = false; int stopAfter = 0; int sectionIx = -1;
     for (int i = 1; i < args.Length; i++)
         switch (args[i])
@@ -812,8 +817,14 @@ int Run(string[] args)
             case "--dump-node": dumpNode = args[++i]; break;
             case "--compare": compareDir = args[++i]; break;
             case "--inject": injectNode = args[++i]; break;   // replace matching nodes' output w/ oracle (needs --compare <dir>)
-            case "--gpu-matmul": Dp.UseGpuMatMul = true; break;   // offload every MatMul to dpgpu.dll (D3D12); CPU fallback on mount failure
-            case "--gpu-matmulnbits": Dp.UseGpuMatMulNBits = true; break;   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); CPU fallback on mount failure
+            case "--gpu-matmul":   // offload every MatMul to the GPU seam (D3D12); `auto` = per-shape router; CPU fallback on mount failure
+                if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
+                else Dp.UseGpuMatMul = true;
+                break;
+            case "--gpu-matmulnbits":   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); `auto` = per-shape router; CPU fallback on mount failure
+                if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;
+                else Dp.UseGpuMatMulNBits = true;
+                break;
             case "--prof": Dp.Profile = true; break;   // per-op-type wall-time breakdown
             case "--drop": Dp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
             case "--drop-scope": Dp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")

@@ -286,6 +286,14 @@ public class Dp
     public static bool ActiveVerbose;
 
     Dictionary<string, Tensor> _winit;   // decoded initializers, cached: streaming Run()s many short feeds over ONE graph -> decode the 82M weights ONCE, not per chunk
+    // Graph-invariant dispatch scaffolding, computed once per model beside _winit (CRQ190 R0 per-Run
+    // hoist): rebuilding these per token was pure Run-loop overhead for a graph that never changes.
+    Dictionary<string, int> _lastUse;    // input name -> index of its LAST consumer (liveness reclaim)
+    HashSet<string> _pinned;             // graph output names - never reclaimed mid-run
+    Tensor[][] _nodeIns;                 // one reusable input buffer per node (arity is graph-invariant)
+    // Per-model MatMulNBits route table (CRQ190 R0): non-null only under DPGPU_BACKEND=auto; passed into
+    // Dispatch so bare static callers (benches, DpxRace's oracle) never route.
+    readonly DpxRoute _routes = AutoRouteMatMulNBits ? new DpxRoute() : null;
     public unsafe Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null)
     {
         ActiveVerbose = Verbose;
@@ -320,35 +328,45 @@ public class Dp
                 _m.Graph.Initializer.Clear();
                 System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
                 GC.Collect();
+                // Liveness reclaim scaffolding: free each intermediate once its LAST consumer has run. A
+                // 4630-node decoder otherwise keeps every output forever (hundreds of 32MB [.,32003,.]
+                // tensors -> ~10GB). Weights live in _winit (resolved through it below), so reclaim can't
+                // free them; graph outputs are pinned. Graph-invariant -> computed here ONCE per model,
+                // never per streaming Run() (per token).
+                var gnodes = _m.Graph.Node;
+                _lastUse = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int i = 0; i < gnodes.Count; i++) foreach (var inp in gnodes[i].Input) if (!string.IsNullOrEmpty(inp)) _lastUse[inp] = i;
+                _pinned = new HashSet<string>(_m.Graph.Output.Select(o => o.Name), StringComparer.Ordinal);
+                _nodeIns = new Tensor[gnodes.Count][];
+                for (int i = 0; i < gnodes.Count; i++) _nodeIns[i] = new Tensor[gnodes[i].Input.Count];
             }
-            var env = new Dictionary<string, Tensor>(_winit);   // shallow: kernels allocate fresh outputs, never mutate weight arrays in place -> safe to reuse across chunks
-            foreach (var kv in feed) env[kv.Key] = kv.Value;
+            // env holds feed + per-run intermediates only; weights resolve through _winit (a per-token
+            // dictionary copy of the whole weight map bought nothing - kernels never mutate weights).
+            var env = new Dictionary<string, Tensor>(feed);
             var nodes = _m.Graph.Node;
-            // Liveness reclaim: free each intermediate once its LAST consumer has run. A 4630-node decoder otherwise
-            // keeps every output forever (hundreds of 32MB [.,32003,.] tensors -> ~10GB). Weights alias _winit, so
-            // evicting them from env can't free them (correct — they're reused across streaming Run()s); only the
-            // per-run intermediates are reclaimed. Graph outputs are pinned. Pure memory management — numerics intact.
-            var lastUse = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int i = 0; i < nodes.Count; i++) foreach (var inp in nodes[i].Input) if (!string.IsNullOrEmpty(inp)) lastUse[inp] = i;
-            var pinned = new HashSet<string>(_m.Graph.Output.Select(o => o.Name), StringComparer.Ordinal);
             DpxMem.Sample();   // ambient RAM reading at entry (telemetry inlet for the host)
             for (int ni = 0; ni < nodes.Count; ni++)
             {
                 var node = nodes[ni];
-                var ins = node.Input.Select(n => string.IsNullOrEmpty(n) ? null : env[n]).ToArray();
+                var ins = _nodeIns[ni];   // reused across Runs; refs cleared at the end of this iteration
+                for (int i = 0; i < ins.Length; i++)
+                {
+                    var nm = node.Input[i];
+                    ins[i] = string.IsNullOrEmpty(nm) ? null : (env.TryGetValue(nm, out var tv) ? tv : _winit[nm]);
+                }
                 Tensor[] outs;
                 try
                 {
                     if (Profile)
                     {
                         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                        outs = Dispatch(node, ins);
+                        outs = Dispatch(node, ins, _routes);
                         double dt = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                         var e = Prof.GetValueOrDefault(node.OpType); Prof[node.OpType] = (e.ms + dt, e.n + 1);
                     }
                     else
                     {
-                        outs = Dispatch(node, ins);
+                        outs = Dispatch(node, ins, _routes);
                     }
                 }
                 catch (Exception ex)
@@ -362,7 +380,7 @@ public class Dp
                 for (int i = 0; i < node.Output.Count && i < outs.Length; i++) if (!string.IsNullOrEmpty(node.Output[i])) env[node.Output[i]] = outs[i];
                 onNode?.Invoke(node, outs, env);   // env passed so a hook can INJECT an oracle value for downstream
                 foreach (var inp in node.Input)    // reclaim dead intermediates (last use is this node; never a pinned graph output)
-                    if (!string.IsNullOrEmpty(inp) && lastUse.TryGetValue(inp, out var lu) && lu == ni && !pinned.Contains(inp))
+                    if (!string.IsNullOrEmpty(inp) && _lastUse.TryGetValue(inp, out var lu) && lu == ni && !_pinned.Contains(inp))
                     {
                         if (env.Remove(inp, out var t))
                         {
@@ -372,11 +390,13 @@ public class Dp
                             }
                         }
                     }
+                for (int i = 0; i < ins.Length; i++) ins[i] = null;   // drop refs so reclaimed intermediates aren't held until the next token
             }
-            var result = _m.Graph.Output.ToDictionary(o => o.Name, o => env[o.Name]);
+            var result = new Dictionary<string, Tensor>();
+            foreach (var o in _m.Graph.Output) result[o.Name] = env.TryGetValue(o.Name, out var ot) ? ot : _winit[o.Name];
             foreach (var kvp in env)
             {
-                if (!_winit.ContainsKey(kvp.Key) && !feed.ContainsKey(kvp.Key) && !pinned.Contains(kvp.Key))
+                if (!_winit.ContainsKey(kvp.Key) && !feed.ContainsKey(kvp.Key) && !_pinned.Contains(kvp.Key))
                 {
                     kvp.Value?.FreeNative();
                 }
@@ -389,7 +409,9 @@ public class Dp
         }
     }
 
-    public static Tensor[] Dispatch(NodeProto n, Tensor[] x)
+    // route: the per-model MatMulNBits route table (CRQ190 R0) - null (every bare caller) routes nothing
+    // and preserves the standing knob behavior exactly. Only Run passes its per-model table through.
+    public static Tensor[] Dispatch(NodeProto n, Tensor[] x, DpxRoute route = null)
     {
         switch (n.OpType)
         {
@@ -480,7 +502,7 @@ public class Dp
             case "Pack": return One(PackOp(x, n));
             case "Fill": return One(FillOp(x, n));
             // ---- Gemma-3n E2B q4 ONNX contrib ops (com.microsoft), grounded against the q4 .db export ----
-            case "MatMulNBits": { var r = MatMulNBits(x, n); DpxExperiments.RecordLogits(n, r); return One(r); }
+            case "MatMulNBits": { var r = ResolveMatMulNBits(x, n, route); DpxExperiments.RecordLogits(n, r); return One(r); }
             case "GatherBlockQuantized": return One(GatherBlockQuantized(x, n));
             case "RotaryEmbedding": return One(RotaryEmbedding(x, n));
             case "SimplifiedLayerNormalization": return One(SimplifiedLayerNorm(x, n));
@@ -847,6 +869,11 @@ public class Dp
     // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
     public static bool UseGpuMatMulNBits = false;
     static bool _gpuQ4Dead = false;
+    // Auto-route mode (CRQ190 R0): DPGPU_BACKEND=auto (the CLI's `--gpu-matmul auto` sets the variable
+    // before the first Dp touch). Hoisted to a static readonly so the router costs ONE env probe per
+    // process, none per dispatch. Default (unset/other values) leaves behavior exactly the standing knobs.
+    public static readonly bool AutoRouteMatMulNBits =
+        string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "auto", StringComparison.OrdinalIgnoreCase);
     // Resident-weight cache key: stable per weight Tensor object for the lifetime of the process (weights are
     // loaded once at model-load time and reused every decode step). RuntimeHelpers.GetHashCode is the object's
     // IDENTITY hash (never overridden, ignores Tensor's own Equals/GetHashCode), so it stays fixed across calls
@@ -863,7 +890,9 @@ public class Dp
     internal static Tensor GpuMatMulNBits(Tensor[] x, NodeProto n, int K, int N, int bs, int nBlk, int rowBytes, int zpRowBytes, bool hasZp, float[] a, float[] scsp, byte[] bArr, byte[] zpArr, int M)
     {
         var c = new float[(long)M * N];
-        long key = GpuWeightKey(x[1], bArr.Length);
+        // key derives from the GEOMETRY byte length (rowBytes*N == the packed weight's full length), not
+        // bArr.Length - resident-aware callers legitimately pass an empty bArr once the weight is uploaded.
+        long key = GpuWeightKey(x[1], rowBytes * N);
         int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4(), key);
         _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
         if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
@@ -876,6 +905,103 @@ public class Dp
         if (_gemmQ4Dxil != null) return _gemmQ4Dxil;
         string near = Path.Combine(AppContext.BaseDirectory, "gemm_q4.dxil");
         return _gemmQ4Dxil = File.Exists(near) ? File.ReadAllBytes(near) : Array.Empty<byte>();
+    }
+
+    // GPU dispatch that skips the b/scale/zp ToArray copies once the weight is resident on the adapter
+    // (GpuD3D12 keeps them in a DEFAULT-heap buffer per weightKey; on a cache hit GemmQ4 never reads
+    // those managed arrays). First sight of a weight still pays the one-time copy+upload; Vulkan reads
+    // the arrays every call, so Gpu.QueryResidentQ4 reports false there and the copies stay.
+    static Tensor GpuMatMulNBitsResident(Tensor[] x, NodeProto n, int K, int N, int bs, int M)
+    {
+        int nBlk = K / bs, rowBytes = nBlk * (bs * 4 / 8), zpRowBytes = (nBlk * 4 + 7) / 8;
+        var a = x[0].AsF(); var scsp = x[2].AsF();
+        var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
+        bool resident = Gpu.QueryResidentQ4(GpuWeightKey(x[1], rowBytes * N));
+        return GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp,
+            a.ToArray(),
+            resident ? Array.Empty<float>() : scsp.ToArray(),
+            resident ? Array.Empty<byte>() : bSpan.ToArray(),
+            resident || !hasZp ? Array.Empty<byte>() : zpSpan.ToArray(), M);
+    }
+
+    // ---- per-shape CPU/GPU router (CRQ190 R0) ----
+    // Routed entry for the Dispatch MatMulNBits case. With no route table (auto mode off, or a bare
+    // static Dispatch caller) or with any explicit knob engaged, this IS the standing MatMulNBits call.
+    // Routing engages only for the SIMD-comparable fast shape (bits=4, block_size=32).
+    static Tensor ResolveMatMulNBits(Tensor[] x, NodeProto n, DpxRoute route)
+    {
+        if (route == null || UseGpuMatMulNBits || ForceScalarMatMulNBits || _gpuQ4Dead || !Vector128.IsHardwareAccelerated)
+            return MatMulNBits(x, n);
+        int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
+        if (bits != 4 || bs != 32 || K <= 0 || (K % bs) != 0)
+            return MatMulNBits(x, n);
+        int M = (int)(x[0].Count / K);
+        if (!route.Query(M, N, K, bs, out bool gpuWins))
+            return ResolveMatMulNBitsWinner(x, n, route, M, N, K, bs);
+        if (gpuWins)
+        {
+            if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);
+            try { return GpuMatMulNBitsResident(x, n, K, N, bs, M); }
+            catch (Exception ex)
+            {
+                _gpuQ4Dead = true;   // inv-9: a GPU fault latches, degrades to CPU once, logged
+                Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            }
+        }
+        return MatMulNBits(x, n);   // CPU side: the standing knob-free path (SIMD here; scalar oracle untouched)
+    }
+
+    // First sight of a shape under auto-route: a direct timed comparison, winner cached for the model's
+    // lifetime. One untimed warmup per lane (GPU warmup pays PSO compile + weight residency, CPU warmup
+    // pays JIT/page-in), then two timed reps each; min wins - min is the steady-state signal a dispatch-
+    // time race can afford on a shared box. A GPU fault latches _gpuQ4Dead (inv-9) and every later shape
+    // resolves CPU through the gate above. Returns the winner's LAST output; discarded CPU outputs are
+    // FreeNative'd (they never enter Run's liveness map).
+    static unsafe Tensor ResolveMatMulNBitsWinner(Tensor[] x, NodeProto n, DpxRoute route, int M, int N, int K, int bs)
+    {
+        if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);
+        const int REPS = 2;
+        double freq = System.Diagnostics.Stopwatch.Frequency;
+        Tensor gpuOut = null; double gpuMs = double.MaxValue;
+        try
+        {
+            GpuMatMulNBitsResident(x, n, K, N, bs, M);   // warmup: PSO + weight upload
+            for (int r = 0; r < REPS; r++)
+            {
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                gpuOut = GpuMatMulNBitsResident(x, n, K, N, bs, M);
+                double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / freq;
+                if (ms < gpuMs) gpuMs = ms;
+            }
+        }
+        catch (Exception ex)
+        {
+            _gpuQ4Dead = true;
+            Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            gpuOut = null;
+        }
+        // CPU lane: the same prep MatMulNBits does, the SIMD kernel called knob-free (DpxRace.CpuLane's shape).
+        int nBlk = K / bs, rowBytes = nBlk * (bs * 4 / 8), zpRowBytes = (nBlk * 4 + 7) / 8, defZp = 8;
+        var a = x[0].AsF(); var scsp = x[2].AsF(); int scLen = scsp.Length;
+        var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
+        Tensor cpuOut = null; double cpuMs = double.MaxValue;
+        MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen).FreeNative();   // warmup
+        for (int r = 0; r < REPS; r++)
+        {
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            var o = MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
+            double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / freq;
+            if (ms < cpuMs) cpuMs = ms;
+            if (r < REPS - 1) o.FreeNative(); else cpuOut = o;
+        }
+        bool gpuWins = gpuOut != null && gpuMs < cpuMs;
+        if (gpuOut != null)
+        {
+            route.Register(M, N, K, bs, gpuWins, cpuMs, gpuMs);
+            Console.Error.WriteLine($"[DPX route] M={M} N={N} K={K} bs={bs} -> {(gpuWins ? "gpu" : "cpu")} (cpu {cpuMs:F3} ms, gpu {gpuMs:F3} ms)");
+        }
+        if (gpuWins) { cpuOut.FreeNative(); return gpuOut; }
+        return cpuOut;
     }
 
     // MatMulNBits: Y = A @ dequant(B)^T. B is uint8 [N, K/bs, bs*bits/8] (k-major nibbles, byte=k/2). scale/zp are
@@ -891,7 +1017,7 @@ public class Dp
         {
             try
             {
-                return GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp, a.ToArray(), scsp.ToArray(), bSpan.ToArray(), hasZp ? zpSpan.ToArray() : Array.Empty<byte>(), M);
+                return GpuMatMulNBitsResident(x, n, K, N, bs, M);   // skips the weight re-copies once resident
             }
             catch (Exception ex)
             {
@@ -2422,4 +2548,9 @@ static class Gpu
         return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey);
     }
     public static string DeviceName() { if (s_vk) { GpuVulkan.EnsureInit(); return GpuVulkan.Name; } GpuD3D12.EnsureInit(); return GpuD3D12.Name; }
+    // Residency probe for the q4 weight cache: true only when the D3D12 backend already holds this
+    // weightKey's Bq/scales/zp in a DEFAULT-heap buffer (a GemmQ4 cache hit ignores those arrays, so
+    // the caller can skip materializing them). The Vulkan backend re-reads the managed arrays every
+    // call and always reports false - callers keep passing real copies there.
+    public static bool QueryResidentQ4(long weightKey) => !s_vk && GpuD3D12.QueryResidentQ4(weightKey);
 }
