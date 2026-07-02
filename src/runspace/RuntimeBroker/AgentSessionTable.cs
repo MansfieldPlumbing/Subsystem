@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using Subsystem.Cm;
 using Subsystem.Vom;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // Saved agent chats — registry-faithful (doctrine: everything is an object in ONE namespace; no second
     // store). A conversation is a Cm capability at `\Agent\Session\<id>`, Type="Session"; its ManifestJson IS

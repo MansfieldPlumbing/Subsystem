@@ -72,7 +72,7 @@ public static class ModelsApi
                     Func<string, Task> selReport = async (txt) =>
                         await Send(ws, new { type = "progress", id, text = txt.Trim(), pct = (int?)null }, token);
                     try { await ModelCatalog.SelectAsync(context, id, selReport, token); }
-                    catch (Subsystem.RuntimeBroker.RbFaultException fx)
+                    catch (Subsystem.RbFaultException fx)
                     {
                         await Send(ws, new { type = "error", id, @class = fx.Fault.Class.ToString(),
                             backend = fx.Fault.Backend, text = fx.Fault.NativeDetail }, token);

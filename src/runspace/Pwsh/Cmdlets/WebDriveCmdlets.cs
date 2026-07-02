@@ -154,11 +154,11 @@ public sealed class InvokeWebAgentCmdlet : WrapperCmdlet
     // Drain a side-conversation turn to its visible answer text (the thinking channel is already split out
     // by the runtime). Only Token deltas are collected — the intent is parsed from the answer.
     private static async System.Threading.Tasks.Task<string> ReadReplyAsync(
-        Subsystem.RuntimeBroker.SideConversation side, string prompt, CancellationToken ct)
+        Subsystem.SideConversation side, string prompt, CancellationToken ct)
     {
         var sb = new StringBuilder();
         await foreach (var d in side.StreamTurnAsync(prompt, ct))
-            if (d.Kind == Subsystem.RuntimeBroker.AgentDeltaKind.Token && !string.IsNullOrEmpty(d.Text)) sb.Append(d.Text);
+            if (d.Kind == Subsystem.AgentDeltaKind.Token && !string.IsNullOrEmpty(d.Text)) sb.Append(d.Text);
         return sb.ToString();
     }
 

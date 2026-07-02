@@ -91,22 +91,22 @@ public sealed class GetAgentSessionCmdlet : WrapperCmdlet
     [Parameter(Position = 0)] public string? Id { get; set; }
     protected override void ProcessRecord()
         => Emit(string.IsNullOrEmpty(Id)
-            ? (object)Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries()
-            : Subsystem.RuntimeBroker.AgentSessionTable.Load(Id));
+            ? (object)Subsystem.AgentSessionTable.ListSummaries()
+            : Subsystem.AgentSessionTable.Load(Id));
 }
 
 [Cmdlet(VerbsCommon.New, "AgentSession")]
 public sealed class NewAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Position = 0)] public string? Title { get; set; }
-    protected override void ProcessRecord() => Emit(Subsystem.RuntimeBroker.AgentSessionTable.Create(Title));
+    protected override void ProcessRecord() => Emit(Subsystem.AgentSessionTable.Create(Title));
 }
 
 [Cmdlet(VerbsCommon.Remove, "AgentSession")]
 public sealed class RemoveAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)] public string Id { get; set; } = string.Empty;
-    protected override void ProcessRecord() => Emit(Subsystem.RuntimeBroker.AgentSessionTable.Delete(Id));
+    protected override void ProcessRecord() => Emit(Subsystem.AgentSessionTable.Delete(Id));
 }
 
 [Cmdlet(VerbsCommon.Rename, "AgentSession")]
@@ -114,7 +114,7 @@ public sealed class RenameAgentSessionCmdlet : WrapperCmdlet
 {
     [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)] public string Id { get; set; } = string.Empty;
     [Parameter(Mandatory = true, Position = 1)] public string Title { get; set; } = string.Empty;
-    protected override void ProcessRecord() => Emit(Subsystem.RuntimeBroker.AgentSessionTable.Rename(Id, Title));
+    protected override void ProcessRecord() => Emit(Subsystem.AgentSessionTable.Rename(Id, Title));
 }
 
 // --- Package metadata ---

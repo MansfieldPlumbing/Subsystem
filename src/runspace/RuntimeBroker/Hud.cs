@@ -1,7 +1,7 @@
 using System;
 using Subsystem.Vom;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // Hud — the pinned sitrep (AGENT-SPEC §2/§3): a deterministic projection of device vitals the
     // harness re-asserts at the front of EVERY turn. The model never tool-calls for vitals and never

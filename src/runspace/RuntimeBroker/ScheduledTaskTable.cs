@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Subsystem.Cm;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // The durable scheduled-task plane — the temporal agent's spine: inference that fires OUTSIDE the chat
     // window, on a clock. Registry-faithful (one namespace, no second store): a task is a Cm capability at

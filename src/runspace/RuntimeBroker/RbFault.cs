@@ -1,6 +1,6 @@
 using System;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // §3.1 — the inference subsystem's typed fault surface. Interior code branches on Class ONLY;
     // NativeDetail is opaque payload (journal/UI) and is interpreted nowhere past the JNI boundary.

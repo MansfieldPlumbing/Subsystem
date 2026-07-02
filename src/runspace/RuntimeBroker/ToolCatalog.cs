@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // A runtime-agnostic tool descriptor projected from the Cm registry — MCP-shaped (name / description /
     // inputSchema), carrying NO engine types (no Java.Lang.Object, no LM.IOpenApiTool). The JNI runtime,

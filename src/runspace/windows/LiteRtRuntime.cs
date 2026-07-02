@@ -11,7 +11,7 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // In-process LiteRT-LM Runtime for the Windows head — CPU rung, P/Invoke against the litert-lm C API.
     public sealed class LiteRtRuntime : Runtime, IDisposable

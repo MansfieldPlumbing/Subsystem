@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // In-process LiteRT-LM Runtime for the Android head over the C API (P/Invoke against LiteRtNative),
     // additive beside the JNI LiteRtChatClient — the broker routes by the Runtime contract. Tokens cross

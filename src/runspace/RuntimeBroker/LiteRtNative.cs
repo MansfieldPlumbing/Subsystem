@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
     // LiteRtNative — the home-spun P/Invoke binding to the LiteRT-LM C API (c/engine.h), shared VERBATIM
     // by both heads: the Windows head loads litert-lm.dll, the Android head loads libLiteRtLm.so. ONE

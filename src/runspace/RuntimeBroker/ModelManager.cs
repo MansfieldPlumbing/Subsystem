@@ -90,7 +90,7 @@ public static class ModelCatalog
 
     // §5 — failed-unit demotion: mark the record degraded with the fault; Active() excludes it.
     // Cleared only by explicit operator action (re-selecting the unit) or a verification pass.
-    public static void Demote(Context context, string id, Subsystem.RuntimeBroker.RbFault fault)
+    public static void Demote(Context context, string id, Subsystem.RbFault fault)
     {
         RewriteManifest(context, id, obj =>
         {
@@ -151,7 +151,7 @@ public static class ModelCatalog
             Dg.Log("engine", $"SELECT {target.Id} committed; serviceable on {broker.BackendName}");
             return target;
         }
-        catch (Subsystem.RuntimeBroker.RbFaultException fx)
+        catch (Subsystem.RbFaultException fx)
         {
             if (priorId.Length > 0 && !string.Equals(priorId, target.Id, StringComparison.OrdinalIgnoreCase))
             {

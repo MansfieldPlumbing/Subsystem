@@ -6,7 +6,7 @@
     <script src="/themes.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Broker</title>
+    <title>Subsystem</title>
     <style>
         /* Agent local names are ALIASES of the canonical theme.css vars (THEMES.md anti-drift): the presenter
            keeps a readable local vocabulary but holds NO color truth — it inherits the active theme. */
@@ -193,7 +193,7 @@
         }
         .btn-action:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); transform: translateY(-1px); }
         .btn-action:active { transform: scale(.96); }
-        /* Contextual offers Broker pushes mid-turn — accent-tinted so they read as "her suggestions". */
+        /* Contextual offers Subsystem pushes mid-turn — accent-tinted so they read as "her suggestions". */
         .btn-action-sug {
             background: color-mix(in srgb, var(--accent) 16%, transparent);
             border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--fg);
@@ -317,7 +317,7 @@
     <div class="chat-header">
         <div class="header-left">
             <button class="header-btn" id="drawer-btn" title="Saved chats">☰</button>
-            <div class="header-avatar" id="avatar" title="Broker — hold for options">
+            <div class="header-avatar" id="avatar" title="Subsystem — hold for options">
                 <span class="avatar-dot" id="avatar-dot"></span>
             </div>
         </div>
@@ -329,7 +329,7 @@
             <div class="sys-avatar"></div>
             <div class="sys-col">
               <div class="message system">
-                <div style="font-size:16px;font-weight:600;margin-bottom:4px;">Hi, I'm Broker 👋</div>
+                <div style="font-size:16px;font-weight:600;margin-bottom:4px;">Hi, I'm Subsystem 👋</div>
                 <div style="color:var(--muted);font-size:14px;line-height:1.5;">I live on your phone and I can actually operate it for you — check the <b>battery</b>, toggle the <b>flashlight</b>, read <b>memory</b>, set <b>volume</b>, <b>vibrate</b>, send <b>notifications</b>, or run any phone command. Just ask in plain words.</div>
               </div>
             </div>
@@ -337,13 +337,13 @@
     </div>
 
     <!-- Action Surface (AGENT-SPEC §3/§4): chips are a live projection of the agent-tool registry,
-         not a held list. Default chips render from each tool's `chip` field; Broker can also push a
+         not a held list. Default chips render from each tool's `chip` field; Subsystem can also push a
          `suggestions` frame to offer contextual follow-ups. The bar holds NO truth of its own. -->
     <div class="suggestions-bar" id="suggestions-bar"></div>
 
     <div id="input-area">
         <div class="input-container">
-            <textarea id="cmd-input" rows="1" placeholder="Message Broker… ('>' runs PowerShell)" title="Start a message with '>' to run it as a PowerShell command"></textarea>
+            <textarea id="cmd-input" rows="1" placeholder="Message Subsystem… ('>' runs PowerShell)" title="Start a message with '>' to run it as a PowerShell command"></textarea>
             <button class="mic-btn" id="mic-btn" title="Hold to record a voice message"><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg></button>
             <button class="send-btn" id="send-btn"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
         </div>
@@ -382,7 +382,7 @@
         function setStatus(state, detail) {
             const c = state === 'ok' ? 'var(--success)' : state === 'err' ? 'var(--error)' : 'var(--accent)';
             avatarDot.style.background = c; avatarDot.style.boxShadow = '0 0 8px ' + c;
-            if (detail) document.getElementById('avatar').title = 'Broker — ' + detail;
+            if (detail) document.getElementById('avatar').title = 'Subsystem — ' + detail;
         }
         function apiSend(obj) { if (wsApi) wsApi.send(obj); }
         function connectApi() {
@@ -591,7 +591,7 @@
         // ===== Action Surface (AGENT-SPEC §3/§4) =====
         // The chip bar is a live projection of the agent-tool registry — it holds no list of its own.
         // Default chips come from each tool's `chip` field in /agent-tools.json (the same manifest the
-        // backend tool-loop reads), so a new capability appears here by construction. Broker can also
+        // backend tool-loop reads), so a new capability appears here by construction. Subsystem can also
         // push a `suggestions` frame mid-turn to offer contextual follow-ups; those take over the bar
         // until the next user turn, then it reverts to the default tool chips.
         const sugBar = document.getElementById('suggestions-bar');
@@ -608,7 +608,7 @@
             sugBar.innerHTML = '';
             chips.forEach(c => sugBar.appendChild(makeChip(c.label, c.prompt, c.contextual)));
         }
-        // Broker-offered follow-ups: items may be plain strings or { label, prompt }.
+        // Subsystem-offered follow-ups: items may be plain strings or { label, prompt }.
         function renderSuggestions(items, replace) {
             const chips = items.map(it => typeof it === 'string'
                 ? { label: it, prompt: it, contextual: true }
@@ -618,7 +618,7 @@
         function restoreDefaultChips() { paintChips(defaultChips); }
 
         async function loadActionSurface() {
-            // A chip's click text strips the leading emoji/symbol so Broker gets a clean phrase.
+            // A chip's click text strips the leading emoji/symbol so Subsystem gets a clean phrase.
             const cleanPhrase = (s) => s.replace(/^[^\p{L}\p{N}]+/u, '').trim();
             if (MOCK) {
                 defaultChips = [{ label: '🔋 Battery?', prompt: 'Battery?' }, { label: '📳 Vibrate', prompt: 'Vibrate' }];

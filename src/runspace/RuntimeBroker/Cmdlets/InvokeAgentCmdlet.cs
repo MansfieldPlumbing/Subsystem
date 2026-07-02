@@ -2,7 +2,7 @@ using System;
 using System.Management.Automation;
 using System.Threading;
 
-namespace Subsystem.RuntimeBroker.Cmdlets;
+namespace Subsystem.Cmdlets;
 
 [Cmdlet(VerbsLifecycle.Invoke, "Agent")]
 public class InvokeAgentCmdlet : PSCmdlet

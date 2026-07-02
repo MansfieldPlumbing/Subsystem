@@ -11,7 +11,6 @@ namespace Subsystem;
 public static class SubsystemApi
 {
     private static System.Management.Automation.Runspaces.RunspacePool? _apiPool;
-    private static Subsystem.RuntimeBroker.Broker? _assistant;
 
     // The single home for the adb client-key path (Personal/adbkey.bin). The connect path treats
     // "key on disk" as the paired signal (see SubsystemService), so IsAdbPaired reads the same truth
@@ -123,7 +122,7 @@ public static class SubsystemApi
     //     { type:"profile", prompt? }             run one turn + return benchmark counters
     public static async Task ProcessLlmWebSocket(Android.Content.Context context, WebSocket ws, CancellationToken token)
     {
-        Subsystem.RuntimeBroker.Runtime assistant;
+        Subsystem.ITurnSource assistant;
         try {
             Func<string, Task> report = async (txt) => {
                 var m = System.Text.RegularExpressions.Regex.Match(txt, @"(\d+)%");
@@ -132,24 +131,24 @@ public static class SubsystemApi
             var activeSpec = ModelCatalog.Active(context);
             if (string.Equals(activeSpec.Format, "dpx", StringComparison.OrdinalIgnoreCase))
             {
-                // She is ambient, not brokered: no memory boundary to admission-control across, so no
-                // Rb.GetAsync ceremony - construct her directly the instant her data exists on this
-                // device (ModelCatalog.EnsureAsync is the same presence check every other model uses;
-                // she is sideloaded-only, so absence throws the same clear FileNotFoundException any
-                // sideloaded model without its file gives).
+                // DPX is ambient: she is the native citizen, constructed the instant her data exists on this
+                // device (ModelCatalog.EnsureAsync is the same presence check every model uses). No mount, no
+                // broker — she runs in-proc on the VOM.
                 var dpxPath = await ModelCatalog.EnsureAsync(context, activeSpec, report, token);
                 var dpx = new Subsystem.Dpx.DpxDecoder(dpxPath, activeSpec.Id);
                 var dpxFault = dpx.BringUp();
-                if (dpxFault != null) throw new Subsystem.RuntimeBroker.RbFaultException(dpxFault);
+                if (dpxFault != null) throw new Subsystem.RbFaultException(dpxFault);
                 assistant = dpx;
             }
             else
             {
-                assistant = (await Rb.GetAsync(context, report, token)).Client;
+                // GUEST engine (LiteRT) path. The guest mount was removed with RuntimeBroker (larp, errata);
+                // rebuild it as a LiteRt guest adapter. The DPX citizen is the default; LiteRT is opt-in.
+                throw new InvalidOperationException("Guest engine mount not wired (RuntimeBroker retired). Enable a DPX model or rebuild the LiteRt guest adapter.");
             }
             await SendFrame(ws, new { type = "meta", model = activeSpec.DisplayName, backend = assistant.BackendName }, token);
             await SendFrame(ws, new { type = "status", state = "ready", text = "Ready." }, token);
-        } catch (Subsystem.RuntimeBroker.RbFaultException fx) {
+        } catch (Subsystem.RbFaultException fx) {
             // §3.1: the typed fault crosses to the client as structured fields; text is display-only.
             await SendFrame(ws, new { type = "error", @class = fx.Fault.Class.ToString(),
                 unitId = fx.Fault.UnitId, backend = fx.Fault.Backend, text = fx.Fault.NativeDetail }, token);
@@ -212,11 +211,11 @@ public static class SubsystemApi
             try
             {
                 // --- Saved-chat commands (Cm \Agent\Session\*) ---
-                if (action == "sessions") { await SendFrame(ws, new { type = "sessions", items = Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries() }, token); continue; }
-                if (action == "new")      { sessionId = Subsystem.RuntimeBroker.AgentSessionTable.Create(title); await SendFrame(ws, new { type = "session", id = sessionId }, token); continue; }
-                if (action == "load")     { sessionId = id; await SendFrame(ws, new { type = "transcript", id, json = Subsystem.RuntimeBroker.AgentSessionTable.LoadJson(id) }, token); continue; }
-                if (action == "delete")   { Subsystem.RuntimeBroker.AgentSessionTable.Delete(id); if (sessionId == id) sessionId = ""; await SendFrame(ws, new { type = "sessions", items = Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries() }, token); continue; }
-                if (action == "rename")   { Subsystem.RuntimeBroker.AgentSessionTable.Rename(id, title); await SendFrame(ws, new { type = "sessions", items = Subsystem.RuntimeBroker.AgentSessionTable.ListSummaries() }, token); continue; }
+                if (action == "sessions") { await SendFrame(ws, new { type = "sessions", items = Subsystem.AgentSessionTable.ListSummaries() }, token); continue; }
+                if (action == "new")      { sessionId = Subsystem.AgentSessionTable.Create(title); await SendFrame(ws, new { type = "session", id = sessionId }, token); continue; }
+                if (action == "load")     { sessionId = id; await SendFrame(ws, new { type = "transcript", id, json = Subsystem.AgentSessionTable.LoadJson(id) }, token); continue; }
+                if (action == "delete")   { Subsystem.AgentSessionTable.Delete(id); if (sessionId == id) sessionId = ""; await SendFrame(ws, new { type = "sessions", items = Subsystem.AgentSessionTable.ListSummaries() }, token); continue; }
+                if (action == "rename")   { Subsystem.AgentSessionTable.Rename(id, title); await SendFrame(ws, new { type = "sessions", items = Subsystem.AgentSessionTable.ListSummaries() }, token); continue; }
 
                 if (action == "profile")
                 {
@@ -224,7 +223,7 @@ public static class SubsystemApi
                     int chars = 0;
                     var probe = string.IsNullOrWhiteSpace(text) ? "Say hello in one short sentence." : text;
                     await foreach (var d in assistant.StreamTurnAsync(probe, null, token))
-                        if (d.Kind == Subsystem.RuntimeBroker.AgentDeltaKind.Token && !string.IsNullOrEmpty(d.Text)) chars += d.Text.Length;
+                        if (d.Kind == Subsystem.AgentDeltaKind.Token && !string.IsNullOrEmpty(d.Text)) chars += d.Text.Length;
                     sw.Stop();
                     var b = assistant.GetBenchmark();
                     await SendFrame(ws, new {
@@ -245,8 +244,8 @@ public static class SubsystemApi
 
                 // Persist the user turn into the active saved chat (create one lazily on first message so
                 // every conversation is durable in Cm without the user asking). Announce the session id once.
-                if (string.IsNullOrEmpty(sessionId)) { sessionId = Subsystem.RuntimeBroker.AgentSessionTable.Create(); await SendFrame(ws, new { type = "session", id = sessionId }, token); }
-                Subsystem.RuntimeBroker.AgentSessionTable.AppendTurn(sessionId,
+                if (string.IsNullOrEmpty(sessionId)) { sessionId = Subsystem.AgentSessionTable.Create(); await SendFrame(ws, new { type = "session", id = sessionId }, token); }
+                Subsystem.AgentSessionTable.AppendTurn(sessionId,
                     "user", audioBytes != null && text.Length == 0 ? "🎤 (voice message)" : text);
                 var answerBuf = new StringBuilder();
 
@@ -258,7 +257,7 @@ public static class SubsystemApi
                 // Pin the HUD sitrep to the head of the turn (AGENT-SPEC §2/§3): fresh device vitals
                 // re-projected by the harness every loop. The transcript above persisted the RAW user
                 // text — the HUD is projection, never transcript truth.
-                var turnText = Subsystem.RuntimeBroker.Hud.Wrap(
+                var turnText = Subsystem.Hud.Wrap(
                     text, ModelCatalog.Active(context).DisplayName, assistant.BackendName);
 
                 // Stream the structured turn: visible tokens, the thinking channel, and native tool
@@ -268,14 +267,14 @@ public static class SubsystemApi
                     if (ws.State != WebSocketState.Open) break;
                     switch (d.Kind)
                     {
-                        case Subsystem.RuntimeBroker.AgentDeltaKind.Token:
+                        case Subsystem.AgentDeltaKind.Token:
                             answerBuf.Append(d.Text);
                             await SendFrame(ws, new { type = "token", text = d.Text }, token); break;
-                        case Subsystem.RuntimeBroker.AgentDeltaKind.Think:
+                        case Subsystem.AgentDeltaKind.Think:
                             await SendFrame(ws, new { type = "think", text = d.Text }, token); break;
-                        case Subsystem.RuntimeBroker.AgentDeltaKind.ToolCall:
+                        case Subsystem.AgentDeltaKind.ToolCall:
                             await SendFrame(ws, new { type = "tool", name = d.Name, args = d.Text }, token); break;
-                        case Subsystem.RuntimeBroker.AgentDeltaKind.ToolResult:
+                        case Subsystem.AgentDeltaKind.ToolResult:
                             // The `offer_choices` verb is presentation, not a data tool: route its result
                             // to the Action Surface as a `suggestions` frame rather than a tool card.
                             if (d.Name == "offer_choices")
@@ -283,7 +282,7 @@ public static class SubsystemApi
                             else
                                 await SendFrame(ws, new { type = "tool_result", name = d.Name, result = d.Text }, token);
                             break;
-                        case Subsystem.RuntimeBroker.AgentDeltaKind.Error:
+                        case Subsystem.AgentDeltaKind.Error:
                             await SendFrame(ws, d.Fault is { } f
                                 ? new { type = "error", @class = (string?)f.Class.ToString(), unitId = (string?)f.UnitId, backend = (string?)f.Backend, text = d.Text }
                                 : new { type = "error", @class = (string?)null, unitId = (string?)null, backend = (string?)null, text = d.Text }, token);
@@ -302,7 +301,7 @@ public static class SubsystemApi
                 }, token);
 
                 // Persist her answer (append-only transcript in Cm).
-                if (answerBuf.Length > 0) Subsystem.RuntimeBroker.AgentSessionTable.AppendTurn(sessionId, "assistant", answerBuf.ToString());
+                if (answerBuf.Length > 0) Subsystem.AgentSessionTable.AppendTurn(sessionId, "assistant", answerBuf.ToString());
             }
             catch (Exception ex)
             {

@@ -9,15 +9,15 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Onnx;
-using Subsystem.RuntimeBroker;
+using Subsystem;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
 
 namespace Subsystem.Dpx
 {
-    // DPX decode face: the host-side DECODE LOOP that turns a prompt into streamed
-    // tokens by driving the in-proc dpx interpreter. Tensors and KV are VOM regions, off-GC.
-    public sealed class DpxDecoder : Runtime
+    // DPX is the PROTOCOL (DirectPortX) — logistics, not an agent. This is the citizen decode loop SS drives
+    // over it: an ITurnSource, never a Runtime (a Runtime is a mounted GUEST engine; DPX is neither).
+    public sealed class DpxDecoder : ITurnSource
     {
         private readonly string? _modelPath;
         private readonly string? _embedModelPath;

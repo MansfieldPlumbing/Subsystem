@@ -2,16 +2,24 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace Subsystem.RuntimeBroker
+namespace Subsystem
 {
-    // The inference-runtime contract both heads implement: one Runtime per inference exec —
-    // LiteRtRuntime / OnnxRuntime / GgmlRuntime — brokered behind the RuntimeBroker.
-    public interface Runtime : IDisposable
+    // ITurnSource — yields a turn as AgentDeltas. The native DPX citizen is one; a mounted foreign engine
+    // is one. The only shape they share.
+    public interface ITurnSource : IDisposable
     {
         RbFault? BringUp();
         IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default);
+        IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, byte[]? imageBytes, CancellationToken ct = default)
+            => StreamTurnAsync(prompt, audioBytes, ct);
         bool IsAlive { get; }
         string BackendName { get; }
+    }
+
+    // Runtime — the GUEST contract. A foreign, boundary-crossing engine (LiteRT-LM, ONNX, GGML) signs this to
+    // be mounted through the guest door. DPX IS NOT A RUNTIME — she is the native citizen, an ITurnSource.
+    public interface Runtime : ITurnSource
+    {
     }
 
     public enum AgentDeltaKind
