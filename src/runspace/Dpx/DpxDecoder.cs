@@ -45,6 +45,19 @@ namespace Subsystem.Dpx
         // the persistent region) instead of needing the legacy per-token alloc/copy/close carry-forward.
         public long KvRingSteps { get; private set; }
 
+        // Last turn's measured counters (the settings benchmark / done-frame receipt). Written by the
+        // decode worker at turn end; read after the stream drains — turns are serialized by _turnGate.
+        private double _lastPrefillMs, _lastDecodeMs;
+        private int _lastDecodeTokens;
+
+        public Benchmark? GetBenchmark()
+        {
+            if (_lastPrefillMs <= 0 && _lastDecodeTokens == 0) return null;
+            double prefillTps = _lastPrefillMs > 0 ? PromptTokensCount / (_lastPrefillMs / 1000.0) : 0;
+            double decodeTps = _lastDecodeMs > 0 ? _lastDecodeTokens / (_lastDecodeMs / 1000.0) : 0;
+            return new Benchmark(0, _lastPrefillMs / 1000.0, PromptTokensCount, prefillTps, _lastDecodeTokens, decodeTps);
+        }
+
         // Per-turn decode cap. The constructor value seeds it; a resident host (e.g. ss mcp `query`)
         // sets it between turns. Turns are serialized by _turnGate and the hosts are single-threaded,
         // so a set never races an in-flight decode loop.
@@ -458,6 +471,9 @@ namespace Subsystem.Dpx
                 ringLive.Add(kvInput.Name);
             }
 
+            _lastPrefillMs = 0; _lastDecodeMs = 0; _lastDecodeTokens = 0;
+            var turnSw = System.Diagnostics.Stopwatch.StartNew();
+
             while (step < _maxTokens)
             {
                 ct.ThrowIfCancellationRequested();
@@ -535,6 +551,9 @@ namespace Subsystem.Dpx
                 }
 
                 seq.Add(nextTokenId);
+                if (step == 0) { _lastPrefillMs = turnSw.Elapsed.TotalMilliseconds; turnSw.Restart(); }
+                else { _lastDecodeMs = turnSw.Elapsed.TotalMilliseconds; }
+                _lastDecodeTokens = step + 1;
 
                 if (nextTokenId == eosId || (endOfTurnId >= 0 && nextTokenId == endOfTurnId))
                 {

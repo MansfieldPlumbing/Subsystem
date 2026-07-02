@@ -14,7 +14,12 @@ namespace Subsystem
             => StreamTurnAsync(prompt, audioBytes, ct);
         bool IsAlive { get; }
         string BackendName { get; }
+        Benchmark? GetBenchmark() => null;
     }
+
+    // Per-turn decode counters (mirrors the Android head's Runtime.cs contract member-for-member).
+    public sealed record Benchmark(double InitSeconds, double TimeToFirstTokenSeconds,
+        int PrefillTokens, double PrefillTokensPerSecond, int DecodeTokens, double DecodeTokensPerSecond);
 
     // Runtime — the GUEST contract. A foreign, boundary-crossing engine (LiteRT-LM, ONNX, GGML) signs this to
     // be mounted through the guest door. DPX IS NOT A RUNTIME — she is the native citizen, an ITurnSource.
