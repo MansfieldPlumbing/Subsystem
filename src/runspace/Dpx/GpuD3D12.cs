@@ -71,9 +71,12 @@ unsafe static class GpuD3D12
     public static string Name => s_name;
 
     // q4 GEMM root sig/PSO — separate from the fp32 GEMM (5 params: RootConstants(5) b0, SRV t0 A, SRV t1 Bq, SRV t2 Scales, SRV t3 Zp, UAV u0 C).
-    // PSO cache key is length+FNV-1a(bytes), not length alone (two different DXIL blobs of the same length used
-    // to silently reuse the wrong compiled PSO — CRQ-tournament shaders are exactly this size-collision shape).
-    static IntPtr s_rootQ4, s_psoQ4; static int s_psoQ4Len = -1; static ulong s_psoQ4Hash;
+    // Small slot array of compiled PSOs keyed by length+FNV-1a(bytes) — the q4 seam now alternates kernel
+    // variants (naive / GEMV / tiled) within one process, and a single-slot cache would recompile the PSO on
+    // every prefill<->decode switch. Hash, not length alone: two different DXIL blobs of the same length used
+    // to silently reuse the wrong compiled PSO — tournament shaders are exactly this size-collision shape.
+    const int Q4PsoSlots = 4;
+    static IntPtr s_rootQ4; static IntPtr[] s_psoQ4; static int[] s_psoQ4Len; static ulong[] s_psoQ4Hash;
 
     static ulong Fnv1a(byte[] data)
     {
@@ -255,26 +258,41 @@ unsafe static class GpuD3D12
         cap = need;
     }
 
+    // One compiled PSO per distinct q4 DXIL blob, matched by (length, FNV-1a). A full slot array evicts its
+    // last entry — with 3 kernel variants and 4 slots that never happens in practice.
+    static IntPtr PsoQ4(byte[] dxil, int dxilLen)
+    {
+        if (s_psoQ4 == null) { s_psoQ4 = new IntPtr[Q4PsoSlots]; s_psoQ4Len = new int[Q4PsoSlots]; s_psoQ4Hash = new ulong[Q4PsoSlots]; }
+        ulong dHash = Fnv1a(dxil);
+        int slot = 0;
+        for (int i = 0; i < Q4PsoSlots; i++)
+        {
+            if (s_psoQ4[i] != IntPtr.Zero && s_psoQ4Len[i] == dxilLen && s_psoQ4Hash[i] == dHash) return s_psoQ4[i];
+            if (s_psoQ4[i] != IntPtr.Zero) slot = i + 1;
+        }
+        if (slot == Q4PsoSlots) { slot = Q4PsoSlots - 1; Marshal.Release(s_psoQ4[slot]); s_psoQ4[slot] = IntPtr.Zero; }
+        IntPtr dp = Marshal.AllocHGlobal(dxilLen); Marshal.Copy(dxil, 0, dp, dxilLen);
+        CPSO pd = new CPSO { RS = s_rootQ4, CS = new BC { p = dp, len = (IntPtr)dxilLen } };
+        int rc = Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out IntPtr pso);
+        Marshal.FreeHGlobal(dp);
+        if (rc != 0) return IntPtr.Zero;
+        s_psoQ4[slot] = pso; s_psoQ4Len[slot] = dxilLen; s_psoQ4Hash[slot] = dHash;
+        return pso;
+    }
+
     // GemmQ4: Y[M,N] = A[M,K] @ dequant(Bq)^T, q4 SEQUENTIAL-nibble packed weight, never expanded to fp32 on CPU.
     // A/Scales fp32, Bq/Zp raw packed uint8 nibbles (Zp may be empty when hasZp=false — dequant defaults zp=8 on GPU).
     // weightKey>0: Bq/Scales/Zp are uploaded to a DEFAULT-heap buffer ONCE (keyed by weightKey) and reused on every
     // subsequent call with the same key - the 33MB+ weight re-upload that made the naive per-call path slower than
     // the CPU SIMD kernel is gone entirely; only A (tiny, M*K) and C (readback) still move host<->device per call.
     // weightKey<=0 preserves the old fully-per-call upload/release behavior (no caching, no leaked resources).
-    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, int dxilLen, long weightKey = -1)
+    // tileN/tileM are the OUTPUT elements each threadgroup of the supplied kernel covers (the dispatch divisors,
+    // decoupled from numthreads): 16x16 for the naive/tiled kernels, 8x1 for the M==1 GEMV kernel.
+    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, int dxilLen, long weightKey = -1, int tileN = 16, int tileM = 16)
     {
         EnsureInit();
-        ulong dHash = Fnv1a(dxil);
-        if (s_psoQ4 == IntPtr.Zero || s_psoQ4Len != dxilLen || s_psoQ4Hash != dHash)
-        {
-            if (s_psoQ4 != IntPtr.Zero) { Marshal.Release(s_psoQ4); s_psoQ4 = IntPtr.Zero; }
-            IntPtr dp = Marshal.AllocHGlobal(dxilLen); Marshal.Copy(dxil, 0, dp, dxilLen);
-            CPSO pd = new CPSO { RS = s_rootQ4, CS = new BC { p = dp, len = (IntPtr)dxilLen } };
-            int rc = Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out s_psoQ4);
-            Marshal.FreeHGlobal(dp);
-            if (rc != 0) return -6;
-            s_psoQ4Len = dxilLen; s_psoQ4Hash = dHash;
-        }
+        IntPtr pso = PsoQ4(dxil, dxilLen);
+        if (pso == IntPtr.Zero) return -6;
         byte[] resIID = G(IID_RES);
         bool cache = weightKey > 0;
         ulong aB = (ulong)M * K * 4, bqB = (ulong)Bq.Length, scB = (ulong)Scales.Length * 4, cB = (ulong)M * N * 4;
@@ -322,15 +340,15 @@ unsafe static class GpuD3D12
         // persistent command allocator/list: Reset instead of create/destroy every call.
         if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
         else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
-        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, s_psoQ4, G(IID_LIST), out s_q4List);
-        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, s_psoQ4);
+        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
         IntPtr list = s_q4List;
 
-        Fn<DSetPSO>(list, 25)(list, s_psoQ4); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
         uint* gc = stackalloc uint[5]; gc[0] = M; gc[1] = N; gc[2] = K; gc[3] = blockSize; gc[4] = hasZp ? 1u : 0u;
         Fn<DSet32>(list, 35)(list, 0, 5, gc, 0);
         Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bqVA); Fn<DSetSRV>(list, 39)(list, 3, scVA); Fn<DSetSRV>(list, 39)(list, 4, zpVA); Fn<DSetUAV>(list, 41)(list, 5, cVA);
-        Fn<DDispatch>(list, 14)(list, (N + 15) / 16, (M + 15) / 16, 1);
+        Fn<DDispatch>(list, 14)(list, (N + (uint)tileN - 1) / (uint)tileN, (M + (uint)tileM - 1) / (uint)tileM, 1);
         BAR bar2 = new BAR { Type = 0, Res = cBuf, Before = 8, After = 2048 }; Fn<DBarrier>(list, 26)(list, 1, ref bar2);
         Fn<DCopy>(list, 15)(list, rbBuf, 0, cBuf, 0, cB);
         BAR bar3 = new BAR { Type = 0, Res = cBuf, Before = 2048, After = 8 }; Fn<DBarrier>(list, 26)(list, 1, ref bar3);   // back to UAV for the next call's dispatch

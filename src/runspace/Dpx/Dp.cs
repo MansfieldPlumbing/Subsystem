@@ -898,19 +898,42 @@ public class Dp
         // key derives from the GEOMETRY byte length (rowBytes*N == the packed weight's full length), not
         // bArr.Length - resident-aware callers legitimately pass an empty bArr once the weight is uploaded.
         long key = GpuWeightKey(x[1], rowBytes * N);
-        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, GemmDxilQ4(), key);
+        // variant rungs, placed beside the exe by the tournament (ShaderTournament.ResolveQ4): M==1 decode ->
+        // the GEMV kernel (8 output rows per group, 16 lanes each, tileN=8/tileM=1), M>1 prefill -> the 16x16
+        // tiled kernel. Both are BlockSize==32-only; an absent file or ineligible shape falls back to the naive
+        // gemm_q4.dxil rung (and any GPU fault still latches _gpuQ4Dead down to the CPU oracle).
+        byte[] dxil = GemmDxilQ4(); int tileN = 16, tileM = 16;
+        if (bs == 32)
+        {
+            if (M == 1 && (long)N <= 8L * 65535)   // D3D12 dispatch cap: 65535 groups of 8 rows
+            {
+                var v = Q4Dxil(1);
+                if (v.Length > 0) { dxil = v; tileN = 8; tileM = 1; }
+            }
+            else if (M > 1)
+            {
+                var v = Q4Dxil(2);
+                if (v.Length > 0) dxil = v;
+            }
+        }
+        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, dxil, key, tileN, tileM);
         _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
         if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
         var outShape0 = (int[])x[0].Shape.Clone(); outShape0[outShape0.Length - 1] = N;
         return Tensor.F(c, outShape0);
     }
-    static byte[] _gemmQ4Dxil;
-    internal static byte[] GemmDxilQ4()
+    // [0]=naive gemm_q4.dxil (the fallback rung), [1]=gemm_q4_gemv.dxil (M==1), [2]=gemm_q4_tiled.dxil (M>1);
+    // Array.Empty = probed and absent. The tournament rewrites these files and then nulls this cache (reflection).
+    static byte[][] _gemmQ4Dxil;
+    static byte[] Q4Dxil(int variant)
     {
-        if (_gemmQ4Dxil != null) return _gemmQ4Dxil;
-        string near = Path.Combine(AppContext.BaseDirectory, "gemm_q4.dxil");
-        return _gemmQ4Dxil = File.Exists(near) ? File.ReadAllBytes(near) : Array.Empty<byte>();
+        _gemmQ4Dxil ??= new byte[3][];
+        if (_gemmQ4Dxil[variant] != null) return _gemmQ4Dxil[variant];
+        string name = variant == 1 ? "gemm_q4_gemv.dxil" : variant == 2 ? "gemm_q4_tiled.dxil" : "gemm_q4.dxil";
+        string near = Path.Combine(AppContext.BaseDirectory, name);
+        return _gemmQ4Dxil[variant] = File.Exists(near) ? File.ReadAllBytes(near) : Array.Empty<byte>();
     }
+    internal static byte[] GemmDxilQ4() => Q4Dxil(0);
 
     // GPU dispatch that skips the b/scale/zp ToArray copies once the weight is resident on the adapter
     // (GpuD3D12 keeps them in a DEFAULT-heap buffer per weightKey; on a cache hit GemmQ4 never reads
@@ -2583,14 +2606,16 @@ static class Gpu
     // weightKey: stable per-weight-tensor cache token (Dp.GpuWeightKey) so GpuD3D12 can keep Bq/scales/zp resident
     // in a default-heap buffer across calls instead of re-uploading 33MB+ of weight bytes every single GEMM.
     // key<=0 disables residency (old per-call upload behavior) - Vulkan backend doesn't take the key yet.
-    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, long weightKey = -1)
+    // tileN/tileM: output elements per threadgroup of the supplied dxil (dispatch divisors — 16x16 naive/tiled,
+    // 8x1 GEMV). D3D12-only; the Vulkan backend still carries the naive gemm_q4.spv with its own fixed geometry.
+    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, long weightKey = -1, int tileN = 16, int tileM = 16)
     {
         if (s_vk)
         {
             s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
             return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4);
         }
-        return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey);
+        return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey, tileN, tileM);
     }
     public static string DeviceName() { if (s_vk) { GpuVulkan.EnsureInit(); return GpuVulkan.Name; } GpuD3D12.EnsureInit(); return GpuD3D12.Name; }
     // Residency probe for the q4 weight cache: true only when the D3D12 backend already holds this
