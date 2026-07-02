@@ -15,6 +15,13 @@ namespace Subsystem.Device;
 // with no shared filesystem: advertise -> a scanner reads capabilities off the GATT characteristics ->
 // connects -> McpRelay-fragmented JSON-RPC rides the Mcp Rx/Tx characteristics.
 //
+// ANDROID-ONLY. Scott, 2026-07-02 (raw prompt, re: the Windows-side scanner that used to live at
+// windows/DpBleScan.cs): "Android-only advertise ... Windows never actively scans for BLE — it reaches
+// phones via USB/AOA or LAN instead". Windows has no public device-object/IOCTL surface for passive BLE
+// advertisement scanning (only the gated WinRT BluetoothLEAdvertisementWatcher, which we don't pursue —
+// see [[no-winrt-native-c-abi]]), and it doesn't need one: it already reaches phones over faster rungs.
+// The scanner side of this recipe is Android scanning Android (phone-to-phone, not yet built).
+//
 // Gated by \Capability\Mcp\RemoteAccept — default-deny, mirrors windows/CapabilityGate.cs's shape without
 // its Console UX (Android has none; denials log via Dg). Off until the user flips the toggle in the ss
 // UI; nothing here starts advertising on its own.
