@@ -216,7 +216,7 @@ internal static class DpBleScan
             }
             finally { Marshal.FreeHGlobal(reg); }
         }
-        catch (ThreadInterruptedException) { }
+        catch (ThreadInterruptedException) { Dg.Log("dp-ble", "subscription thread unwound (Terminate interrupt)"); }
         finally { CloseHandle(hDevice); GC.KeepAlive(cb); }
     }
 

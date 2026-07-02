@@ -150,9 +150,9 @@ internal sealed class DpAoaDevice : IDisposable
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         Vom.Vom.Terminate(_owner);
-        try { _rx?.Close(); } catch { }
-        try { _tx?.Close(); } catch { }
-        try { _pfd?.Close(); } catch { }
+        try { _rx?.Close(); } catch (Exception ex) { Dg.Log("dp-aoa", $"rx close: {ex.Message}"); }
+        try { _tx?.Close(); } catch (Exception ex) { Dg.Log("dp-aoa", $"tx close: {ex.Message}"); }
+        try { _pfd?.Close(); } catch (Exception ex) { Dg.Log("dp-aoa", $"pfd close: {ex.Message}"); }
     }
 
     public void Dispose() => Stop();
@@ -289,7 +289,7 @@ internal sealed class DpAoaHost : IDisposable
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         Vom.Vom.Terminate(_owner);
-        try { _conn.Close(); } catch { }
+        try { _conn.Close(); } catch (Exception ex) { Dg.Log("dp-aoa", $"conn close: {ex.Message}"); }
     }
 
     public void Dispose() => Stop();

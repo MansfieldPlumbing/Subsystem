@@ -16,6 +16,7 @@ using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Subsystem.Device;
 using VtNetCore.VirtualTerminal;
 
 using System.Management.Automation.Host;

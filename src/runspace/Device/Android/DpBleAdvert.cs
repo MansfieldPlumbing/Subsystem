@@ -5,6 +5,7 @@ using Android.Bluetooth.LE;
 using Android.OS;
 using Subsystem.Cm;
 using Subsystem.Vom;
+using CmClass = Subsystem.Cm.Cm;   // the registry CLASS; bare `Cm` binds to the sibling NAMESPACE here (the Dp.cs VomClass precedent)
 
 namespace Subsystem.Device;
 
@@ -50,8 +51,8 @@ internal static class DpBleAdvert
 
     private static BluetoothLeAdvertiser? _advertiser;
     private static BluetoothGattServer? _gattServer;
-    private static AdvertiseCallbackImpl? _advertiseCallback;
-    private static GattServerCallbackImpl? _gattCallback;
+    private static DpAdvertiseCallback? _advertiseCallback;
+    private static DpGattServerCallback? _gattCallback;
     private static Owner? _owner;
 
     // The opt-in door. grant=true seeds+enables the capability (an audited grant, the same shape as a
@@ -60,9 +61,9 @@ internal static class DpBleAdvert
     // calls with grant:false and relies on the persisted Enabled bit.
     public static bool Allow(bool grant)
     {
-        if (Cm.Get(CapabilityPath) is null)
+        if (CmClass.Get(CapabilityPath) is null)
         {
-            Cm.Register(new CapabilityRecord
+            CmClass.Register(new CapabilityRecord
             {
                 Path = CapabilityPath, Name = "RemoteAccept", Type = "Mount", Owner = "\\System",
                 Integrity = "User", StartType = "manual", Enabled = false,
@@ -74,7 +75,7 @@ internal static class DpBleAdvert
             });
         }
 
-        if (grant) Cm.Set(CapabilityPath, enabled: true, startType: null);
+        if (grant) CmClass.Set(CapabilityPath, enabled: true, startType: null);
 
         var res = AccessCheck.Resolve(Caller.Local(), CapabilityPath);
         if (!res.Granted) { Dg.Log("dp-ble", $"DENIED — {res.Reason}"); return false; }
@@ -104,7 +105,7 @@ internal static class DpBleAdvert
         service.AddCharacteristic(NotifyCharacteristic(McpTxUuid));
 
         _owner = Vom.Vom.CreateOwner($"\\Device\\Android\\{serial}\\Mcp");
-        _gattCallback = new GattServerCallbackImpl();
+        _gattCallback = new DpGattServerCallback();
         _gattServer = btMgr!.OpenGattServer(ctx, _gattCallback);
         if (_gattServer == null) { Dg.Log("dp-ble", "OpenGattServer failed"); Stop(); return false; }
         _gattServer.AddService(service);
@@ -119,7 +120,7 @@ internal static class DpBleAdvert
             .SetIncludeDeviceName(false)!                    // DeviceName characteristic carries it — the 31B adv payload can't
             .Build();
 
-        _advertiseCallback = new AdvertiseCallbackImpl();
+        _advertiseCallback = new DpAdvertiseCallback();
         _advertiser.StartAdvertising(settings, data, _advertiseCallback);
         Dg.Log("dp-ble", $"advertising {ServiceUuid} caps=0x{(byte)caps:X2} transport={BestTransport()}");
         return true;
@@ -159,7 +160,7 @@ internal static class DpBleAdvert
     // completed JSON-RPC frame into the actual `ss mcp` tool surface is NOT wired here: that surface
     // (windows/Mcp.cs) is Windows-head only today — porting/sharing its dispatcher into the Android
     // runspace is the next slice (filed alongside this).
-    private sealed class GattServerCallbackImpl : BluetoothGattServerCallback
+    private sealed class DpGattServerCallback : BluetoothGattServerCallback
     {
         private readonly McpRelay.Reassembler _rx = new();
 
@@ -174,11 +175,13 @@ internal static class DpBleAdvert
                 _gattServer?.SendResponse(device, requestId, GattStatus.Success, offset, value);
         }
 
-        public override void OnConnectionStateChange(BluetoothDevice? device, GattStatus status, ProfileState newState)
+        // Binding quirk: the SERVER callback maps both Java ints to ProfileState (client-side
+        // BluetoothGattCallback is the one that takes GattStatus).
+        public override void OnConnectionStateChange(BluetoothDevice? device, ProfileState status, ProfileState newState)
             => Dg.Log("dp-ble", $"peer {device?.Address} -> {newState}");
     }
 
-    private sealed class AdvertiseCallbackImpl : AdvertiseCallback
+    private sealed class DpAdvertiseCallback : AdvertiseCallback
     {
         public override void OnStartFailure(AdvertiseFailure errorCode) => Dg.Log("dp-ble", $"advertise failed: {errorCode}");
     }
