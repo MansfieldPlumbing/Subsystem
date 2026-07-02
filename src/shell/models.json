@@ -4,12 +4,20 @@
     "id": "_about"
   },
   {
-    "id": "e2b", "name": "Gemma 4 E2B", "enabled": true,
+    "id": "e2b", "name": "Gemma 4 E2B (DPX)", "enabled": true,
+    "version": 1, "kind": "model", "format": "dpx", "role": "assistant",
+    "modality": "text", "displayName": "Gemma 4 E2B — DPX native", "approxSize": "4.3 GB",
+    "file": "gemma4-e2b.db",
+    "minBytes": 4200000000, "isDefault": true, "tools": false, "thinking": false,
+    "note": "runs through the in-proc DPX interpreter (VOM-native, no admission/OOM brokering) - not the LiteRT C-API path. Sideloaded only (no url - adb push into files/models/); greedy decode only, no configurable sampler yet. Keeps id 'e2b' - ModelManager.DefaultId is a hardcoded C# fallback constant matching this exact id string."
+  },
+  {
+    "id": "e2b-litert", "name": "Gemma 4 E2B (LiteRT)", "enabled": false,
     "version": 1, "kind": "model", "format": "litertlm", "role": "assistant",
     "modality": "text·image·audio·video", "displayName": "Gemma 4 E2B", "approxSize": "2.6 GB",
     "file": "gemma-4-E2B-it.litertlm",
     "url": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
-    "minBytes": 2000000000, "isDefault": true, "tools": true, "thinking": true,
+    "minBytes": 2000000000, "tools": true, "thinking": true,
     "sampler": { "type": "topP", "topK": 40, "topP": 0.95, "temperature": 0.3, "seed": 0 }
   },
   {

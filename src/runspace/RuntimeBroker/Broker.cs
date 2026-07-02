@@ -37,6 +37,11 @@ namespace Subsystem.RuntimeBroker
         public string BackendName => _client.BackendName;
         public string UnitId => _unitId;
 
+        // The underlying Runtime — lets a caller that needs to hold EITHER a brokered (LiteRT) or a
+        // directly-constructed (DPX, never brokered - no memory boundary to admission-control) engine
+        // behind one Runtime-typed reference, without Rb itself ever referencing Dpx (SS014).
+        public Runtime Client => _client;
+
         // §3/§6: serviceability surface — acquisition and verification consult these.
         public bool IsAlive => _client.IsAlive;
         public RbFault? BringUp() => _client.BringUp();

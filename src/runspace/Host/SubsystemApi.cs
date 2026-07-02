@@ -123,14 +123,31 @@ public static class SubsystemApi
     //     { type:"profile", prompt? }             run one turn + return benchmark counters
     public static async Task ProcessLlmWebSocket(Android.Content.Context context, WebSocket ws, CancellationToken token)
     {
-        Subsystem.RuntimeBroker.Broker assistant;
+        Subsystem.RuntimeBroker.Runtime assistant;
         try {
             Func<string, Task> report = async (txt) => {
                 var m = System.Text.RegularExpressions.Regex.Match(txt, @"(\d+)%");
                 await SendFrame(ws, new { type = "status", state = "loading", pct = m.Success ? int.Parse(m.Groups[1].Value) : (int?)null, text = txt.Trim() }, token);
             };
-            assistant = await Rb.GetAsync(context, report, token);
-            await SendFrame(ws, new { type = "meta", model = ModelCatalog.Active(context).DisplayName, backend = assistant.BackendName }, token);
+            var activeSpec = ModelCatalog.Active(context);
+            if (string.Equals(activeSpec.Format, "dpx", StringComparison.OrdinalIgnoreCase))
+            {
+                // She is ambient, not brokered: no memory boundary to admission-control across, so no
+                // Rb.GetAsync ceremony - construct her directly the instant her data exists on this
+                // device (ModelCatalog.EnsureAsync is the same presence check every other model uses;
+                // she is sideloaded-only, so absence throws the same clear FileNotFoundException any
+                // sideloaded model without its file gives).
+                var dpxPath = await ModelCatalog.EnsureAsync(context, activeSpec, report, token);
+                var dpx = new Subsystem.Dpx.DpxDecoder(dpxPath, activeSpec.Id);
+                var dpxFault = dpx.BringUp();
+                if (dpxFault != null) throw new Subsystem.RuntimeBroker.RbFaultException(dpxFault);
+                assistant = dpx;
+            }
+            else
+            {
+                assistant = (await Rb.GetAsync(context, report, token)).Client;
+            }
+            await SendFrame(ws, new { type = "meta", model = activeSpec.DisplayName, backend = assistant.BackendName }, token);
             await SendFrame(ws, new { type = "status", state = "ready", text = "Ready." }, token);
         } catch (Subsystem.RuntimeBroker.RbFaultException fx) {
             // §3.1: the typed fault crosses to the client as structured fields; text is display-only.
@@ -206,7 +223,8 @@ public static class SubsystemApi
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     int chars = 0;
                     var probe = string.IsNullOrWhiteSpace(text) ? "Say hello in one short sentence." : text;
-                    await foreach (var chunk in assistant.SendMessageStreamAsync(probe, ct: token)) chars += chunk.Length;
+                    await foreach (var d in assistant.StreamTurnAsync(probe, null, token))
+                        if (d.Kind == Subsystem.RuntimeBroker.AgentDeltaKind.Token && !string.IsNullOrEmpty(d.Text)) chars += d.Text.Length;
                     sw.Stop();
                     var b = assistant.GetBenchmark();
                     await SendFrame(ws, new {
@@ -245,7 +263,7 @@ public static class SubsystemApi
 
                 // Stream the structured turn: visible tokens, the thinking channel, and native tool
                 // call/result activity (the engine runs tools itself — AgentTools.cs). One frame per delta.
-                await foreach (var d in assistant.SendTurnAsync(turnText, audioBytes, ct: token))
+                await foreach (var d in assistant.StreamTurnAsync(turnText, audioBytes, token))
                 {
                     if (ws.State != WebSocketState.Open) break;
                     switch (d.Kind)
