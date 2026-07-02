@@ -380,7 +380,7 @@ namespace Subsystem.Dpx
                     break;
                 }
 
-                string text = _tokenizer.Detokenize(new[] { nextTokenId });
+                string text = _tokenizer.Detokenize(new[] { nextTokenId }, trimDummyPrefix: false);
                 if (!string.IsNullOrEmpty(text))
                 {
                     writer(new AgentDelta(AgentDeltaKind.Token, text));
@@ -541,7 +541,7 @@ namespace Subsystem.Dpx
                     break;
                 }
 
-                string text = _tokenizer!.Detokenize(new[] { nextTokenId });
+                string text = _tokenizer!.Detokenize(new[] { nextTokenId }, trimDummyPrefix: false);
                 if (!string.IsNullOrEmpty(text))
                 {
                     writer(new AgentDelta(AgentDeltaKind.Token, text));

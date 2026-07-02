@@ -232,7 +232,7 @@ static int Generate(string[] args)
             int next = 0; float best = float.NegativeInfinity;
             for (int v = 0; v < logits.Length; v++) if (logits[v] > best) { best = logits[v]; next = v; }
             if (next == eos || next == eot) { Console.Error.WriteLine(" [end]"); break; }
-            Console.Write(tok.Detokenize(new[] { next })); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
+            Console.Write(tok.Detokenize(new[] { next }, trimDummyPrefix: false)); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
             seq.Add(next);
         }
         emb.FreeNative();
@@ -323,7 +323,7 @@ static int GenOnnx(string[] args)
         int next = 0; float best = float.NegativeInfinity;
         for (int v = 0; v < V; v++) { float val = lf[last * V + v]; if (val > best) { best = val; next = v; } }
         if (next == eos || next == eot) { Console.Error.WriteLine(" [end]"); break; }
-        Console.Write(tok.Detokenize(new[] { next })); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
+        Console.Write(tok.Detokenize(new[] { next }, trimDummyPrefix: false)); Console.Error.Write($"[id={next}]"); Console.Out.Flush();
         seq.Add(next);
     }
     sw.Stop();

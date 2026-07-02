@@ -1,1 +1,2 @@
 DOTNET_EnableDiagnostics=0
+DPGPU_BACKEND=auto

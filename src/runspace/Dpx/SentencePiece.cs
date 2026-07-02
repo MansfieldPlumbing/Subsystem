@@ -160,6 +160,8 @@ public sealed class SentencePieceTokenizer
     private readonly HashSet<int> _specialTokenIds = new();
     private Dictionary<ByteArrayKey, int> _bytesToPiece;   // bytes -> piece id, built once (longest-match Encode)
     private int _maxPieceBytes;
+    private List<(string Piece, int Id)> _specialPieces;   // special pieces, longest-first (Encode's pre-split)
+    private HashSet<char> _specialFirstChars;              // first chars of special pieces (cheap scan gate)
 
     public SentencePieceTokenizer(SpModelProto model)
     {
@@ -203,12 +205,57 @@ public sealed class SentencePieceTokenizer
             && byte.TryParse(piece.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
     }
 
+    // Control/user-defined markers (<start_of_turn>, <end_of_turn>, <bos>, …) are deliberately absent
+    // from the byte matcher below, so without this pre-split a chat template enters the model as literal
+    // text — the model then CONTINUES the literal pattern and never emits the control id the decode
+    // loop's stop check waits on (the runaway-turn failure observed on-device). Split on the special
+    // pieces first: each match becomes its id; only the text between runs the normal segmentation.
+    // Text after a special piece encodes WITHOUT the dummy prefix (the reference tokenizer's non-legacy
+    // behavior), so "<start_of_turn>user" is [id, "user"], not [id, "▁user"].
     public List<int> Encode(string text)
+    {
+        if (_specialPieces == null)
+        {
+            var sp = new List<(string Piece, int Id)>();
+            foreach (int id in _specialTokenIds) sp.Add((_idToPiece[id], id));
+            sp.Sort((a, b) => b.Piece.Length - a.Piece.Length);
+            _specialPieces = sp;
+            _specialFirstChars = new HashSet<char>();
+            foreach (var (piece, _) in sp) if (piece.Length > 0) _specialFirstChars.Add(piece[0]);
+        }
+
+        var ids = new List<int>();
+        int start = 0; bool firstSegment = true;
+        for (int i = 0; i < text.Length; )
+        {
+            int matchId = -1, matchLen = 0;
+            if (_specialFirstChars.Contains(text[i]))
+            {
+                foreach (var (piece, id) in _specialPieces)
+                {
+                    if (piece.Length <= text.Length - i && string.CompareOrdinal(text, i, piece, 0, piece.Length) == 0)
+                    { matchId = id; matchLen = piece.Length; break; }
+                }
+            }
+            if (matchId >= 0)
+            {
+                if (i > start) ids.AddRange(EncodeSegment(text.Substring(start, i - start), firstSegment));
+                firstSegment = false;
+                ids.Add(matchId);
+                i += matchLen; start = i;
+            }
+            else i++;
+        }
+        if (start < text.Length) ids.AddRange(EncodeSegment(text.Substring(start), firstSegment));
+        return ids;
+    }
+
+    private List<int> EncodeSegment(string text, bool addDummyPrefix)
     {
         string normalized = text;
         if (_model.Normalizer.EscapeWhitespaces)
             normalized = normalized.Replace(" ", "▁");
-        if (_model.Normalizer.AddDummyPrefix && (normalized.Length == 0 || normalized[0] != '▁'))
+        if (addDummyPrefix && _model.Normalizer.AddDummyPrefix && (normalized.Length == 0 || normalized[0] != '▁'))
             normalized = "▁" + normalized;
         if (normalized.Length == 0)
             return new List<int>();
@@ -251,7 +298,10 @@ public sealed class SentencePieceTokenizer
         return resultIds;
     }
 
-    public string Detokenize(IReadOnlyList<int> ids)
+    // trimDummyPrefix reverses AddDummyPrefix — correct for a whole sequence, WRONG for a streaming
+    // caller decoding one token at a time (every "▁word" token is then "first" and loses its space:
+    // the "IamaLargeLanguageModel" failure). Streaming callers pass false.
+    public string Detokenize(IReadOnlyList<int> ids, bool trimDummyPrefix = true)
     {
         var bytes = new List<byte>();
         foreach (int id in ids)
@@ -270,7 +320,7 @@ public sealed class SentencePieceTokenizer
 
         string result = Encoding.UTF8.GetString(bytes.ToArray());
         result = result.Replace("▁", " ");
-        if (result.StartsWith(" ", StringComparison.Ordinal))
+        if (trimDummyPrefix && result.StartsWith(" ", StringComparison.Ordinal))
             result = result.Substring(1);
         return result;
     }
