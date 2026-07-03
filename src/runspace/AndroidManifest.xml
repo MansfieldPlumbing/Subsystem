@@ -45,6 +45,20 @@
              install and fall back to the CPU backend (LiteRtChatClient.EnsureEngine). -->
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
 
+        <!-- Hexagon NPU (DpxQnn): the fastRPC user clients are PUBLIC vendor libraries on both fleet
+             devices (S23 + razr+ list lib{a,c,s}dsprpc.so in /vendor/etc/public.libraries.txt), and
+             targetSdk>=31 exposes a public vendor library to the app namespace ONLY when declared here.
+             MEASURED 2026-07-03: declaring these is NECESSARY but NOT SUFFICIENT on a stock device —
+             even declared, libcdsprpc still would not carry the app to the NPU, because the DSP fastRPC
+             node (/dev/adsprpc-smd, u:object_r:vendor_qdsp_device) is SELinux-denied to the untrusted_app
+             domain (verified: app File.Open -> EACCES on a world-readable node; `adb shell` in the shell
+             domain opens it fine, rc=0). So this declaration only helps a SHELL-domain/permissive/rooted
+             host reach the DSP; on a stock untrusted_app it is a harmless no-op. Kept as the correct
+             declaration for those hosts. required=false: devices without them still install. -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libadsprpc.so" android:required="false" />
+        <uses-native-library android:name="libsdsprpc.so" android:required="false" />
+
         <!-- THE FEDERATION doors (2026-06-10e), de-spammed (2026-06-11): one activity-alias per door,
              all targeting MainActivity. The alias component name's suffix (…door.<Id>) IS the door id:
              MainActivity reads it and loads that presenter full-bleed (no shell chrome). The aliases

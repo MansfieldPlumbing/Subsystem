@@ -100,3 +100,4 @@ ss.exe.*.old
 ss.exe.old*
 ss.exe.prev
 tmpss-*.exe
+src/native/qnnworker/mm_qnn
