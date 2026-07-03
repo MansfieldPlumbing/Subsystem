@@ -80,14 +80,21 @@
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libGemmaModelConstraintProvider.so" /> -->
     <!-- The Hexagon NPU stack (QNN AI Runtime 2.42, app-tier). The device's /vendor/lib64 copies are
          namespace-blocked for apps (clns-9 refuses them by design), so the app must carry its OWN copies;
-         DpxQnn.Project dlopens libQnnHtp.so from the extracted nativeLibraryDir. The V73 skel runs ON the
-         cDSP via fastRPC (libcdsprpc.so, app-accessible) — ADSP_LIBRARY_PATH is pointed at the lib dir at
-         boot so HtpPrepare finds it. Only bundled when the SDK is present (SS_QNN or the S:\qairt default). -->
+         DpxQnn.Project dlopens libQnnHtp.so from the extracted nativeLibraryDir. ADSP_LIBRARY_PATH is
+         pointed at the lib dir at boot so HtpPrepare finds the skel. Only bundled when the SDK is present
+         (SS_QNN or the S:\qairt default). -->
     <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtp.so"        Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtp.so')" />
     <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so')" />
     <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so')" />
     <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnSystem.so"     Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnSystem.so')" />
     <AndroidNativeLibrary Include="$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so')" />
+    <!-- libcdsprpc.so — the fastRPC user-space client. libQnnHtpV73Stub.so DLOPENS this as ITS OWN
+         dependency to reach the cDSP; it too is vendor-only and clns-9-blocked, exactly like the QNN libs
+         above (confirmed on-device: "Failed in loading stub: dlopen failed: library libcdsprpc.so not
+         found ... in namespace clns-9" -> cascades to deviceCreate/contextCreate failing 0x36b1/14001).
+         A vendor shim, not SDK-shipped; staged locally at $(SsLibs)\arm64-v8a (pulled once via
+         `adb pull /vendor/lib64/libcdsprpc.so`) the same way libpsl-android.so is staged there. -->
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libcdsprpc.so" Condition="Exists('$(SsLibs)\arm64-v8a\libcdsprpc.so')" />
   </ItemGroup>
   <ItemGroup Condition="'$(SsX64)' == 'true'">
     <!-- x86_64 sovereign syslog stub for Cuttlefish / x86_64 emulator (the foreign libpsl-native.so is

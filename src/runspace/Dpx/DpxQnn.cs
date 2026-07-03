@@ -115,6 +115,49 @@ namespace Subsystem.Dpx
             return rc == 0 ? device : IntPtr.Zero;
         }
 
+        // On-device HTP device that runs in the UNSIGNED process domain — required when the app carries the
+        // UNSIGNED skel (libQnnHtpV73Skel.so from the SDK's hexagon-v73/unsigned), which is the only skel an
+        // app can bundle without Qualcomm signing. Without this, deviceCreate/contextCreate is refused ("0x72
+        // untrusted app -> signed PD"). No PlatformInfo: the live chip is the target, so HTP queries it — this
+        // is the on-device path, not the offline cross-compile path. Header-verified layout (QnnHtpDevice.h):
+        //   QnnHtpDevice_CustomConfig_t { ConfigOption option@0; union{ ...; UseSignedProcessDomain_t{ uint32 deviceId@4; bool use@8 } } }
+        //   QnnDevice_Config_t          { ConfigOption option@0=CUSTOM(0); union{ ...; const void* custom@8 } }
+        static IntPtr CreateUnsignedPdDevice(IntPtr* fn, out ulong rc)
+        {
+            // QnnHtpDevice_CustomConfig_t (16B): option=SIGNEDPD(2), useSignedProcessDomain{ deviceId=0, use=false }.
+            IntPtr htpCustom = Marshal.AllocHGlobal(16);
+            for (int i = 0; i < 16; i++) Marshal.WriteByte(htpCustom, i, 0);
+            Marshal.WriteInt32(htpCustom, 0, 2);         // QNN_HTP_DEVICE_CONFIG_OPTION_SIGNEDPD
+            Marshal.WriteInt32(htpCustom, 4, 0);         // deviceId = 0
+            Marshal.WriteByte(htpCustom, 8, 0);          // useSignedProcessDomain = false -> UNSIGNED PD
+
+            // QnnDevice_Config_t (16B): option=CUSTOM(0), custom@8 -> htpCustom.
+            IntPtr devCfg = Marshal.AllocHGlobal(16);
+            for (int i = 0; i < 16; i++) Marshal.WriteByte(devCfg, i, 0);
+            Marshal.WriteInt32(devCfg, 0, 0);            // QNN_DEVICE_CONFIG_OPTION_CUSTOM
+            Marshal.WriteIntPtr(devCfg, 8, htpCustom);
+
+            IntPtr cfgArray = Marshal.AllocHGlobal(IntPtr.Size * 2);
+            Marshal.WriteIntPtr(cfgArray, 0, devCfg);
+            Marshal.WriteIntPtr(cfgArray, IntPtr.Size, IntPtr.Zero);
+
+            IntPtr device;
+            rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnDeviceCreate])(IntPtr.Zero, cfgArray, &device);
+
+            Marshal.FreeHGlobal(cfgArray); Marshal.FreeHGlobal(devCfg); Marshal.FreeHGlobal(htpCustom);
+            return rc == 0 ? device : IntPtr.Zero;
+        }
+
+        // Bare deviceCreate with a NULL config array (no PlatformInfo, no CustomConfig) — the simplest
+        // possible on-device call, to isolate whether the CustomConfig struct layout is the fault or
+        // deviceCreate itself refuses on this build/skel regardless of config.
+        static IntPtr CreateNullConfigDevice(IntPtr* fn, out ulong rc)
+        {
+            IntPtr device;
+            rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnDeviceCreate])(IntPtr.Zero, IntPtr.Zero, &device);
+            return rc == 0 ? device : IntPtr.Zero;
+        }
+
         static Tensor CreateTensor(string name, int type, uint* dims, IntPtr data, uint bytes)
         {
             var t = new Tensor { Version = TensorVersion1 };
@@ -156,12 +199,27 @@ namespace Subsystem.Dpx
             IntPtr backend, context, graph; ulong rc;
             if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnBackendCreate])(IntPtr.Zero, IntPtr.Zero, &backend)) != 0) return $"DpxQnn: backendCreate 0x{rc:x}";
             IntPtr device = IntPtr.Zero;
+            string dpath = "null";
             if (socModel != 0)
             {
                 device = CreateOfflineHtpDevice(fn, socModel, dspArch, vtcmSizeMb);
                 if (device == IntPtr.Zero) return $"DpxQnn: deviceCreate soc={socModel} failed";
+                dpath = "offline";
             }
-            if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, device, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate soc={socModel} 0x{rc:x}";
+            else
+            {
+                // On-device path: try (a) bare null-config deviceCreate first (isolates whether ANY
+                // deviceCreate call succeeds at all on this build/skel), then (b) the unsigned-PD config.
+                // Best-effort — a device stays optional for contextCreate (inv-9); surfaced diagnostically.
+                device = CreateNullConfigDevice(fn, out ulong rc0);
+                dpath = device != IntPtr.Zero ? "nullConfig" : $"nullConfig-failed(0x{rc0:x})";
+                if (device == IntPtr.Zero)
+                {
+                    device = CreateUnsignedPdDevice(fn, out ulong rc1);
+                    dpath += device != IntPtr.Zero ? "->unsignedPd" : $"->unsignedPd-failed(0x{rc1:x})";
+                }
+            }
+            if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, device, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate soc={socModel} dev={dpath} 0x{rc:x}";
             if ((rc = ((delegate* unmanaged<IntPtr, byte*, IntPtr, IntPtr*, ulong>)fn[FnGraphCreate])(context, (byte*)AllocCString("matmul"), IntPtr.Zero, &graph)) != 0) return $"DpxQnn: graphCreate 0x{rc:x}";
 
             if (weights == null)
