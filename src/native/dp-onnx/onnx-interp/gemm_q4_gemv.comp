@@ -1,0 +1,60 @@
+#version 450
+// q4 GEMV (M==1 decode) — the Adreno-shaped rung. One workgroup per output row n; 64 lanes each
+// dequant+dot ONE 32-nibble q4 block per pass (K=2048 -> 64 blocks = one block per lane), then a
+// shared-memory tree reduction; lane 0 writes C[n]. Same bindings + push constants as gemm_q4.comp
+// (A,Bq,Scales,Zp,C / {M,N,K,BS,HasZp}) so the C# seam only changes the dispatch shape (N,1,1).
+// Packing: sequential nibbles [N, K/32, 16] bytes, low nibble = even idx (Dp.Nib4's layout);
+// a little-endian uint load preserves nibble order: logical nibble t of the uint = (w >> 4t) & 0xF.
+// No zero-point plane (the e2b export; HasZp!=0 falls back to the naive pipeline in C#). defZp = 8.
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform P { uint M; uint N; uint K; uint BS; uint HasZp; } p;
+
+layout(std430, binding = 0) readonly  buffer A_  { float A[];  };
+layout(std430, binding = 1) readonly  buffer B_  { uint  Bq[]; };
+layout(std430, binding = 2) readonly  buffer S_  { float Sc[]; };
+layout(std430, binding = 3) readonly  buffer Z_  { uint  Zp[]; };
+layout(std430, binding = 4) writeonly buffer C_  { float C[];  };
+
+shared float red[64];
+
+void main()
+{
+    uint n    = gl_WorkGroupID.x;
+    uint lane = gl_LocalInvocationID.x;
+    uint nBlk = p.K / p.BS;
+
+    float acc = 0.0;
+    for (uint b = lane; b < nBlk; b += 64u)
+    {
+        float sc    = Sc[n * nBlk + b];
+        // block base in uints: row n starts at n*(K/2) bytes; block b at +b*(BS/2) bytes; /4 -> uint index
+        uint  ubase = (n * (p.K >> 1) + b * (p.BS >> 1)) >> 2;
+        uint  aBase = b * p.BS;
+        float s = 0.0;
+        for (uint u = 0u; u < (p.BS >> 3); u++)     // BS/8 uints per block (BS=32 -> 4)
+        {
+            uint w  = Bq[ubase + u];
+            uint ai = aBase + (u << 3);
+            s += (float((w      ) & 0xFu) - 8.0) * A[ai    ];
+            s += (float((w >> 4u) & 0xFu) - 8.0) * A[ai + 1u];
+            s += (float((w >> 8u) & 0xFu) - 8.0) * A[ai + 2u];
+            s += (float((w >>12u) & 0xFu) - 8.0) * A[ai + 3u];
+            s += (float((w >>16u) & 0xFu) - 8.0) * A[ai + 4u];
+            s += (float((w >>20u) & 0xFu) - 8.0) * A[ai + 5u];
+            s += (float((w >>24u) & 0xFu) - 8.0) * A[ai + 6u];
+            s += (float((w >>28u) & 0xFu) - 8.0) * A[ai + 7u];
+        }
+        acc += s * sc;
+    }
+
+    red[lane] = acc;
+    barrier();
+    for (uint step = 32u; step > 0u; step >>= 1u)
+    {
+        if (lane < step) red[lane] += red[lane + step];
+        barrier();
+    }
+    if (lane == 0u) C[n] = red[0];
+}

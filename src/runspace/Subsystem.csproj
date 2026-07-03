@@ -153,5 +153,6 @@
          code that carries the Windows Vulkan-backend receipt runs here against Adreno/Mali. -->
     <AndroidAsset Include="..\native\dp-onnx\onnx-interp\gemm.spv" Link="shaders\gemm.spv" />
     <AndroidAsset Include="..\native\dp-onnx\onnx-interp\gemm_q4.spv" Link="shaders\gemm_q4.spv" Condition="Exists('..\native\dp-onnx\onnx-interp\gemm_q4.spv')" />
+    <AndroidAsset Include="..\native\dp-onnx\onnx-interp\gemm_q4_gemv.spv" Link="shaders\gemm_q4_gemv.spv" Condition="Exists('..\native\dp-onnx\onnx-interp\gemm_q4_gemv.spv')" />
   </ItemGroup>
 </Project>

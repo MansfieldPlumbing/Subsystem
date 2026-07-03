@@ -111,6 +111,9 @@ unsafe static class GpuVulkan
 
     // q4 GEMM: separate descriptor-set layout (5 bindings: A, Bq, Scales, Zp, C), pipeline layout (push {M,N,K,BlockSize,HasZp}), pipeline.
     static IntPtr s_dslQ4, s_playoutQ4, s_pipeQ4; static int s_spvQ4Len = -1;
+    // The GEMV variant rung (M==1 decode, one workgroup per row) — same layout/push interface, its own
+    // pipeline. Absent .spv = the naive rung stands (fallback-by-absence, the D3D12 variant discipline).
+    static IntPtr s_pipeQ4Gemv; static int s_spvQ4GemvLen = -1;
 
     public static void EnsureInit()
     {
@@ -209,6 +212,19 @@ unsafe static class GpuVulkan
         cpci.layout = s_playoutQ4;
         vkCreateComputePipelines(s_dev, IntPtr.Zero, 1, ref cpci, IntPtr.Zero, out s_pipeQ4);
         s_spvQ4Len = spv.Length;
+    }
+
+    static void EnsurePipelineQ4Gemv(byte[] spv)
+    {
+        if (s_pipeQ4Gemv != IntPtr.Zero && s_spvQ4GemvLen == spv.Length) return;
+        IntPtr spvPtr = Marshal.AllocHGlobal(spv.Length); Marshal.Copy(spv, 0, spvPtr, spv.Length);
+        SMCI smci = new SMCI(); smci.sType = 16; smci.codeSize = (IntPtr)spv.Length; smci.pCode = spvPtr;
+        IntPtr shader; vkCreateShaderModule(s_dev, ref smci, IntPtr.Zero, out shader);
+        CPCI cpci = new CPCI(); cpci.sType = 29;
+        cpci.stage = new PSSCI(); cpci.stage.sType = 18; cpci.stage.stage = 0x20; cpci.stage.module = shader; cpci.stage.pName = Marshal.StringToHGlobalAnsi("main");
+        cpci.layout = s_playoutQ4;   // same 5-binding layout + push range — the variant shares the seam
+        vkCreateComputePipelines(s_dev, IntPtr.Zero, 1, ref cpci, IntPtr.Zero, out s_pipeQ4Gemv);
+        s_spvQ4GemvLen = spv.Length;
     }
 
     static int FindMem(uint typeBits)
@@ -317,10 +333,13 @@ unsafe static class GpuVulkan
         return true;
     }
 
-    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] spv, Tensor bWeight = null)
+    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] spv, Tensor bWeight = null, byte[] spvGemv = null)
     {
         EnsureInit();
         EnsurePipelineQ4(spv);
+        // GEMV rung: M==1, no zero-point plane, variant shipped. One workgroup per row (dispatch N,1,1).
+        bool gemv = M == 1 && !hasZp && spvGemv != null && spvGemv.Length > 0;
+        if (gemv) EnsurePipelineQ4Gemv(spvGemv);
         // Resident rung: the weight's AHB imports once and the GPU reads the SAME memory the CPU filled at
         // model load — no per-call weight map/copy (the churn that killed the razr). Import failure clears
         // AhbWeight so the transient rung stands permanently for that weight (inv-9, fault latches once).
@@ -375,10 +394,11 @@ unsafe static class GpuVulkan
         IntPtr cb; vkAllocateCommandBuffers(s_dev, ref cbai, out cb);
         CBBI bi = new CBBI(); bi.sType = 42; bi.flags = 1;
         vkBeginCommandBuffer(cb, ref bi);
-        vkCmdBindPipeline(cb, 1, s_pipeQ4);
+        vkCmdBindPipeline(cb, 1, gemv ? s_pipeQ4Gemv : s_pipeQ4);
         IntPtr setH = dset; vkCmdBindDescriptorSets(cb, 1, s_playoutQ4, 0, 1, ref setH, 0, IntPtr.Zero);
         vkCmdPushConstants(cb, s_playoutQ4, 0x20, 0, 20, new uint[] { M, N, K, blockSize, hasZp ? 1u : 0u });
-        vkCmdDispatch(cb, (N + 15) / 16, (M + 15) / 16, 1);
+        if (gemv) vkCmdDispatch(cb, N, 1, 1);
+        else vkCmdDispatch(cb, (N + 15) / 16, (M + 15) / 16, 1);
         vkEndCommandBuffer(cb);
 
         FenceCI fci = new FenceCI(); fci.sType = 8; IntPtr fence; vkCreateFence(s_dev, ref fci, IntPtr.Zero, out fence);

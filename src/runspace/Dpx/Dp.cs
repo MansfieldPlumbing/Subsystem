@@ -2687,6 +2687,14 @@ static class Gpu
         return GpuD3D12.Gemm(A, B, C, M, N, K, dxil, (int)dxilLen, threadM, threadN);
     }
     static byte[] s_spvQ4;
+    static byte[] s_spvQ4Gemv;
+    // Variant-rung reader: an absent .spv is ABSENCE (the naive rung stands), not an error — returns the
+    // Array.Empty sentinel so ??= probes the asset once, never per call.
+    static byte[] ReadSpvOrEmpty(string name)
+    {
+        try { return ShaderAssetReader(name) ?? Array.Empty<byte>(); }
+        catch (Exception ex) { Console.Error.WriteLine($"spv variant '{name}' absent ({ex.GetType().Name}); naive rung stands."); return Array.Empty<byte>(); }
+    }
     // q4 seam: A/Scales fp32, Bq/Zp are the packed uint8 SEQUENTIAL-nibble buffers straight off the model (never
     // dequantized to fp32 on the CPU side). dxil/spv resolved by the caller (mirrors dpgpu_gemm's dxil plumbing).
     // weightKey: stable per-weight-tensor cache token (Dp.GpuWeightKey) so GpuD3D12 can keep Bq/scales/zp resident
@@ -2699,9 +2707,13 @@ static class Gpu
         if (s_vk)
         {
             s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
+            // The GEMV variant rung, shipped like the naive kernel; a missing asset degrades to naive
+            // (Array.Empty sentinel so the reader probes once, not per call).
+            s_spvQ4Gemv ??= ReadSpvOrEmpty("gemm_q4_gemv.spv");
             // bWeight carries the AHB handle (Android zero-copy residency); the D3D12 rung has its own
             // weightKey-keyed residency and ignores it.
-            return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4, bWeight);
+            return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4, bWeight,
+                s_spvQ4Gemv.Length > 0 ? s_spvQ4Gemv : null);
         }
         return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey, tileN, tileM);
     }
