@@ -48,6 +48,9 @@
          every libpsl-native P/Invoke to libpsl-android.so at runtime, so the blob would only be dead weight. -->
     <SsLibs Condition="'$(SS_LIBS)' != ''">$(SS_LIBS)</SsLibs>
     <SsLibs Condition="'$(SsLibs)' == ''">$(MSBuildProjectDirectory)\libs</SsLibs>
+    <!-- The Hexagon QNN AI Runtime SDK root (app-tier .so's bundled below). -->
+    <SsQnn Condition="'$(SS_QNN)' != ''">$(SS_QNN)</SsQnn>
+    <SsQnn Condition="'$(SsQnn)' == ''">S:\qairt\2.42.0.251225</SsQnn>
     <!-- Build posture = the AdbElevation ceiling. DEV is defined by default so ss-build keeps the
          elevated-adb dev workflow; a release build (-p:SubsystemRelease=true) compiles DEV out, so the
          self-elevation path is physically ABSENT from the binary — a forwarded release APK cannot
@@ -75,6 +78,16 @@
          the LiteRT C-API path ever returns.
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libLiteRtLm.so" />
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libGemmaModelConstraintProvider.so" /> -->
+    <!-- The Hexagon NPU stack (QNN AI Runtime 2.42, app-tier). The device's /vendor/lib64 copies are
+         namespace-blocked for apps (clns-9 refuses them by design), so the app must carry its OWN copies;
+         DpxQnn.Project dlopens libQnnHtp.so from the extracted nativeLibraryDir. The V73 skel runs ON the
+         cDSP via fastRPC (libcdsprpc.so, app-accessible) — ADSP_LIBRARY_PATH is pointed at the lib dir at
+         boot so HtpPrepare finds it. Only bundled when the SDK is present (SS_QNN or the S:\qairt default). -->
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtp.so"        Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtp.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnSystem.so"     Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnSystem.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so')" />
   </ItemGroup>
   <ItemGroup Condition="'$(SsX64)' == 'true'">
     <!-- x86_64 sovereign syslog stub for Cuttlefish / x86_64 emulator (the foreign libpsl-native.so is
