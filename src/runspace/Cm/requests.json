@@ -2457,5 +2457,30 @@
       }
     ],
     "Ref": "CRQ000000000191"
+  },
+  {
+    "Id": 192,
+    "Kind": "Change",
+    "Category": "build",
+    "Summary": "16 KB PAGE ALIGNMENT — Samsung S23 (Android 16) 'Android App Compatibility' dialog: ELF alignment check failed, our bundled native libs are not 16 KB aligned. Transcribed verbatim from on-device screenshot 2026-07-03 (scratchpad/elf_err.png): 'This app isn't 16 KB compatible. ELF alignment check failed. Please follow the steps on https://developer.android.com/16kb-page-size. The following libraries are not 16 KB aligned: lib/arm64-v8a/libSystem.Native.so : Unknown error; lib/arm64-v8a/libxamarin-app.so : Unknown error; lib/arm64-v8a/libcoreclr.so : Unknown error; lib/arm64-v8a/libQnnHtp.so : Unknown error; lib/arm64-v8a/libSystem.Security.Cryptography.Native.Android.so : Unknown error; lib/arm64-v8a/libSystem.Globalization.Native.so : Unknown [truncated].' Two lib families implicated: (1) the .NET/CoreCLR runtime pack (libcoreclr.so, libSystem.Native.so, libxamarin-app.so, libSystem.*.Native.so) and (2) the QUALCOMM prebuilts we bundle (libQnnHtp.so — and by extension the rest of the QAIRT stack + our disguised libqnnworker.so).",
+    "RelatedFiles": [
+      "src/runspace/Subsystem.csproj",
+      "src/runspace/Dpx/DpxQnn.cs",
+      "src/runspace/Dpx/DpxQnnWorker.cs"
+    ],
+    "Severity": 2,
+    "Status": "Open",
+    "Created": 1783052595,
+    "Closed": 0,
+    "Disposition": "",
+    "EosLog": [
+      {
+        "Request": 192,
+        "Noted": 1783052595,
+        "Disposition": "logged-from-device-screenshot",
+        "Body": "SEVERITY / BLAST RADIUS (measured on-device, not assumed): the S23 (RFCWA0CE47F, SM8550) is CURRENTLY running 4 KB pages (getconf PAGE_SIZE = 4096), so THIS dialog is ADVISORY — the app loads and runs (pid alive, ProjectionServer listening on 8080), the misaligned libs still dlopen on a 4 KB kernel. So 16 KB alignment is NOT what is blocking the S23 QNN-worker bring-up right now (that is a separate forward/HTTP issue). BUT it is a real, dated blocker for two reasons: (1) FATAL on any 16 KB-page device — Android 16 devices can ship/toggle 16 KB pages, and a misaligned lib fails to mmap (dlopen 'CANNOT LINK') there, which would harden this warning into a crash; (2) Google Play MANDATES 16 KB compatibility for apps targeting Android 15+ submitted/updated after 2025-11-01. FIX DIRECTION, per implicated family: (A) .NET runtime libs (libcoreclr/libSystem.Native/libxamarin-app/libSystem.*.Native) come from the .NET Android runtime pack — need a .NET SDK/workload build that emits 16 KB-aligned runtime .so (the toolchain's linker must pass -Wl,-z,max-page-size=16384; confirm the pinned dotnet on S:\\bin\\dotnet produces aligned output or bump the Android workload), NOT something we can zipalign after the fact for correctness of the segment alignment. (B) The QAIRT prebuilts (libQnnHtp.so et al.) ship 4 KB-aligned from Qualcomm's SDK — re-link/re-align them (or pull a newer QAIRT that ships 16 KB-aligned), and REBUILD our disguised worker binary libqnnworker.so (the mm_qnn ELF) with -Wl,-z,max-page-size=16384. (C) Verify end-state with the NDK check: alignment must be 0x4000 on every PT_LOAD across every lib/arm64-v8a/*.so, and re-test on a device forced to 16 KB pages. Cross-refs: this rode in on the NPU-on-S23 bring-up (DpxQnnWorker child-process path); the S23 grants untrusted_app the DSP node (unlike the razr's Motorola sepolicy), so the S23 IS the target device for our-own-model NPU and MUST be 16 KB-clean. Screenshot saved at scratchpad/elf_err.png (session cf00a11b)."
+      }
+    ],
+    "Ref": "CRQ000000000192"
   }
 ]

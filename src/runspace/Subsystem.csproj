@@ -95,6 +95,17 @@
          A vendor shim, not SDK-shipped; staged locally at $(SsLibs)\arm64-v8a (pulled once via
          `adb pull /vendor/lib64/libcdsprpc.so`) the same way libpsl-android.so is staged there. -->
     <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libcdsprpc.so" Condition="Exists('$(SsLibs)\arm64-v8a\libcdsprpc.so')" />
+    <!-- libqnnworker.so — the QNN Hexagon worker, disguised as a native library on purpose. In-process
+         dlopen of libQnnHtp.so is sandboxed by Android's app JNI linker namespace (clns-9), which blocks
+         vendor/system dependencies (libcdsprpc.so -> libhidlbase.so) no matter what we bundle — CONFIRMED
+         on-device this session. A SEPARATE EXEC'D PROCESS gets the standard system linker instead and
+         reaches those libraries directly (this is how LocalDream's QNN backend works: a spawned worker,
+         never JNI-loaded). Naming the ELF *.so and placing it here makes the installer extract it into
+         ApplicationInfo.NativeLibraryDir WITH exec permission (the same directory every dlopen'd .so lives
+         in) — /data/local/tmp and most app-data paths are noexec on modern Android; this directory is the
+         one exemption. Subsystem.Dpx.DpxQnnWorker spawns it as a child process. Proven end-to-end on the
+         razr (v73): backend/context/graph create -> HTP prepare ON-DEVICE -> execute -> bit-exact vs CPU. -->
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libqnnworker.so" Condition="Exists('$(SsLibs)\arm64-v8a\libqnnworker.so')" />
   </ItemGroup>
   <ItemGroup Condition="'$(SsX64)' == 'true'">
     <!-- x86_64 sovereign syslog stub for Cuttlefish / x86_64 emulator (the foreign libpsl-native.so is

@@ -511,12 +511,21 @@ public static class Registrar
         //     presenter also calls the bridge's revokePermission for the OS layer). SEED-IF-ABSENT so a
         //     granted permission is never re-disabled on reboot. consentKind: capability | android |
         //     allfiles | accessibility (tells the presenter which grant/revoke mechanism to drive). ---
-        void Consent(string id, string name, string description, string consentKind, string? androidPerm = null)
+        void Consent(string id, string name, string description, string consentKind, string? androidPerm = null, bool devDefault = false)
         {
             var path = "\\Capability\\Consent\\" + id;
             if (Subsystem.Cm.Cm.Get(path) is not null) return;     // never clobber a live grant
+            bool enabled = false;
+#if DEV
+            // Scott-directed: "only a --debug build should opt in for me." A DEV build (DefineConstants;DEV,
+            // csproj — compiled OUT on -p:SubsystemRelease=true) self-grants the marked dev-workflow consents
+            // so the owner is not hand-granting on every install. Release stays default-deny/opt-in. Only
+            // consents that are pure Cm gates (no OS-side prompt) AND not network-exposing are marked
+            // devDefault; the sensitive/OS-backed ones stay OFF even on DEV.
+            enabled = devDefault;
+#endif
             Reg(path, name, "Consent", new { version = 1, kind = "consent", description, consentKind, androidPerm },
-                enabled: false, integrity: "User");
+                enabled: enabled, integrity: "User");
         }
         try
         {
@@ -546,7 +555,7 @@ public static class Registrar
                 "accessibility");
             Consent("AdbElevation", "ADB self-elevation",
                 "Let the app connect to the on-device ADB channel and run as the uid=2000 shell (the dev/remote-control elevation). DEV builds only — a release build cannot do this at all. Off = no elevation, no mDNS multicast.",
-                "capability");
+                "capability", devDefault: true);
         }
         catch (Exception ex) { Subsystem.Dg.Log("registrar", "consent seed failed: " + ex.Message); }
 

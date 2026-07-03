@@ -3,6 +3,14 @@
     <string name="app_text">Hello, Android!</string>
     <string name="accessibility_service_description">Subsystem</string>
     <string name="wp_description">Subsystem shader wallpapers — the registry catalog, live on the home screen</string>
+    <string name="sc_terminal_short">Terminal</string>
+    <string name="sc_terminal_long">Open Terminal</string>
+    <string name="sc_editor_short">Editor</string>
+    <string name="sc_editor_long">Open Editor</string>
+    <string name="sc_broker_short">Broker</string>
+    <string name="sc_broker_long">Open Broker</string>
+    <string name="sc_settings_short">Settings</string>
+    <string name="sc_settings_long">Subsystem Settings</string>
 </resources>
 
 

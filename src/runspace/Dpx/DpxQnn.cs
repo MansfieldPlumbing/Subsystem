@@ -59,6 +59,11 @@ namespace Subsystem.Dpx
                   FnGraphCreate = 15, FnGraphAddNode = 18, FnGraphFinalize = 19, FnGraphExecute = 21,
                   FnTensorCreateGraphTensor = 24, FnDeviceCreate = 40;
 
+        // QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE = QNN_COMMON_ERROR_NOT_SUPPORTED = QNN_MIN_ERROR_COMMON(1000)+0
+        // (QnnCommon.h/QnnDevice.h). Stock QnnSampleApp::createDevice() (QAIRT SDK examples) treats exactly this
+        // code as "no device object needed" and proceeds anyway — it does not retry with a different config.
+        const ulong QnnDeviceErrorUnsupportedFeature = 1000;
+
         static IntPtr AllocCString(string s) => Marshal.StringToHGlobalAnsi(s);
 
         // Offline HTP device pinned to one SoC. Without a PlatformInfo the HTP backend prepares for a
@@ -115,42 +120,13 @@ namespace Subsystem.Dpx
             return rc == 0 ? device : IntPtr.Zero;
         }
 
-        // On-device HTP device that runs in the UNSIGNED process domain — required when the app carries the
-        // UNSIGNED skel (libQnnHtpV73Skel.so from the SDK's hexagon-v73/unsigned), which is the only skel an
-        // app can bundle without Qualcomm signing. Without this, deviceCreate/contextCreate is refused ("0x72
-        // untrusted app -> signed PD"). No PlatformInfo: the live chip is the target, so HTP queries it — this
-        // is the on-device path, not the offline cross-compile path. Header-verified layout (QnnHtpDevice.h):
-        //   QnnHtpDevice_CustomConfig_t { ConfigOption option@0; union{ ...; UseSignedProcessDomain_t{ uint32 deviceId@4; bool use@8 } } }
-        //   QnnDevice_Config_t          { ConfigOption option@0=CUSTOM(0); union{ ...; const void* custom@8 } }
-        static IntPtr CreateUnsignedPdDevice(IntPtr* fn, out ulong rc)
-        {
-            // QnnHtpDevice_CustomConfig_t (16B): option=SIGNEDPD(2), useSignedProcessDomain{ deviceId=0, use=false }.
-            IntPtr htpCustom = Marshal.AllocHGlobal(16);
-            for (int i = 0; i < 16; i++) Marshal.WriteByte(htpCustom, i, 0);
-            Marshal.WriteInt32(htpCustom, 0, 2);         // QNN_HTP_DEVICE_CONFIG_OPTION_SIGNEDPD
-            Marshal.WriteInt32(htpCustom, 4, 0);         // deviceId = 0
-            Marshal.WriteByte(htpCustom, 8, 0);          // useSignedProcessDomain = false -> UNSIGNED PD
-
-            // QnnDevice_Config_t (16B): option=CUSTOM(0), custom@8 -> htpCustom.
-            IntPtr devCfg = Marshal.AllocHGlobal(16);
-            for (int i = 0; i < 16; i++) Marshal.WriteByte(devCfg, i, 0);
-            Marshal.WriteInt32(devCfg, 0, 0);            // QNN_DEVICE_CONFIG_OPTION_CUSTOM
-            Marshal.WriteIntPtr(devCfg, 8, htpCustom);
-
-            IntPtr cfgArray = Marshal.AllocHGlobal(IntPtr.Size * 2);
-            Marshal.WriteIntPtr(cfgArray, 0, devCfg);
-            Marshal.WriteIntPtr(cfgArray, IntPtr.Size, IntPtr.Zero);
-
-            IntPtr device;
-            rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr*, ulong>)fn[FnDeviceCreate])(IntPtr.Zero, cfgArray, &device);
-
-            Marshal.FreeHGlobal(cfgArray); Marshal.FreeHGlobal(devCfg); Marshal.FreeHGlobal(htpCustom);
-            return rc == 0 ? device : IntPtr.Zero;
-        }
-
-        // Bare deviceCreate with a NULL config array (no PlatformInfo, no CustomConfig) — the simplest
-        // possible on-device call, to isolate whether the CustomConfig struct layout is the fault or
-        // deviceCreate itself refuses on this build/skel regardless of config.
+        // Bare deviceCreate with a NULL config array — the ONLY on-device device-create path, mirroring stock
+        // QnnSampleApp::createDevice() exactly (deviceCreate(logHandle, nullptr, &device), tolerate
+        // QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE, proceed). The former CreateUnsignedPdDevice (a
+        // QnnHtpDevice_CustomConfig SIGNEDPD/useSignedProcessDomain retry) was removed: it was our own
+        // addition, not anything the stock reference app does, and its custom-config negotiation is what drove
+        // the SoC-sku sysfs read + "tests" dir search that an untrusted_app-domain process gets SELinux-denied
+        // on. LocalDream (an ordinary untrusted_app) runs real HTP NPU via this same single stock call.
         static IntPtr CreateNullConfigDevice(IntPtr* fn, out ulong rc)
         {
             IntPtr device;
@@ -208,16 +184,19 @@ namespace Subsystem.Dpx
             }
             else
             {
-                // On-device path: try (a) bare null-config deviceCreate first (isolates whether ANY
-                // deviceCreate call succeeds at all on this build/skel), then (b) the unsigned-PD config.
-                // Best-effort — a device stays optional for contextCreate (inv-9); surfaced diagnostically.
+                // On-device path: MIRROR stock QnnSampleApp::createDevice() EXACTLY (QAIRT SDK
+                // examples/QNN/SampleApp/src/QnnSampleApp.cpp:780). Call deviceCreate(null,null,&device)
+                // ONCE. QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE (=1000) means "no device object needed" —
+                // stock proceeds to contextCreate with whatever handle came back (device stays optional,
+                // inv-9). It does NOT retry with a custom config. The removed CreateUnsignedPdDevice retry
+                // was OUR OWN addition; its custom-config path does extra environment probing (a SoC-sku
+                // sysfs read, a "tests" dir search) that an untrusted_app-domain process gets SELinux-
+                // denied on — the exact denials we chased. LocalDream (an ordinary untrusted_app) runs
+                // real NPU via this same stock single-call path. See [[npu-hex-reachability]].
                 device = CreateNullConfigDevice(fn, out ulong rc0);
-                dpath = device != IntPtr.Zero ? "nullConfig" : $"nullConfig-failed(0x{rc0:x})";
-                if (device == IntPtr.Zero)
-                {
-                    device = CreateUnsignedPdDevice(fn, out ulong rc1);
-                    dpath += device != IntPtr.Zero ? "->unsignedPd" : $"->unsignedPd-failed(0x{rc1:x})";
-                }
+                dpath = device != IntPtr.Zero ? "nullConfig"
+                      : rc0 == QnnDeviceErrorUnsupportedFeature ? "nullConfig-unsupported(stock-ok)"
+                      : $"nullConfig-failed(0x{rc0:x})";
             }
             if ((rc = ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr*, ulong>)fn[FnContextCreate])(backend, device, IntPtr.Zero, &context)) != 0) return $"DpxQnn: contextCreate soc={socModel} dev={dpath} 0x{rc:x}";
             if ((rc = ((delegate* unmanaged<IntPtr, byte*, IntPtr, IntPtr*, ulong>)fn[FnGraphCreate])(context, (byte*)AllocCString("matmul"), IntPtr.Zero, &graph)) != 0) return $"DpxQnn: graphCreate 0x{rc:x}";

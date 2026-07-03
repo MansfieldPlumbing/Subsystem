@@ -13,8 +13,10 @@ public class SubsystemService : Service
 
     // Channel settings are IMMUTABLE once created on a device — any change here REQUIRES bumping the
     // id suffix (v2 -> v3 -> …) or installed devices keep the old behavior forever.
-    // v3 (2026-06-11): the persistent engine card is SILENT — IMPORTANCE_LOW, no sound. Engine status
+    // v3 (2026-06-11): the persistent runspace card is SILENT — IMPORTANCE_LOW, no sound. Runspace status
     // is ambient; only the Broker's message channel (Surfaces.cs, broker_v2) may chirp.
+    // (The "engine_confirm_v1" channel id below is IMMUTABLE — an installed-device contract — so the id
+    // string keeps its legacy name even though the user-facing text is now runspace-precise.)
     private const string ChannelId        = "terminal_bg_v3";
     private const string ConfirmChannelId = "engine_confirm_v1"; // high-importance, shutdown confirmation ONLY
 
@@ -55,7 +57,7 @@ public class SubsystemService : Service
             // Confirmed shutdown in flight — RENOTIFY is disarmed; don't resurrect the card.
             if (_shuttingDown) { StopSelf(); return StartCommandResult.NotSticky; }
             // The engine card was swiped (accidentally or otherwise) — put it straight back.
-            ((NotificationManager)GetSystemService(NotificationService)!).Notify(NotificationId, BuildNotification("Engine running..."));
+            ((NotificationManager)GetSystemService(NotificationService)!).Notify(NotificationId, BuildNotification("Runspace resident"));
             return StartCommandResult.Sticky;
         }
 
@@ -105,7 +107,7 @@ public class SubsystemService : Service
             }
             
             var notifManager = (NotificationManager)GetSystemService(NotificationService)!;
-            notifManager.Notify(NotificationId, BuildNotification("Engine running..."));
+            notifManager.Notify(NotificationId, BuildNotification("Runspace resident"));
             return StartCommandResult.Sticky;
         }
 
@@ -117,7 +119,7 @@ public class SubsystemService : Service
         _shuttingDown = false;   // a fresh deliberate start re-arms the durability guarantees
         try
         {
-            StartForeground(NotificationId, BuildNotification("Engine running..."), ForegroundService.TypeDataSync);
+            StartForeground(NotificationId, BuildNotification("Runspace resident"), ForegroundService.TypeDataSync);
         }
         catch (System.Exception ex)
         {
@@ -267,7 +269,7 @@ public class SubsystemService : Service
             .AddAction(shutdownAction);
 
         // "Enter Code" is scoped to an ACTIVE wireless-pairing attempt (a pairing port was
-        // discovered via mDNS). It is never shown on the persistent "Engine running" notification.
+        // discovered via mDNS). It is never shown on the persistent "Runspace resident" notification.
         if (showPairing)
         {
             var remoteInput = new Android.App.RemoteInput.Builder("pairing_code")
@@ -308,7 +310,7 @@ public class SubsystemService : Service
 
         var n = new Notification.Builder(this, ConfirmChannelId)
             .SetContentTitle("Shut down Subsystem?")
-            .SetContentText("The engine, server, and runspace will stop.")
+            .SetContentText("The runspace and loopback server will stop.")
             .SetSmallIcon(this.ApplicationInfo!.Icon)
             .SetAutoCancel(true)
             .SetTimeoutAfter(30_000)

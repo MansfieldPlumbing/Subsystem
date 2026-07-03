@@ -199,6 +199,9 @@ Set-Alias ls dir -Force
 [MetaData(UsbManager.ActionUsbAccessoryAttached, Resource = "@xml/accessory_filter")]
 [IntentFilter(new[] { UsbManager.ActionUsbDeviceAttached })]
 [MetaData(UsbManager.ActionUsbDeviceAttached, Resource = "@xml/device_filter")]
+// App-icon long-press shortcuts (launcher menu). Static list in @xml/shortcuts; each entry launches a
+// door activity-alias by component name, routed by DoorFromIntent — no new intent handling needed.
+[MetaData("android.app.shortcuts", Resource = "@xml/shortcuts")]
 // SECURITY (history): the .ssr "open-to-import" ACTION_VIEW intent filters — and later the whole .ssr
 // file-format module — were REMOVED. Open-to-import let ANY app or browsable link inject capabilities/verbs
 // into Cm with no confirmation, reachable by the elevated uid=2000 adb channel. Verbs are Cm records,
