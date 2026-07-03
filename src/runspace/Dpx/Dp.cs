@@ -158,6 +158,12 @@ public class Tensor
     private unsafe byte* _nativeRawb;
     private int _nativeRawbLen;
     public unsafe void SetNativeRawb(byte* ptr, int len) { _nativeRawb = ptr; _nativeRawbLen = len; }
+    // The AHardwareBuffer handle backing this weight's bytes (Android zero-copy residency), or 0 when the
+    // bytes are a plain VOM region / GC array. Instance state (rides the weight Tensor whose owner refcount
+    // gates the region — SS015-clean, no static cache). GpuVulkan.GemmQ4 imports this buffer once per weightKey.
+    private nint _ahbWeight;
+    public nint AhbWeight => _ahbWeight;
+    public void SetAhbWeight(nint h) { _ahbWeight = h; }
     // ReadRawb: the packed-byte accessor kernels pin via `fixed` (the SAME statement transparently pins a
     // managed array OR is a no-op over already-stable native memory — no kernel code branches on which).
     public unsafe Span<byte> ReadRawb() => _nativeRawb != null ? new Span<byte>(_nativeRawb, _nativeRawbLen) : Rawb;
@@ -2563,11 +2569,29 @@ public class Dp
                 int byteLen = t.RawData.Span.Length;
                 if (owner != null)
                 {
-                    var dt = DpTensor.Alloc(owner, dims, VomFormat.Bytes, subdir: "Weights",
-                                             name: string.IsNullOrEmpty(t.Name) ? null : t.Name);
+                    string? nm = string.IsNullOrEmpty(t.Name) ? null : t.Name;
+                    // Android: back the weight bytes with an AHardwareBuffer blob so GpuVulkan can import the
+                    // SAME memory (zero-copy residency on UMA). Fault-degrades to a plain VOM region (inv-9):
+                    // AHB alloc can fail under fragmentation/OOM, and the CPU rung (ReadRawb over Resource)
+                    // is byte-identical either way. Windows always takes the plain path.
+                    DpTensor dt; nint ahb = 0;
+                    try
+                    {
+                        if (OperatingSystem.IsAndroid())
+                            dt = DpTensor.AllocBlobAhb(owner, dims, byteLen, out ahb, name: nm);
+                        else
+                            dt = DpTensor.Alloc(owner, dims, VomFormat.Bytes, subdir: "Weights", name: nm);
+                    }
+                    catch (Exception ex)
+                    {
+                        Subsystem.Dg.Log("dpx", $"AHB weight alloc failed, CPU rung: {ex.Message}");
+                        dt = DpTensor.Alloc(owner, dims, VomFormat.Bytes, subdir: "Weights", name: nm);
+                        ahb = 0;
+                    }
                     t.RawData.Span.CopyTo(dt.ReadBytes());
                     var rt = new Tensor { Shape = dims };
                     rt.SetNativeRawb((byte*)dt.Data.Resource, byteLen);
+                    if (ahb != 0) rt.SetAhbWeight(ahb);
                     return rt;
                 }
                 return new Tensor { Rawb = t.RawData.Span.ToArray(), Shape = dims };
