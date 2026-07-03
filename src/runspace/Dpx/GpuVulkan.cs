@@ -61,6 +61,8 @@ unsafe static class GpuVulkan
     [DllImport(VK)] static extern int  vkWaitForFences(IntPtr dev, uint c, ref IntPtr f, uint all, ulong timeout);
     [DllImport(VK)] static extern void vkDestroyBuffer(IntPtr dev, IntPtr b, IntPtr a);
     [DllImport(VK)] static extern void vkFreeMemory(IntPtr dev, IntPtr m, IntPtr a);
+    [DllImport(VK)] static extern IntPtr vkGetDeviceProcAddr(IntPtr dev, [MarshalAs(UnmanagedType.LPStr)] string name);
+    [DllImport(VK)] static extern int vkEnumerateDeviceExtensionProperties(IntPtr pd, IntPtr layer, ref uint count, IntPtr props);
     [DllImport(VK)] static extern void vkDestroyDescriptorPool(IntPtr dev, IntPtr p, IntPtr a);
     [DllImport(VK)] static extern void vkDestroyCommandPool(IntPtr dev, IntPtr p, IntPtr a);
     [DllImport(VK)] static extern void vkDestroyFence(IntPtr dev, IntPtr f, IntPtr a);
@@ -89,6 +91,15 @@ unsafe static class GpuVulkan
     [StructLayout(LayoutKind.Sequential)] struct CBBI   { public int sType; public IntPtr pNext; public uint flags; public IntPtr pInh; }
     [StructLayout(LayoutKind.Sequential)] struct SubmitI{ public int sType; public IntPtr pNext; public uint wsc; public IntPtr pWS; public IntPtr pWDSM; public uint cbc; public IntPtr pCB; public uint ssc; public IntPtr pSS; }
     [StructLayout(LayoutKind.Sequential)] struct FenceCI{ public int sType; public IntPtr pNext; public uint flags; }
+
+    // --- AHardwareBuffer import (VK_ANDROID_external_memory_android_hardware_buffer) ---
+    // sType values are the spec constants; handleTypes 0x400 = ..._ANDROID_HARDWARE_BUFFER_BIT_ANDROID.
+    [StructLayout(LayoutKind.Sequential)] struct ExtMemBufCI { public int sType; public IntPtr pNext; public uint handleTypes; }            // 1000072004
+    [StructLayout(LayoutKind.Sequential)] struct AhbProps    { public int sType; public IntPtr pNext; public ulong allocationSize; public uint memoryTypeBits; } // 1000129003
+    [StructLayout(LayoutKind.Sequential)] struct ImportAhbAI { public int sType; public IntPtr pNext; public IntPtr buffer; }               // 1000129002
+    [StructLayout(LayoutKind.Sequential)] struct DedicatedAI { public int sType; public IntPtr pNext; public IntPtr image; public IntPtr buffer; } // 1000127001
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    delegate int PfnGetAhbProps(IntPtr dev, IntPtr ahb, ref AhbProps props);
 
     static IntPtr Pin<T>(T s){ IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T))); Marshal.StructureToPtr(s, p, false); return p; }
     static IntPtr PinArr<T>(T[] a){ int sz = Marshal.SizeOf(typeof(T)); IntPtr p = Marshal.AllocHGlobal(sz*a.Length); for(int i=0;i<a.Length;i++) Marshal.StructureToPtr(a[i], (IntPtr)((byte*)p + i*sz), false); return p; }
@@ -120,6 +131,39 @@ unsafe static class GpuVulkan
         float[] pri = new float[] { 1.0f };
         QueueCI qci = new QueueCI(); qci.sType = 2; qci.qfi = s_qfi; qci.qc = 1; qci.pPri = PinArr(pri);
         DevCI dci = new DevCI(); dci.sType = 3; dci.qcic = 1; dci.pQci = Pin(qci);
+        // Android: enable the AHardwareBuffer-import extension set, presence-probed against the device's own
+        // extension list (absence = the import path never engages; the transient upload rung stays — inv-9).
+        // Windows keeps ec=0 — the Android ext names must not be requested off-platform.
+        if (OperatingSystem.IsAndroid())
+        {
+            string[] want = {
+                "VK_ANDROID_external_memory_android_hardware_buffer",
+                "VK_KHR_external_memory", "VK_KHR_sampler_ycbcr_conversion", "VK_EXT_queue_family_foreign",
+                "VK_KHR_bind_memory2", "VK_KHR_get_memory_requirements2", "VK_KHR_maintenance1",
+                "VK_KHR_dedicated_allocation", "VK_KHR_external_memory_capabilities",
+            };
+            uint xc = 0; vkEnumerateDeviceExtensionProperties(s_pd, IntPtr.Zero, ref xc, IntPtr.Zero);
+            var have = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            if (xc > 0)
+            {
+                IntPtr xbuf = Marshal.AllocHGlobal((int)xc * 260);   // VkExtensionProperties: char[256] + uint
+                vkEnumerateDeviceExtensionProperties(s_pd, IntPtr.Zero, ref xc, xbuf);
+                for (uint i = 0; i < xc; i++)
+                {
+                    string? nm = Marshal.PtrToStringAnsi((IntPtr)((byte*)xbuf + i * 260));
+                    if (nm != null) have.Add(nm);
+                }
+                Marshal.FreeHGlobal(xbuf);
+            }
+            var enable = new System.Collections.Generic.List<IntPtr>();
+            foreach (var w in want) if (have.Contains(w)) enable.Add(Marshal.StringToHGlobalAnsi(w));
+            if (enable.Count > 0 && have.Contains("VK_ANDROID_external_memory_android_hardware_buffer"))
+            {
+                IntPtr names = Marshal.AllocHGlobal(IntPtr.Size * enable.Count);
+                for (int i = 0; i < enable.Count; i++) Marshal.WriteIntPtr(names, i * IntPtr.Size, enable[i]);
+                dci.ec = (uint)enable.Count; dci.ppE = names;
+            }
+        }
         vkCreateDevice(s_pd, ref dci, IntPtr.Zero, out s_dev);
         vkGetDeviceQueue(s_dev, s_qfi, 0, out s_queue);
         // descriptor set layout: 3 storage buffers (A,B,C), stage COMPUTE
@@ -240,18 +284,71 @@ unsafe static class GpuVulkan
 
     // GemmQ4: Y[M,N] = A[M,K] @ dequant(Bq)^T on the q4 SEQUENTIAL-nibble packed weight — same layout/formula as
     // GpuD3D12.GemmQ4. Never materializes the dequantized fp32 weight on the CPU; dequant happens per-k on GPU.
-    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] spv)
+    // Import an AHB-backed weight as a VkBuffer bound to imported VkDeviceMemory (dedicated alloc — the
+    // spec requires it for AHB import). One import per weight, cached ON the tensor; false on any VkResult
+    // failure (the caller falls back to the transient-upload rung and clears AhbWeight so it never retries).
+    static bool TryImportAhbWeight(Tensor bWeight)
+    {
+        if (bWeight == null || bWeight.AhbWeight == 0) return false;
+        if (bWeight.VkWeightBuf != 0) return true;   // already imported
+        IntPtr pfn = vkGetDeviceProcAddr(s_dev, "vkGetAndroidHardwareBufferPropertiesANDROID");
+        if (pfn == IntPtr.Zero) return false;        // extension not enabled/present — transient rung stays
+        var getProps = Marshal.GetDelegateForFunctionPointer<PfnGetAhbProps>(pfn);
+        AhbProps props = new AhbProps { sType = 1000129003 };
+        if (getProps(s_dev, bWeight.AhbWeight, ref props) != 0 || props.allocationSize == 0) return false;
+
+        AhbNative.AHardwareBuffer_describe(bWeight.AhbWeight, out var desc);
+        ulong byteLen = desc.Width;                  // BLOB: width = byte length
+
+        ExtMemBufCI ext = new ExtMemBufCI { sType = 1000072004, handleTypes = 0x400 };
+        BufCI bci = new BufCI { sType = 12, pNext = Pin(ext), size = byteLen, usage = 0x20, sharing = 0 };
+        if (vkCreateBuffer(s_dev, ref bci, IntPtr.Zero, out IntPtr buf) != 0) return false;
+
+        DedicatedAI ded = new DedicatedAI { sType = 1000127001, buffer = buf };
+        ImportAhbAI imp = new ImportAhbAI { sType = 1000129002, pNext = Pin(ded), buffer = bWeight.AhbWeight };
+        uint typeIdx = 0; for (int i = 0; i < 32; i++) if (((props.memoryTypeBits >> i) & 1) != 0) { typeIdx = (uint)i; break; }
+        MemAI mai = new MemAI { sType = 5, pNext = Pin(imp), size = props.allocationSize, typeIdx = typeIdx };
+        if (vkAllocateMemory(s_dev, ref mai, IntPtr.Zero, out IntPtr mem) != 0)
+        { vkDestroyBuffer(s_dev, buf, IntPtr.Zero); return false; }
+        if (vkBindBufferMemory(s_dev, buf, mem, 0) != 0)
+        { vkDestroyBuffer(s_dev, buf, IntPtr.Zero); vkFreeMemory(s_dev, mem, IntPtr.Zero); return false; }
+
+        bWeight.SetVkWeight(buf, mem, byteLen);
+        return true;
+    }
+
+    public static int GemmQ4(float[] A, byte[] Bq, float[] Scales, byte[] Zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] spv, Tensor bWeight = null)
     {
         EnsureInit();
         EnsurePipelineQ4(spv);
-        ulong aB = (ulong)A.Length * 4, bqB = (ulong)Bq.Length, scB = (ulong)Scales.Length * 4, cB = (ulong)M * N * 4;
+        // Resident rung: the weight's AHB imports once and the GPU reads the SAME memory the CPU filled at
+        // model load — no per-call weight map/copy (the churn that killed the razr). Import failure clears
+        // AhbWeight so the transient rung stands permanently for that weight (inv-9, fault latches once).
+        bool resident = false;
+        if (bWeight != null && bWeight.AhbWeight != 0)
+        {
+            resident = TryImportAhbWeight(bWeight);
+            if (!resident) bWeight.SetAhbWeight(0);
+        }
+        // Transient Bq source: the caller may pass an empty Bq when the weight is AHB-backed; if the import
+        // just failed, read the bytes from the AHB's CPU map (ReadRawb) so the fallback still computes.
+        ulong aB = (ulong)A.Length * 4, scB = (ulong)Scales.Length * 4, cB = (ulong)M * N * 4;
+        ulong bqB = resident ? bWeight.VkWeightBytes
+                  : (ulong)(Bq.Length > 0 ? Bq.Length : (bWeight != null ? bWeight.ReadRawb().Length : 0));
         ulong zpB = (ulong)Math.Max(1, Zp?.Length ?? 1);
-        IntPtr aBuf, aMem, bqBuf, bqMem, scBuf, scMem, zpBuf, zpMem, cBuf, cMem;
-        MkBuf(aB, out aBuf, out aMem); MkBuf(bqB, out bqBuf, out bqMem); MkBuf(scB, out scBuf, out scMem);
+        IntPtr aBuf, aMem, bqBuf = IntPtr.Zero, bqMem = IntPtr.Zero, scBuf, scMem, zpBuf, zpMem, cBuf, cMem;
+        MkBuf(aB, out aBuf, out aMem); MkBuf(scB, out scBuf, out scMem);
         MkBuf(zpB, out zpBuf, out zpMem); MkBuf(cB, out cBuf, out cMem);
+        if (!resident) MkBuf(bqB, out bqBuf, out bqMem);
         IntPtr p;
         vkMapMemory(s_dev, aMem, 0, aB, 0, out p); Marshal.Copy(A, 0, p, A.Length); vkUnmapMemory(s_dev, aMem);
-        vkMapMemory(s_dev, bqMem, 0, bqB, 0, out p); Marshal.Copy(Bq, 0, p, Bq.Length); vkUnmapMemory(s_dev, bqMem);
+        if (!resident)
+        {
+            vkMapMemory(s_dev, bqMem, 0, bqB, 0, out p);
+            if (Bq.Length > 0) Marshal.Copy(Bq, 0, p, Bq.Length);
+            else if (bWeight != null) bWeight.ReadRawb().CopyTo(new Span<byte>((void*)p, (int)bqB));
+            vkUnmapMemory(s_dev, bqMem);
+        }
         vkMapMemory(s_dev, scMem, 0, scB, 0, out p); Marshal.Copy(Scales, 0, p, Scales.Length); vkUnmapMemory(s_dev, scMem);
         if (hasZp && Zp != null && Zp.Length > 0) { vkMapMemory(s_dev, zpMem, 0, zpB, 0, out p); Marshal.Copy(Zp, 0, p, Zp.Length); vkUnmapMemory(s_dev, zpMem); }
 
@@ -260,7 +357,8 @@ unsafe static class GpuVulkan
         IntPtr pool; vkCreateDescriptorPool(s_dev, ref dpci, IntPtr.Zero, out pool);
         DSAI dsai = new DSAI(); dsai.sType = 34; dsai.pool = pool; dsai.sc = 1; dsai.pSL = PinH(s_dslQ4);
         IntPtr dset; vkAllocateDescriptorSets(s_dev, ref dsai, out dset);
-        DBI ia = new DBI { buffer = aBuf, off = 0, range = aB }, ib = new DBI { buffer = bqBuf, off = 0, range = bqB },
+        DBI ia = new DBI { buffer = aBuf, off = 0, range = aB },
+            ib = new DBI { buffer = resident ? bWeight.VkWeightBuf : bqBuf, off = 0, range = bqB },
             isc = new DBI { buffer = scBuf, off = 0, range = scB }, iz = new DBI { buffer = zpBuf, off = 0, range = zpB },
             ic = new DBI { buffer = cBuf, off = 0, range = cB };
         WDS[] w = new WDS[5];
@@ -294,7 +392,9 @@ unsafe static class GpuVulkan
         vkDestroyCommandPool(s_dev, cpool, IntPtr.Zero);
         vkDestroyDescriptorPool(s_dev, pool, IntPtr.Zero);
         vkDestroyBuffer(s_dev, aBuf, IntPtr.Zero); vkFreeMemory(s_dev, aMem, IntPtr.Zero);
-        vkDestroyBuffer(s_dev, bqBuf, IntPtr.Zero); vkFreeMemory(s_dev, bqMem, IntPtr.Zero);
+        // A resident weight's VkBuffer/VkDeviceMemory ride the tensor for the model's lifetime — never
+        // destroyed per call (that per-call churn was the whole disease).
+        if (!resident) { vkDestroyBuffer(s_dev, bqBuf, IntPtr.Zero); vkFreeMemory(s_dev, bqMem, IntPtr.Zero); }
         vkDestroyBuffer(s_dev, scBuf, IntPtr.Zero); vkFreeMemory(s_dev, scMem, IntPtr.Zero);
         vkDestroyBuffer(s_dev, zpBuf, IntPtr.Zero); vkFreeMemory(s_dev, zpMem, IntPtr.Zero);
         vkDestroyBuffer(s_dev, cBuf, IntPtr.Zero); vkFreeMemory(s_dev, cMem, IntPtr.Zero);

@@ -164,6 +164,14 @@ public class Tensor
     private nint _ahbWeight;
     public nint AhbWeight => _ahbWeight;
     public void SetAhbWeight(nint h) { _ahbWeight = h; }
+    // The VkBuffer/VkDeviceMemory GpuVulkan imported over AhbWeight (one import per weight, first GPU
+    // sight). Rides the tensor like the AHB handle itself — weights live for the model's lifetime, so the
+    // imported pair is freed with the device, not per-call. 0 = not (yet) imported.
+    private nint _vkWeightBuf, _vkWeightMem;
+    private ulong _vkWeightBytes;
+    public nint VkWeightBuf => _vkWeightBuf;
+    public ulong VkWeightBytes => _vkWeightBytes;
+    public void SetVkWeight(nint buf, nint mem, ulong bytes) { _vkWeightBuf = buf; _vkWeightMem = mem; _vkWeightBytes = bytes; }
     // ReadRawb: the packed-byte accessor kernels pin via `fixed` (the SAME statement transparently pins a
     // managed array OR is a no-op over already-stable native memory — no kernel code branches on which).
     public unsafe Span<byte> ReadRawb() => _nativeRawb != null ? new Span<byte>(_nativeRawb, _nativeRawbLen) : Rawb;
@@ -880,6 +888,19 @@ public class Dp
     // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
     public static bool UseGpuMatMulNBits = false;
     static bool _gpuQ4Dead = false;
+    // Presence-flow (re-landed once AHB residency deleted the per-call upload churn that killed the razr):
+    // q4 GEMMs flow to the GPU whenever the seam initializes — no switch, no env var. A seam-init fault or
+    // an absent GPU latches _gpuQ4Dead once, and everything flows to CPU (inv-8/9). Probes at most once.
+    static bool GpuPresent()
+    {
+        try { Gpu.DeviceName(); return true; }
+        catch (Exception ex)
+        {
+            _gpuQ4Dead = true;
+            Console.Error.WriteLine($"GPU rung absent ({ex.GetType().Name}: {ex.Message}); q4 flows to CPU.");
+            return false;
+        }
+    }
     // Auto-route mode (CRQ190 R0): DPGPU_BACKEND=auto (the CLI's `--gpu-matmul auto` sets the variable
     // before the first Dp touch). Hoisted to a static readonly so the router costs ONE env probe per
     // process, none per dispatch. Default (unset/other values) leaves behavior exactly the standing knobs.
@@ -927,7 +948,7 @@ public class Dp
                 if (v.Length > 0) dxil = v;
             }
         }
-        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, dxil, key, tileN, tileM);
+        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, dxil, key, tileN, tileM, x[1]);
         _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
         if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
         var outShape0 = (int[])x[0].Shape.Clone(); outShape0[outShape0.Length - 1] = N;
@@ -956,10 +977,14 @@ public class Dp
         var a = x[0].AsF(); var scsp = x[2].AsF();
         var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
         bool resident = Gpu.QueryResidentQ4(GpuWeightKey(x[1], rowBytes * N));
+        // An AHB-backed weight never needs the Bq managed copy: GpuVulkan imports (or, on import fault,
+        // reads) the SAME bytes straight from the weight's map — the 33MB/GEMM churn is structurally gone.
+        // Scales/zp stay per-call uploads on Vulkan (KBs), so their copies key on D3D12 residency only.
+        bool ahb = x[1].AhbWeight != 0 || x[1].VkWeightBuf != 0;
         return GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp,
             a.ToArray(),
             resident ? Array.Empty<float>() : scsp.ToArray(),
-            resident ? Array.Empty<byte>() : bSpan.ToArray(),
+            resident || ahb ? Array.Empty<byte>() : bSpan.ToArray(),
             resident || !hasZp ? Array.Empty<byte>() : zpSpan.ToArray(), M);
     }
 
@@ -1052,7 +1077,11 @@ public class Dp
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
         var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
         var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        if (UseGpuMatMulNBits && !_gpuQ4Dead && bits == 4)
+        // GPU q4 engagement is OPT-IN on Android until the Vulkan q4 shader + AHB import are parity-verified
+        // ON THE ADRENO (the RTX proved D3D12+Vulkan; the phone's first turn hung — unvalidated on that GPU).
+        // The AHB residency machinery below is fully built and validated-at-alloc; a single-GEMM on-device
+        // parity+timing harness is the gate before presence-flow re-lands. UseGpuMatMulNBits forces it on.
+        if (bits == 4 && !_gpuQ4Dead && UseGpuMatMulNBits)
         {
             try
             {
@@ -2665,12 +2694,14 @@ static class Gpu
     // key<=0 disables residency (old per-call upload behavior) - Vulkan backend doesn't take the key yet.
     // tileN/tileM: output elements per threadgroup of the supplied dxil (dispatch divisors — 16x16 naive/tiled,
     // 8x1 GEMV). D3D12-only; the Vulkan backend still carries the naive gemm_q4.spv with its own fixed geometry.
-    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, long weightKey = -1, int tileN = 16, int tileM = 16)
+    public static int dpgpu_gemm_q4(float[] A, byte[] Bq, float[] scales, byte[] zp, float[] C, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, long weightKey = -1, int tileN = 16, int tileM = 16, Tensor bWeight = null)
     {
         if (s_vk)
         {
             s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
-            return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4);
+            // bWeight carries the AHB handle (Android zero-copy residency); the D3D12 rung has its own
+            // weightKey-keyed residency and ignores it.
+            return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4, bWeight);
         }
         return GpuD3D12.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, dxil, dxil.Length, weightKey, tileN, tileM);
     }
