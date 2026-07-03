@@ -1,0 +1,64 @@
+#version 450
+// q4 GEMV (M==1 decode), fp16-arithmetic variant. Same layout/bindings/push as gemm_q4_gemv.comp, but the
+// per-element dequant-multiply runs in mediump (RelaxedPrecision) — the Adreno executes those as fp16 at
+// ~2x fp32 rate. Per-block partial sums stay mediump (32 elements, safe range); the cross-block accumulator
+// and the shared reduction stay highp so K=2048 accumulation doesn't lose the low bits. fp32 output, so the
+// C# seam and parity oracle are unchanged; the q4 weights are already lossy, so mediump multiply is within
+// tolerance (validated on-device against the scalar oracle before this ships).
+// One workgroup per output row n; 64 lanes; dispatch (N,1,1). No zero-point (e2b export). defZp = 8.
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform P { uint M; uint N; uint K; uint BS; uint HasZp; } p;
+
+layout(std430, binding = 0) readonly  buffer A_  { float A[];  };
+layout(std430, binding = 1) readonly  buffer B_  { uint  Bq[]; };
+layout(std430, binding = 2) readonly  buffer S_  { float Sc[]; };
+layout(std430, binding = 3) readonly  buffer Z_  { uint  Zp[]; };
+layout(std430, binding = 4) writeonly buffer C_  { float C[];  };
+
+shared highp float red[64];
+
+void main()
+{
+    uint n    = gl_WorkGroupID.x;
+    uint lane = gl_LocalInvocationID.x;
+    uint nBlk = p.K / p.BS;
+
+    highp float acc = 0.0;                   // highp cross-block accumulator
+    for (uint b = lane; b < nBlk; b += 64u)
+    {
+        highp float sc = Sc[n * nBlk + b];
+        uint  ubase = (n * (p.K >> 1) + b * (p.BS >> 1)) >> 2;
+        uint  aBase = b * p.BS;
+        mediump float s = 0.0;               // fp16 partial sum over one 32-wide block
+        for (uint u = 0u; u < (p.BS >> 3); u++)
+        {
+            uint w  = Bq[ubase + u];
+            uint ai = aBase + (u << 3);
+            mediump float a0 = A[ai];      mediump float a1 = A[ai + 1u];
+            mediump float a2 = A[ai + 2u]; mediump float a3 = A[ai + 3u];
+            mediump float a4 = A[ai + 4u]; mediump float a5 = A[ai + 5u];
+            mediump float a6 = A[ai + 6u]; mediump float a7 = A[ai + 7u];
+            mediump float w0 = float((w      ) & 0xFu) - 8.0;
+            mediump float w1 = float((w >> 4u) & 0xFu) - 8.0;
+            mediump float w2 = float((w >> 8u) & 0xFu) - 8.0;
+            mediump float w3 = float((w >>12u) & 0xFu) - 8.0;
+            mediump float w4 = float((w >>16u) & 0xFu) - 8.0;
+            mediump float w5 = float((w >>20u) & 0xFu) - 8.0;
+            mediump float w6 = float((w >>24u) & 0xFu) - 8.0;
+            mediump float w7 = float((w >>28u) & 0xFu) - 8.0;
+            s += w0 * a0 + w1 * a1 + w2 * a2 + w3 * a3 + w4 * a4 + w5 * a5 + w6 * a6 + w7 * a7;
+        }
+        acc += float(s) * sc;
+    }
+
+    red[lane] = acc;
+    barrier();
+    for (uint step = 32u; step > 0u; step >>= 1u)
+    {
+        if (lane < step) red[lane] += red[lane + step];
+        barrier();
+    }
+    if (lane == 0u) C[n] = red[0];
+}

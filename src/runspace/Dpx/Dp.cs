@@ -2707,9 +2707,13 @@ static class Gpu
         if (s_vk)
         {
             s_spvQ4 ??= ShaderAssetReader("gemm_q4.spv");
-            // The GEMV variant rung, shipped like the naive kernel; a missing asset degrades to naive
-            // (Array.Empty sentinel so the reader probes once, not per call).
-            s_spvQ4Gemv ??= ReadSpvOrEmpty("gemm_q4_gemv.spv");
+            // The GEMV variant rung (M==1 decode). Prefer the fp16-arithmetic kernel (mediump/RelaxedPrecision
+            // — the Adreno runs it ~2x); fall back to the fp32 GEMV, then naive. Array.Empty sentinel = probe once.
+            if (s_spvQ4Gemv == null)
+            {
+                var f16 = ReadSpvOrEmpty("gemm_q4_gemv_f16.spv");
+                s_spvQ4Gemv = f16.Length > 0 ? f16 : ReadSpvOrEmpty("gemm_q4_gemv.spv");
+            }
             // bWeight carries the AHB handle (Android zero-copy residency); the D3D12 rung has its own
             // weightKey-keyed residency and ignores it.
             return GpuVulkan.GemmQ4(A, Bq, scales, zp, C, M, N, K, blockSize, hasZp, s_spvQ4, bWeight,
