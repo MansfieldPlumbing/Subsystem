@@ -62,6 +62,23 @@ public readonly struct DpTensor
         return new DpTensor(owner, h, shape, null, null, 0, 0);
     }
 
+    // Allocate a packed-byte weight region whose backing IS an AHardwareBuffer blob (Android only). The
+    // CPU fills the returned tensor's ReadBytes() map once; GpuVulkan imports the SAME buffer as a VkBuffer
+    // (zero copy on UMA — the CPU-mapped pointer and the GPU buffer alias one physical region). Registered
+    // via Vom.RegisterNative so the AHB refcounts and reclaims exactly like any handle: the map ptr is the
+    // Resource (what ReadBytes dereferences), the AHB is released at refcount-zero (free-at-zero, inv-3).
+    // `ahb` (out) is the buffer handle the caller carries on the consuming Tensor for the GPU import.
+    public static DpTensor AllocBlobAhb(Owner owner, int[] shape, int byteCount, out IntPtr ahb,
+                                        string subdir = "Weights", string? name = null)
+    {
+        var (buf, mapped) = AhbNative.AllocBlob(byteCount);
+        var h = VomClass.RegisterNative(owner, "DpTensor.Packed.Ahb", mapped,
+            reclaim: () => AhbNative.Free(buf, mapped), byteCount: byteCount, format: VomFormat.Bytes,
+            subdir: subdir, name: name);
+        ahb = buf;
+        return new DpTensor(owner, h, shape, null, null, 0, 0);
+    }
+
     // Wrap an already-packed quantized weight: Data holds the packed sub-byte/byte bytes (format
     // Bytes), QScale/QZero are separate VOM regions (one element per quantized row/block).
     public static DpTensor AllocQuant(Owner owner, int[] shape, int packedByteCount, int qbits, int qaxis,
