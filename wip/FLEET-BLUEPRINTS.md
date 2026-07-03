@@ -3,6 +3,23 @@
 Baseline to beat: razr CPU decode 2.45 tok/s. Measured GPU q4 ceiling (D3D12, this box): MLP up-proj 21.9x, qkv 2.7x.
 The phone died on per-call weight re-upload churn (GpuVulkan.GemmQ4 vkMapMemory+Marshal.Copy every call); AHB deletes it.
 
+## STATUS (2026-07-02, updated as landed)
+GPU slice — LANDED + VALIDATED ON RAZR:
+  - FILE 1 (AhbNative.describe/Free): done (commit ab18436)
+  - FILE 2 (DpTensor.AllocBlobAhb, VOM-registered): done (ab18436)
+  - FILE 3a (Tensor._ahbWeight instance field): done (5ee536e)
+  - FILE 3b (FromProto case 2/3 Android AHB hook, fault-degrading): done + VALIDATED — full gemma4-e2b
+    load on the razr produced ZERO fault-degrades; every q4 weight allocated as an AHB blob; clean run +
+    clean reclaim. The AHB alloc/lock/map/fill/read/unlock/release lifecycle works on real Adreno.
+GPU slice — REMAINING (the reap; needs Vulkan validation layers on-device):
+  - FILE 3c/3d (Dp.cs: thread AhbWeight + weightKey into Gpu.dpgpu_gemm_q4 / GpuMatMulNBitsResident;
+    make QueryResidentQ4 Vulkan-aware; skip bSpan.ToArray() when AHB-resident)
+  - FILE 4 (GpuVulkan.cs: enable the AHB device extensions in EnsureInit; add the 4 import structs +
+    vkGetAndroidHardwareBufferPropertiesANDROID via vkGetDeviceProcAddr; ImportAhbBuffer; GemmQ4 imports
+    the AHB cached per weightKey instead of MkBuf+Marshal.Copy every call) — detail below, exact sTypes.
+  - Then re-land presence-flow (the reverted bd7ae76 pattern). Reaps the 21.9x MLP win, zero copy churn.
+NPU + scrcpy slices below: DESIGN-only, unstarted.
+
 ## DESIGN plan for making the NPU (Cylinder 3) a GRAPH PEER for the gemma4-e2b embedder face. Verified against the real code: DpxQnn.Project (src/runspace/Dpx/DpxQnn.cs) today only PREPARES+EMITS a one-MatMul context binary â€” there is NO from-binary mount, NO graphRetrieve, NO execute-against-a-mounted-graph, and NO fence/overlap wiring in DecodeLoopSplit (src/runspace/Dpx/DpxDecoder.cs:448). The plan is four seams: (1) grow DpxQnn op coverage from one MatMul to the embedder op set; (2) add a from-binary MOUNT verb + a QueryEmbedder execute path so the emitted .bin becomes a live, VOM-owned guest graph; (3) refactor DecodeLoopSplit into three Vom.Spawn workers (embed t+1 / decode t / sample t-1) coordinated by CpuFence WaitAll/WaitN; (4) a presence-not-permission degradation ladder so an absent/late NPU rung falls to the CPU _embedInterp path without a mid-turn mode switch. Every verb used (Project/Mount/Query/Signal/Wait/Spawn/Terminate/Alloc/Close) is already in the approved bucket of src/analyzers/SystemCatalog.json; Dpx already dependsOn Rb+Vom; no new component edge and no async/await needed (SS018-clean â€” the overlap is real threads + Fence, never Task).
 
 THE OP-COVERAGE LIST (embedder face, the "friendly face": fixed shapes, no KV). Confirmed against Dp.Dispatch (src/runspace/Dpx/Dp.cs:419-516) and the split loop (DpxDecoder.cs:488, which runs _embedInterp on {input_ids} -> inputs_embeds + per_layer_inputs). The embedder emits two activation tensors and uses this op subset, with the QNN op-package + node shape each transcribes to (mirroring the proven MatMul node at DpxQnn.cs:199-202: OpConfig{PackageName="qti.aisw", TypeName=<X>} + input/output Tensor arrays):
