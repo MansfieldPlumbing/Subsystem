@@ -67,17 +67,33 @@ internal static class Build
                 return 3;
             }
 
-            var dbPath = Path.Combine(root, "subsystem-requests.db");
-            if (File.Exists(dbPath))
+            // Clean up requests and config DBs from the resolved unified location
+            var requestsDb = Subsystem.Cm.EnvironmentVariables.Db.Requests;
+            var configDb = Subsystem.Cm.EnvironmentVariables.Db.Config;
+            foreach (var path in new[] { requestsDb, configDb })
             {
-                try { File.Delete(dbPath); Console.WriteLine($"ss build: deleted local database for release ({dbPath})"); }
-                catch (Exception ex) { Console.Error.WriteLine($"ss build: failed to delete database: {ex.Message}"); }
+                if (File.Exists(path))
+                {
+                    try { File.Delete(path); Console.WriteLine($"ss build: deleted unified database for release ({path})"); }
+                    catch (Exception ex) { Console.Error.WriteLine($"ss build: failed to delete database {path}: {ex.Message}"); }
+                }
             }
-            var selfDbPath = Path.Combine(AppContext.BaseDirectory, "subsystem-requests.db");
-            if (File.Exists(selfDbPath))
+
+            // Legacy paths clean up
+            var legacyPaths = new[]
             {
-                try { File.Delete(selfDbPath); Console.WriteLine($"ss build: deleted self database for release ({selfDbPath})"); }
-                catch (Exception ex) { Console.Error.WriteLine($"ss build: failed to delete self database: {ex.Message}"); }
+                Path.Combine(root, "subsystem-requests.db"),
+                Path.Combine(AppContext.BaseDirectory, "subsystem-requests.db"),
+                Path.Combine(root, "subsystem-registry.db"),
+                Path.Combine(AppContext.BaseDirectory, "subsystem-registry.db")
+            };
+            foreach (var path in legacyPaths)
+            {
+                if (File.Exists(path))
+                {
+                    try { File.Delete(path); Console.WriteLine($"ss build: deleted legacy database ({path})"); }
+                    catch (Exception ex) { Console.Error.WriteLine($"ss build: failed to delete legacy database {path}: {ex.Message}"); }
+                }
             }
         }
 
@@ -100,7 +116,7 @@ internal static class Build
             catch   // the running image is locked — rename it aside (Windows allows it), then write.
             {
                 var old = t + "." + Guid.NewGuid().ToString("N").Substring(0, 4) + ".old";
-                try { if (File.Exists(old)) File.Delete(old); } catch { }
+                try { if (File.Exists(old)) File.Delete(old); } catch (Exception ex) { Dg.Warn("build", ex); }
                 try { File.Move(t, old); File.WriteAllBytes(t, exeBytes); Console.WriteLine($"  + {t}  (self-replaced; old → {old})"); }
                 catch (Exception ex) { Console.Error.WriteLine($"  ! {t}: {ex.Message}"); }
             }
@@ -174,18 +190,16 @@ internal static class Build
         if (dotnet == null) { Console.Error.WriteLine("  [FAIL] compiler: no dotnet (DOTNET_ROOT / <drive>\\dotnet / PATH)."); return 2; }
         Console.WriteLine($"  [ok] compiler: {dotnet}");
 
-        // Android SDK + JDK, drive-derived (override via SS_ANDROID / SS_JDK) — MSBuild reads these env vars
-        // as the AndroidSdkDirectory / JavaSdkDirectory properties, so exporting them IS the -p: pin.
+        // Android SDK, drive-derived (override via SS_ANDROID) — MSBuild reads this env var
+        // as the AndroidSdkDirectory property, so exporting it IS the -p: pin.
         var drive = Path.GetPathRoot(root) ?? root;
         // Toolchain discovery: the S:\bin layout first (the cleaned-up arsenal), then the legacy drive root.
         // Native libs (the big .so set: libLiteRtLm, libpsl, …) live OUTSIDE the repo at <drive>\libs (SS_LIBS).
         var android = Environment.GetEnvironmentVariable("SS_ANDROID") ?? ToolDir(drive, "bin/android-sdk", "android-sdk", "Android");
-        var jdk     = Environment.GetEnvironmentVariable("SS_JDK")     ?? ToolDir(drive, "bin/jdk", "jdk");
         var libs    = Environment.GetEnvironmentVariable("SS_LIBS")    ?? ToolDir(drive, "libs", "bin/libs");
         if (!Directory.Exists(android)) { Console.Error.WriteLine($"  [FAIL] android sdk: {android} missing (set SS_ANDROID)."); return 2; }
-        if (!Directory.Exists(jdk))     { Console.Error.WriteLine($"  [FAIL] jdk: {jdk} missing (set SS_JDK)."); return 2; }
+        
         Console.WriteLine($"  [ok] android sdk: {android}");
-        Console.WriteLine($"  [ok] jdk: {jdk}");
         Console.WriteLine($"  [ok] native libs: {libs}");
         Console.WriteLine();
 
@@ -193,13 +207,13 @@ internal static class Build
         var env = new Dictionary<string, string>
         {
             ["ANDROID_HOME"] = android, ["ANDROID_SDK_ROOT"] = android, ["AndroidSdkDirectory"] = android,
-            ["JAVA_HOME"] = jdk, ["JavaSdkDirectory"] = jdk,
             ["SS_LIBS"] = libs,
         };
+
         // SignAndroidPackage produces the installable -Signed.apk; a plain build skips signing (faster).
         var target = sign ? "build -t:SignAndroidPackage" : "build";
         Console.WriteLine($"ss build apk: {(sign ? "building + signing" : "building")} via {dotnet}");
-        int rc = RunProc(dotnet, $"{target} \"{csproj}\" -c Release -f net11.0-android -clp:ErrorsOnly", env);
+        int rc = RunProc(dotnet, $"{target} \"{csproj}\" -c Release -f net11.0-android -clp:ErrorsOnly -p:AndroidSdkDirectory=\"{android}\" -p:SS_LIBS=\"{libs}\"", env);
         if (rc != 0) { Console.Error.WriteLine($"ss build apk: RED — build failed (exit {rc})"); return 1; }
         Console.WriteLine("ss build apk: compiled");
 
@@ -231,7 +245,7 @@ internal static class Build
                     .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc).FirstOrDefault();
                 if (hit != null) return hit;
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("build", ex); }
         }
         return null;
     }
@@ -305,7 +319,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
     private static int SafeCount(string root, string pattern)
     {
         try { return Directory.GetFiles(root, pattern, SearchOption.AllDirectories).Count(p => !p.Contains("\\obj\\") && !p.Contains("\\bin\\")); }
-        catch { return 0; }
+        catch (Exception ex) { Dg.Log("build", ex.Message); return 0; }
     }
 
     // Resolve the on-drive dotnet — still the compiler for the Windows publish and the APK pipeline (the
@@ -329,7 +343,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
             if (File.Exists(d)) return d;
         }
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-            try { var p = Path.Combine(dir, "dotnet.exe"); if (File.Exists(p)) return p; } catch { }
+            try { var p = Path.Combine(dir, "dotnet.exe"); if (File.Exists(p)) return p; } catch (Exception ex) { Dg.Log("build", ex.Message); }
         return null;
     }
 
@@ -361,7 +375,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
         {
             var dir = stack.Pop();
             if (blocked.Contains(Path.GetFileName(dir))) continue;
-            try { foreach (var d in Directory.GetDirectories(dir)) stack.Push(d); } catch { }
+            try { foreach (var d in Directory.GetDirectories(dir)) stack.Push(d); } catch (Exception ex) { Dg.Log("build", ex.Message); }
             try
             {
                 foreach (var f in Directory.GetFiles(dir))
@@ -372,7 +386,7 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Dg.Log("build", ex.Message); }
         }
         found.Sort(StringComparer.OrdinalIgnoreCase);
 

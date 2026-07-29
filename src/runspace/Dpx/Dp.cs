@@ -687,7 +687,8 @@ public class Dp
     {
         if (_gemmDxil != null) return _gemmDxil;
         string near = Path.Combine(AppContext.BaseDirectory, "gemm.dxil");
-        string p = File.Exists(near) ? near : @"S:\qnn-project\workspace\onnx-interp\_gpu\gemm.dxil";
+        string fallback = Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\", "qnn-project", "workspace", "onnx-interp", "_gpu", "gemm.dxil");
+        string p = File.Exists(near) ? near : fallback;
         return _gemmDxil = File.ReadAllBytes(p);
     }
     static Tensor GpuMatMul(Tensor A, Tensor B)
@@ -735,7 +736,7 @@ public class Dp
         catch (Exception ex)
         {
             _gpuDead = true;
-            Console.Error.WriteLine($"dp-onnx: GPU GEMM unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            Console.Error.WriteLine($"dpx: GPU GEMM unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
             return MatMul(A, B);
         }
         var sh = new int[nb + 2]; for (int k = 0; k < nb; k++) sh[k] = lead[k]; sh[nb] = M; sh[nb + 1] = N;

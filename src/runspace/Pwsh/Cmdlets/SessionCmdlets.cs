@@ -5,23 +5,21 @@ using Subsystem;
 
 namespace Subsystem.Pwsh.Cmdlets;
 
-internal static class SessionCmdletsHelper
+internal static class SessionCmdletsSupport
 {
     public static void SetSessionBackgroundHelper(PSCmdlet cmdlet, string name, bool enabled)
     {
-        var s = SessionManager.Get(name);
-        if (s != null)
+        if (SessionManager.SetBackground(name, enabled))
         {
-            s.Background = enabled;
             cmdlet.Host.UI.WriteLine(
-                ConsoleColor.Cyan,
+                cmdlet.Host.UI.RawUI.ForegroundColor,
                 cmdlet.Host.UI.RawUI.BackgroundColor,
-                $"Session '{name}' background={enabled}");
+                $"Session '{name}' background mode set to {enabled}");
         }
         else
         {
             cmdlet.Host.UI.WriteLine(
-                ConsoleColor.Red,
+                cmdlet.Host.UI.RawUI.ForegroundColor,
                 cmdlet.Host.UI.RawUI.BackgroundColor,
                 $"No session '{name}'");
         }
@@ -29,7 +27,7 @@ internal static class SessionCmdletsHelper
 }
 
 [Cmdlet(VerbsCommon.New, "Session")]
-public sealed class NewSessionCmdlet : WrapperCmdlet
+public sealed class SessionCreateCmdlet : WrapperCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)]
     public string Name { get; set; } = string.Empty;
@@ -119,7 +117,7 @@ public sealed class SetSessionBackgroundCmdlet : WrapperCmdlet
     {
         try
         {
-            SessionCmdletsHelper.SetSessionBackgroundHelper(this, Name, Enabled);
+            SessionCmdletsSupport.SetSessionBackgroundHelper(this, Name, Enabled);
         }
         catch (Exception ex)
         {
@@ -138,7 +136,7 @@ public sealed class DetachSessionCmdlet : WrapperCmdlet
     {
         try
         {
-            SessionCmdletsHelper.SetSessionBackgroundHelper(this, Name, true);
+            SessionCmdletsSupport.SetSessionBackgroundHelper(this, Name, true);
         }
         catch (Exception ex)
         {

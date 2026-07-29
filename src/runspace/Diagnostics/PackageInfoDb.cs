@@ -27,7 +27,7 @@ public sealed class PackageInfo
 // Add-PackageInfo degrades to Removal='Unknown'. Backend-owned; the renderer never holds it.
 public static class PackageInfoDb
 {
-    private static Dictionary<string, PackageInfo>? _cache;
+    private static IReadOnlyDictionary<string, PackageInfo>? _cache;
     private static readonly object _lock = new();
     private static string _dbPath = "";
     private static readonly char Sep = (char)0x1f;
@@ -47,7 +47,8 @@ public static class PackageInfoDb
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            using var stream = http.GetStreamAsync(url).GetAwaiter().GetResult();
+            using var resp = http.Send(new HttpRequestMessage(HttpMethod.Get, url));
+            using var stream = resp.Content.ReadAsStream();
             using var doc = JsonDocument.Parse(stream);
             lock (_lock)
             {
@@ -78,8 +79,9 @@ public static class PackageInfoDb
 
     private static SqliteConnection OpenAndEnsureSchema()
     {
-        try { SQLitePCL.Batteries_V2.Init(); } catch { }
-        _dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "subsystem-pkginfo.db");
+        try { SQLitePCL.Batteries_V2.Init(); } catch (Exception ex) { Dg.Warn("pkgdb", ex); }
+        string personal = Cm.Cm.Get(@"\System\Config\PersonalDir")?.ManifestJson ?? AppContext.BaseDirectory;
+        _dbPath = Path.Combine(personal, "subsystem-pkginfo.db");
         var c = new SqliteConnection($"Data Source={_dbPath}");
         c.Open();
         using var cmd = c.CreateCommand();

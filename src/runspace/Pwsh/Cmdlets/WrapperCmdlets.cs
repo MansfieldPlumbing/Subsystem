@@ -96,7 +96,7 @@ public sealed class GetAgentSessionCmdlet : WrapperCmdlet
 }
 
 [Cmdlet(VerbsCommon.New, "AgentSession")]
-public sealed class NewAgentSessionCmdlet : WrapperCmdlet
+public sealed class AgentSessionCreateCmdlet : WrapperCmdlet
 {
     [Parameter(Position = 0)] public string? Title { get; set; }
     protected override void ProcessRecord() => Emit(Subsystem.AgentSessionTable.Create(Title));

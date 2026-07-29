@@ -89,14 +89,15 @@ public class AdbConnection : IDisposable
         // TLS upgrade over the SAME socket (StartTLS). adbd authenticates by the client cert's public key,
         // matched against the keys stored at pairing — so the cert must carry the SAME RSA key.
         _stream = await _transport.UpgradeToTlsAsync(_rsaKey, host, port, cancellationToken);
-        _ = Task.Run(() => ReadLoopAsync(cancellationToken), cancellationToken);
+        var owner = Vom.Vom.CreateOwner(@"\System\Adb");
+        Vom.Vom.Spawn(owner, "ReadLoop", _ => ReadLoopAsync(cancellationToken).GetAwaiter().GetResult());
 
         // Post-TLS: per adbd source (adbd_wifi_secure_connect), after a successful TLS handshake the DAEMON
         // proactively send_connect()s its "device::..." CNXN once it has verified our client cert against the
         // paired keystore. We just receive it — we must NOT send our own CNXN (that would re-enter
         // handle_new_connection and fire another STLS). No banner => cert rejected (daemon Kicked the transport).
         AdbMessage? banner = null;
-        await Task.Run(() => { if (_handshakeQueue.TryTake(out var m, 8000)) banner = m; }, cancellationToken);
+        if (_handshakeQueue.TryTake(out var m, 8000)) banner = m;
         if (banner == null) throw new AdbException("post-TLS: no CNXN from device (cert rejected / kicked?)");
         Dg.Log("adb", $"post-TLS device sent: {FormatCommand(banner.Command)} banner='{Encoding.ASCII.GetString(banner.Data).Replace('\0', '.')}'");
         if (banner.Command != CMD_CNXN)
@@ -110,7 +111,7 @@ public class AdbConnection : IDisposable
     private BlockingCollection<AdbMessage> _handshakeQueue = new();
     private async Task<AdbMessage> ReadFromLoopAsync(CancellationToken ct)
     {
-        return await Task.Run(() => _handshakeQueue.Take(ct));
+        return _handshakeQueue.Take(ct);
     }
 
     private async Task ReadLoopAsync(CancellationToken ct)
@@ -241,7 +242,7 @@ public class AdbConnection : IDisposable
             uint remoteId = 0;
             while (true)
             {
-                var msg = await Task.Run(() => queue.Take(ct), ct);
+                var msg = queue.Take(ct);
                 if (msg.Command == CMD_OKAY)
                 {
                     remoteId = msg.Arg0;
@@ -291,7 +292,7 @@ public class AdbConnection : IDisposable
 
     public void Dispose()
     {
-        try { _stream?.Dispose(); } catch { }
-        try { _transport?.Dispose(); } catch { }
+        try { _stream?.Dispose(); } catch (Exception ex) { Dg.Log("adb", ex.Message); }
+        try { _transport?.Dispose(); } catch (Exception ex) { Dg.Log("adb", ex.Message); }
     }
 }

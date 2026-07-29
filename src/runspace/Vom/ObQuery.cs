@@ -43,7 +43,7 @@ public static unsafe partial class Vom
                 if (!string.Equals(e.Descriptor.Type, "Thread", StringComparison.Ordinal)) continue;
 
                 Thread? t = null;
-                try { t = GCHandle.FromIntPtr(e.Descriptor.Resource).Target as Thread; } catch { }
+                try { t = GCHandle.FromIntPtr(e.Descriptor.Resource).Target as Thread; } catch (Exception ex) { Dg.Warn("obquery", ex); }
                 bool cancelled = o.Cts.IsCancellationRequested;
                 string status = cancelled ? "cancelling" : (t == null ? "unknown" : (t.IsAlive ? "running" : "dead"));
 

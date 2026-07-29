@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -16,7 +16,8 @@ namespace Subsystem.Dpx
 
         private static string FindDxcPath()
         {
-            string baseDir = @"C:\Program Files (x86)\Windows Kits\10\bin";
+            string pf = Cm.Cm.Get(@"\System\Config\ProgramFilesX86")?.ManifestJson ?? AppContext.BaseDirectory;
+            string baseDir = Path.Combine(pf, "Windows Kits", "10", "bin");
             if (!Directory.Exists(baseDir)) return null;
             try
             {
@@ -24,8 +25,9 @@ namespace Subsystem.Dpx
                 var x64Files = files.Where(f => f.Contains("x64")).OrderByDescending(f => f);
                 return x64Files.FirstOrDefault();
             }
-            catch
+            catch (Exception ex)
             {
+                Dg.Log("dxc", ex.Message);
                 return null;
             }
         }
@@ -108,7 +110,8 @@ WHERE n.op_type IN ('MatMul', 'Gemm')";
             Console.WriteLine($"Found {shapes.Count} shapes to tune.");
 
             // Create temporary folder for shader compilations
-            string tmpDir = Path.Combine(Path.GetTempPath(), "dpx_tournament_" + Path.GetRandomFileName());
+            string tempDir = Cm.Cm.Get(@"\System\Config\TempDir")?.ManifestJson ?? AppContext.BaseDirectory;
+            string tmpDir = Path.Combine(tempDir, "dpx_tournament_" + Path.GetRandomFileName());
             Directory.CreateDirectory(tmpDir);
 
             try

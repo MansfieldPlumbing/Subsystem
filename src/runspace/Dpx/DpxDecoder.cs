@@ -70,7 +70,7 @@ namespace Subsystem.Dpx
             _tokenizer = tokenizer;
             _unitId = unitId;
             _maxTokens = maxTokens > 0 ? maxTokens : 4096;
-            _backendName = "DP-ONNX";
+            _backendName = "DPX";
             _interp = new Dp(_model);
             _ready = true;
         }

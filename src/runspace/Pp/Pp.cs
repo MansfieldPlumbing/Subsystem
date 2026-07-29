@@ -20,11 +20,11 @@ namespace Subsystem.Pp;
 // when the unified config surface lands (domains: Profiles · Schemes · Themes · Keybindings · Actions · Capabilities).
 public static class Pp
 {
-    private static readonly Dictionary<string, IProvisioningHandler> _handlers =
+    private static readonly Dictionary<string, IProvisioningSeam> _handlers =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Register a domain handler. Idempotent by Name (matches the template's handlers[] enum).</summary>
-    public static void RegisterHandler(IProvisioningHandler h)
+    public static void RegisterHandler(IProvisioningSeam h)
     {
         if (h == null || string.IsNullOrEmpty(h.Name)) return;
         _handlers[h.Name] = h;
@@ -75,7 +75,7 @@ public static class Pp
     }
 
     // null/empty selector => all registered handlers; otherwise the named subset that exists.
-    private static IEnumerable<IProvisioningHandler> Select(string[]? names)
+    private static IEnumerable<IProvisioningSeam> Select(string[]? names)
         => (names == null || names.Length == 0)
             ? _handlers.Values
             : names.Where(_handlers.ContainsKey).Select(n => _handlers[n]);
@@ -83,7 +83,7 @@ public static class Pp
     /// <summary>Round-trip proof (like Test-Vom/Test-Cm): register a probe handler, Extract → Apply → verify.</summary>
     public static object SelfTest()
     {
-        var probe = new ProbeHandler();
+        var probe = new ProbeSeam();
         var saved = _handlers.TryGetValue(probe.Name, out var prev) ? prev : null;
         RegisterHandler(probe);
         try
@@ -107,7 +107,7 @@ public static class Pp
         }
     }
 
-    private sealed class ProbeHandler : IProvisioningHandler
+    private sealed class ProbeSeam : IProvisioningSeam
     {
         public string Name => "__pptest";
         public bool Applied;
@@ -117,7 +117,7 @@ public static class Pp
 }
 
 /// <summary>A domain provider: owns one section of the provisioning template (the PnP "handler" unit).</summary>
-public interface IProvisioningHandler
+public interface IProvisioningSeam
 {
     /// <summary>Matches the handlers[] enum value (e.g. "Capabilities", "Schemes", "Themes").</summary>
     string Name { get; }

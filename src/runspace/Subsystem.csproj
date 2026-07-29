@@ -31,17 +31,22 @@
     <EnableEventPipe>false</EnableEventPipe>
     <EventSourceSupport>false</EventSourceSupport>
     <DebuggerSupport>false</DebuggerSupport>
-    <!-- BUILD JDK = 21 (LTS), pinned. The LiteRT-LM AAR is Java-21 (class v65) bytecode; implementing
-         IMessageCallback generates an ACW javac must compile against it, so the build MUST use JDK 21.
-         The machine's JAVA_HOME points at JDK 17 (fails "class file version 65.0, should be 61.0"), so
-         we set the JDK explicitly here — do NOT rely on JAVA_HOME. Do NOT bump to JDK 25/26: the .NET
-         Android workload validates against 21; newer is unverified and risks toolchain breakage.
-         Path is dynamic: $env:SS_JDK overrides (e.g. JDK moved drives); else falls back to the JBR. -->
-    <JavaSdkDirectory Condition="'$(SS_JDK)' != ''">$(SS_JDK)</JavaSdkDirectory>
-    <!-- Drive-relative fallback (no hardcoded drive letters — dev.psm1 law): <repo drive>\jdk. -->
-    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))jdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))jdk</JavaSdkDirectory>
-    <JavacSourceVersion>21</JavacSourceVersion>
-    <JavacTargetVersion>21</JavacTargetVersion>
+    <!-- BUILD JDK = 25 (LTS). The LiteRT-LM AAR is Java-21 (class v65) bytecode so javac source/target
+         stays pinned at 21 for AAR compatibility — but the JDK runtime itself is 25. We override
+         LatestSupportedJavaVersion to 25.0.99 so both ResolveSdks and ValidateJavaVersion accept it;
+         the workload default cap of 21.0.99 is a conservative guard, not a hard toolchain limit.
+         Path is dynamic: $env:SS_JDK overrides (e.g. JDK moved drives); else drive-relative fallback. -->
+
+    <AndroidSdkDirectory Condition="'$(SS_ANDROID)' != ''">$(SS_ANDROID)</AndroidSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))bin\android-sdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))bin\android-sdk</AndroidSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))android-sdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))android-sdk</AndroidSdkDirectory>
+    <!-- Raise the workload's hard JDK cap so JDK 25 is accepted by both ResolveSdks and ValidateJavaVersion.
+         javac source/target are 11 — the Android minimum. LiteRT-LM AAR (Java-21 / class v65) was cut
+         2026-06-24; its IMessageCallback ACW constraint no longer applies. JDK itself is still required
+         for ACW generation (MainActivity extends Activity which is a Java class). -->
+    <LatestSupportedJavaVersion Condition="'$(LatestSupportedJavaVersion)' == '' Or '$(LatestSupportedJavaVersion)' &lt; '25.0'">25.0.99</LatestSupportedJavaVersion>
+    <JavacSourceVersion>11</JavacSourceVersion>
+    <JavacTargetVersion>11</JavacTargetVersion>
     <!-- libpsl .so resolution: $env:SS_LIBS overrides; else src\runspace\libs. Only the SOVEREIGN
          libpsl-android.so (built in-repo from native\libc.null.c via build-native.ps1) ships; PowerShell's
          FOREIGN prebuilt libpsl-native.so is never packaged — MainActivity's DllImportResolver redirects

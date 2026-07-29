@@ -83,7 +83,7 @@ public static class Dg
                 File.Move(path, Path.Combine(_dir, "events.1.log"), overwrite: true);
             File.AppendAllText(path, $"{r.Time:yyyy-MM-dd HH:mm:ss} [{r.Level}] [{r.Source}] {r.Message}\n");
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("dg", ex); }
     }
 
     public static void RecordCrash(Exception? ex, string source)

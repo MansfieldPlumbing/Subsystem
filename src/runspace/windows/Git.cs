@@ -35,7 +35,7 @@ internal static class Git
         var sanctioned = Path.Combine(drive, "bin", "git", "cmd", "git.exe");
         if (File.Exists(sanctioned)) return sanctioned;
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-            try { var g = Path.Combine(dir, "git.exe"); if (File.Exists(g)) return g; } catch { }
+            try { var g = Path.Combine(dir, "git.exe"); if (File.Exists(g)) return g; } catch (Exception ex) { Dg.Warn("git", ex); }
         return null;
     }
 }

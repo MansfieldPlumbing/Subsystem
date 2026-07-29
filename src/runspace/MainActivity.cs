@@ -49,7 +49,7 @@ public class TerminalSession : IDisposable {
         try {
             Repl?.Stop();
             Ps?.Dispose();
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 
     public TerminalSession(long tabId, MainActivity main) {
@@ -127,7 +127,7 @@ Set-Alias ls dir -Force
                 var providerAttr = type.GetCustomAttribute<CmdletProviderAttribute>();
                 if (providerAttr != null) iss.Providers.Add(new SessionStateProviderEntry(providerAttr.ProviderName, type, ""));
             }
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 
     public void FeedTerminal(byte[] rawAnsiBytes) {
@@ -136,7 +136,6 @@ Set-Alias ls dir -Force
             if (VtController.Changed) VtController.ClearChanges();
         }
         _main.SendRawToReact(TabId, rawAnsiBytes);
-        _main.BroadcastToProjection(TabId, rawAnsiBytes);
     }
 
     public void RouteRawInput(string payload) {
@@ -169,11 +168,12 @@ Set-Alias ls dir -Force
                 char keyChar = key switch { ConsoleKey.Enter => '\r', ConsoleKey.Backspace => '\b', ConsoleKey.Tab => '\t', ConsoleKey.Escape => '\x1b', _ => ch };
                 rawUi.InputQueue.Add(new KeyInfo((int)key, keyChar, (ControlKeyStates)0, true));
             }
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 
     public void ExecuteCommand(string command) {
-        Task.Run(() => {
+        var owner = Vom.Vom.CreateOwner(@"\System\Terminal\Exec");
+        Vom.Vom.Spawn(owner, "ExecCmd", _ => {
             try {
                 FeedTerminal(Encoding.UTF8.GetBytes($"{command}\r\n"));
                 Ps.Commands.Clear();
@@ -210,7 +210,6 @@ public class MainActivity : Activity
 {
     private WebView _webView = null!;
     public bool IsReactReady { get; private set; } = false;
-    private ProjectionServer? _projectionServer;
     public ConcurrentDictionary<long, TerminalSession> Sessions { get; } = new();
     public static MainActivity? Instance { get; private set; }
 
@@ -230,7 +229,7 @@ public class MainActivity : Activity
 
         // Move any pre-models/ flat model files (files/<name>) into files/models/ so a model
         // downloaded before this refactor is recognized as installed without re-downloading.
-        try { ModelCatalog.MigrateLegacyLayout(this); } catch { }
+        try { ModelCatalog.MigrateLegacyLayout(this); } catch (Exception ex) { Dg.Warn("main", ex); }
 
         if (!Android.Provider.Settings.CanDrawOverlays(this)) {
             StartActivity(new Android.Content.Intent(Android.Provider.Settings.ActionManageOverlayPermission, Android.Net.Uri.Parse("package:" + PackageName)));
@@ -251,7 +250,8 @@ public class MainActivity : Activity
         _webView.Settings.LoadWithOverviewMode = true;
         _webView.OverScrollMode = OverScrollMode.Never;
         _webView.SetWebViewClient(new SubsystemWebViewClient());
-        _webView.SetWebChromeClient(new CustomWebChromeClient());
+        _webView.SetWebChromeClient(new CustomWebChromeClient(this));
+        _webView.SetDownloadListener(new SubsystemDownloadListener());
 
         Java.Lang.JavaSystem.LoadLibrary("psl-android");
         // SetDllImportResolver can only be set ONCE per assembly per process. OnCreate can run
@@ -262,7 +262,7 @@ public class MainActivity : Activity
                 if (libraryName.Contains("libpsl-native")) return NativeLibrary.Load("libpsl-android.so", assembly, null);
                 return IntPtr.Zero;
             });
-        } catch (System.InvalidOperationException) { /* resolver already set earlier this process */ }
+        } catch (System.InvalidOperationException ex) { Dg.Warn("main", ex); /* resolver already set earlier this process */ }
         // The GPU q4 GEMM shaders (gemm.spv/gemm_q4.spv) ship as AndroidAssets, not loose files next to an
         // exe — Gpu.ShaderAssetReader defaults to a filesystem read (fine on Windows); this is the ONE place
         // allowed to touch Android.Content.Res.AssetManager, so the shared Dpx/GpuVulkan code stays platform-neutral.
@@ -273,15 +273,12 @@ public class MainActivity : Activity
             return ms.ToArray();
         };
 
-        _webView.AddJavascriptInterface(new PwshBridge(this), "AndroidBridge");
-        _webView.AddJavascriptInterface(new VomBridgeJSInterface(this), "VomBridge");
         // Pre-paint backdrop (visible only until the shell's first frame). BLACK read as a crash/hang on
         // launch; a neutral mid sky-blue (the classic desktop default) reads as "booting", not "dead".
         // This is a native surface OUTSIDE the WebView's CSS scope, so it can't reference var(--bg) — see
         // risks: ideally seeded from the active theme's --bg via Cm so the flash matches the shell.
         _webView.SetBackgroundColor(Android.Graphics.Color.Rgb(0x3A, 0x6E, 0xA5));
-        EnsureWebServer();   // server must be up before the shell loads over http (idempotent; OnCreate re-call is a no-op)
-        _webView.LoadUrl(ProjectionServer.LoopbackBase);   // "/" = the shell presenter (shell.obp, RAM-served)
+        _webView.LoadUrl("http" + "://shell/shell.obp");   // served in-process from assembly resources via ObpHost
 
         if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu) this.OnBackInvokedDispatcher.RegisterOnBackInvokedCallback(0, new TerminalBackCallback(this));
 
@@ -300,13 +297,9 @@ public class MainActivity : Activity
         // OS-owned, so a left swipe fired BACK instead of Charms). Re-assert on every decor layout —
         // cheap, idempotent. (Android still caps exclusion at ~200dp/edge, granted bottom-up: the
         // LOWER part of each edge is ours; mid/upper edge stays the OS back gesture.)
-        try { if (Window?.DecorView is Android.Views.View _dv) _dv.LayoutChange += (s, e) => ApplyGestureExclusion(); } catch { }
+        try { if (Window?.DecorView is Android.Views.View _dv) _dv.LayoutChange += (s, e) => ApplyGestureExclusion(); } catch (Exception ex) { Dg.Warn("main", ex); }
 
-        // Bind the HTTP/WebSocket backend (8080) at launch. This MUST be unconditional —
-        // it powers terminal/messenger/agent/files/settings. Previously it only started
-        // inside StartProjection() (screen-cast), so a normal launch left 8080 unbound and
-        // the whole frontend "couldn't connect". Decoupled now.
-        EnsureWebServer();
+        SeedAssets();
 
         SeedAssets();
         System.Environment.SetEnvironmentVariable("POWERSHELL_TELEMETRY_OPTOUT", "1");
@@ -336,7 +329,7 @@ public class MainActivity : Activity
     // (Presenters are standalone pages: they bring their own theme.css/themes.js.)
     private void LoadDoor(string presenterId)
     {
-        RunOnUiThread(() => { try { _webView?.LoadUrl(ProjectionServer.LoopbackBase + "/presenters/" + presenterId + ".obp"); } catch { } });
+        RunOnUiThread(() => { try { _webView?.LoadUrl("http" + "://shell/presenters/" + presenterId + ".obp"); } catch (Exception ex) { Dg.Warn("main", ex); } });
     }
 
     // The presenter a launching intent asked us to open once the shell is up (flushed by
@@ -407,7 +400,7 @@ public class MainActivity : Activity
     // The single seam the renderer is driven through — callbacks to JS (permission results, deep links)
     // all funnel here so there is one place that talks to V8.
     public void EvaluateInWebView(string js) {
-        RunOnUiThread(() => { try { _webView?.EvaluateJavascript(js, null); } catch { } });
+        RunOnUiThread(() => { try { _webView?.EvaluateJavascript(js, null); } catch (Exception ex) { Dg.Warn("main", ex); } });
     }
 
     // Runtime-permission request from the WebView (mic, etc.). getUserMedia in the WebView can only
@@ -443,7 +436,7 @@ public class MainActivity : Activity
     // string can never break out of the call (the renderer holds no authority; the host quotes for it).
     private void NotifyPermissionResult(string permission, bool granted) {
         var name = System.Text.Json.JsonSerializer.Serialize(permission);
-        var js = "if (window.__onPermissionResult) try { window.__onPermissionResult(" + name + ", " + (granted ? "true" : "false") + "); } catch (e) {}";
+        var js = "if (window.__onPermissionResult) try { window.__onPermissionResult(" + name + ", " + (granted ? "true" : "false") + "); } catch (e) { console.warn(e); }";
         EvaluateInWebView(js);
     }
 
@@ -467,7 +460,7 @@ public class MainActivity : Activity
             // the OS back-gesture so accidental edge swipes don't fire back — the taskbar + red-X are the
             // nav. (Android caps gesture exclusion at ~200dp/edge, so the lower part of each edge is what's
             // reliably covered; the back BUTTON / TerminalBackCallback still works for intentional back.)
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 
     // System BACK (gesture or button) → navigate BACK inside the app (the shell's window history), not out.
@@ -478,7 +471,7 @@ public class MainActivity : Activity
         RunOnUiThread(() => {
             try {
                 if (_webView != null && _webView.CanGoBack()) _webView.GoBack();
-            } catch { }
+            } catch (Exception ex) { Dg.Warn("main", ex); }
         });
     }
 
@@ -494,7 +487,7 @@ public class MainActivity : Activity
                 new Android.Graphics.Rect(0, 0, edge, dv.Height),
                 new Android.Graphics.Rect(dv.Width - edge, 0, dv.Width, dv.Height),
             };
-        } catch { }
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 
     // Native window blur-behind for the assist popup / system mica (API 31+; S/Razr+ are 34). Best-effort:
@@ -518,7 +511,7 @@ public class MainActivity : Activity
                 var c = Window?.InsetsController; if (c == null) return;
                 if (hidden) c.Hide(WindowInsets.Type.StatusBars());
                 else c.Show(WindowInsets.Type.StatusBars());
-            } catch { }
+            } catch (Exception ex) { Dg.Warn("main", ex); }
         });
     }
 
@@ -529,7 +522,7 @@ public class MainActivity : Activity
 
     public bool IsAccessibilityEnabled() {
         int accessibilityEnabled = 0;
-        try { accessibilityEnabled = Android.Provider.Settings.Secure.GetInt(ContentResolver, Android.Provider.Settings.Secure.AccessibilityEnabled); } catch { }
+        try { accessibilityEnabled = Android.Provider.Settings.Secure.GetInt(ContentResolver, Android.Provider.Settings.Secure.AccessibilityEnabled); } catch (Exception ex) { Dg.Warn("main", ex); }
         if (accessibilityEnabled == 1) {
             string? settingValue = Android.Provider.Settings.Secure.GetString(ContentResolver, Android.Provider.Settings.Secure.EnabledAccessibilityServices);
             if (settingValue != null && settingValue.Contains(PackageName!)) return true;
@@ -541,7 +534,8 @@ public class MainActivity : Activity
         if (Sessions.ContainsKey(tabId)) return;
         var session = new TerminalSession(tabId, this);
         Sessions[tabId] = session;
-        Task.Run(() => session.Start(this.FilesDir!.AbsolutePath));
+        var owner = Vom.Vom.CreateOwner($@"\System\Terminal\Session\{tabId}");
+        Vom.Vom.Spawn(owner, "Start", _ => session.Start(this.FilesDir!.AbsolutePath));
     }
 
     public void CloseSession(long tabId) {
@@ -554,7 +548,7 @@ public class MainActivity : Activity
         void SeedAsset(string assetName, string destPath) {
             if (!System.IO.File.Exists(destPath)) {
                 // ObpHost: the shell tree is compiled into the assembly now (embedded -> asset fallback).
-                try { using var s = ObpHost.OpenRead(assetName); if (s != null) { using var d = System.IO.File.Create(destPath); s.CopyTo(d); } } catch { }
+                try { using var s = ObpHost.OpenRead(assetName); if (s != null) { using var d = System.IO.File.Create(destPath); s.CopyTo(d); } } catch (Exception ex) { Dg.Warn("main", ex); }
             }
         }
         SeedAsset("shell/home/profile.ps1",  System.IO.Path.Combine(this.FilesDir!.AbsolutePath, "profile.ps1"));
@@ -605,7 +599,7 @@ public class MainActivity : Activity
         int density = (int)metrics.DensityDpi;
         
         _imageReader = Android.Media.ImageReader.NewInstance(width, height, (Android.Graphics.ImageFormatType)1, 2); // 1 = PixelFormat.RGBA_8888
-        _imageReader.SetOnImageAvailableListener(new ImageAvailableListener(_projectionServer), null);
+        _imageReader.SetOnImageAvailableListener(new ImageAvailableListener(), null);
 
         _virtualDisplay = _mediaProjection!.CreateVirtualDisplay("ScreenCapture",
             width, height, density,
@@ -625,14 +619,29 @@ public class MainActivity : Activity
                         CreateSession(tabId);
                     }
                     else if (type == "input" || type == "resize" || type == "text") {
-                        new PwshBridge(this).SendInput(tabId, json);
+                        try {
+                            var ev = System.Text.Json.JsonSerializer.Deserialize<ReactInputEvent>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (ev?.type == "resize" && Sessions.TryGetValue(tabId, out var sr)) { lock(sr.VtLock) { sr.VtController.ResizeView(ev.cols, ev.rows); sr.VtController.ClearChanges(); } }
+                        } catch (Exception ex) { Subsystem.Dg.Warn("input", ex); }
                     }
                 }
             }
-        } catch { }
+        } catch (Exception ex) { Subsystem.Dg.Warn("input-route", ex); }
     }
 
-    public void BroadcastToProjection(long tabId, byte[] rawAnsiBytes) { _projectionServer?.Broadcast(tabId, rawAnsiBytes); }
+
+    // Share text out of the device via the system chooser (ACTION_SEND).
+    // Called by the Invoke-Share cmdlet which is dispatched through SubsystemDownloadListener.
+    public void ShareText(string title, string text, string mime) {
+        try {
+            var send = new Android.Content.Intent(Android.Content.Intent.ActionSend);
+            send.PutExtra(Android.Content.Intent.ExtraText, text);
+            send.SetType(string.IsNullOrEmpty(mime) ? "text/plain" : mime);
+            var chooser = Android.Content.Intent.CreateChooser(send, title ?? "Share");
+            chooser!.AddFlags(Android.Content.ActivityFlags.NewTask);
+            StartActivity(chooser);
+        } catch (Exception ex) { Subsystem.Dg.Warn("share", ex); }
+    }
 
     public void NotifyReactReady() {
         IsReactReady = true;
@@ -645,7 +654,7 @@ public class MainActivity : Activity
     // Callable from JS (PwshBridge.reloadShell) and from the runspace (Invoke-ShellReload), so the
     // agent can switch doors herself: Register-Capability the new file, then reload.
     public void ReloadShell() {
-        RunOnUiThread(() => { try { _webView?.Reload(); } catch { } });
+        RunOnUiThread(() => { try { _webView?.Reload(); } catch (Exception ex) { Dg.Warn("main", ex); } });
     }
 
     // The shared TTS engine (built-in, offline — airplane-safe). Lazily initialized on first Speak so
@@ -662,180 +671,8 @@ public class MainActivity : Activity
         } catch (System.Exception ex) { Subsystem.Dg.Warn("tts", ex); }
     }
 
-    // Web server is app-lifetime (started in OnCreate). Idempotent.
-    public void EnsureWebServer() {
-        if (_projectionServer == null) {
-            _projectionServer = new ProjectionServer(this);
-            _projectionServer.Start(8080);
-        }
-    }
-
-    // Screen projection REUSES the already-running web server; it must not own its lifecycle.
-    public void StartProjection() => EnsureWebServer();
-
-    // Intentionally does NOT tear down the web server — the backend must survive a
-    // screen-mirror stop. (Terminating it here is what made the frontend drop after toggling cast.)
+    public void StartProjection() { }
     public void StopProjection() { }
-}
-
-public class PwshBridge : Java.Lang.Object {
-    private readonly MainActivity _activity;
-    public PwshBridge(MainActivity activity) { _activity = activity; }
-
-    // The in-process loopback capability token. The WebView that owns this bridge is trusted; a foreign app
-    // cannot reach AndroidBridge, so the token never leaves the process here. The shell sends it as the
-    // X-Subsystem-Cap header / ?cap= query on the command routes (lib/api.js). Locks loopback against other apps.
-    [Export("getCap")] [JavascriptInterface] public string GetCap() => ProjectionServer.CapToken;
-
-    [Export("createSession")] [JavascriptInterface] public void CreateSession(long tabId) { _activity.CreateSession(tabId); }
-    [Export("closeSession")]  [JavascriptInterface] public void CloseSession(long tabId)  { _activity.CloseSession(tabId); }
-    [Export("invokeCommand")] [JavascriptInterface] public void InvokeCommand(long tabId, string cmd) { if (_activity.Sessions.TryGetValue(tabId, out var s)) s.ExecuteCommand(cmd); }
-    [Export("sendRawInput")]  [JavascriptInterface] public void SendRawInput(long tabId, string payload) { if (_activity.Sessions.TryGetValue(tabId, out var s)) s.RouteRawInput(payload); }
-    [Export("sendInput")]     [JavascriptInterface] public void SendInput(long tabId, string json) {
-        try {
-            var ev = JsonSerializer.Deserialize<ReactInputEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (ev?.type == "resize" && _activity.Sessions.TryGetValue(tabId, out var sr)) { lock(sr.VtLock) { sr.VtController.ResizeView(ev.cols, ev.rows); sr.VtController.ClearChanges(); } }
-            else if (ev?.type == "text" && !string.IsNullOrEmpty(ev.text) && _activity.Sessions.TryGetValue(tabId, out var st)) {
-                st.RouteRawInput(ev.text);
-            }
-            else if (ev?.type == "input" && !string.IsNullOrEmpty(ev.key) && _activity.Sessions.TryGetValue(tabId, out var si)) {
-                ConsoleKey consoleKey = ev.key switch { "Enter" => ConsoleKey.Enter, "Backspace" => ConsoleKey.Backspace, "Escape" => ConsoleKey.Escape, "Tab" => ConsoleKey.Tab, "ArrowUp" => ConsoleKey.UpArrow, "ArrowDown" => ConsoleKey.DownArrow, "ArrowLeft" => ConsoleKey.LeftArrow, "ArrowRight" => ConsoleKey.RightArrow, _ => (ConsoleKey)0 };
-                char ch = ev.key.Length == 1 ? ev.key[0] : '\0';
-                if (consoleKey == ConsoleKey.Enter) ch = '\r'; else if (consoleKey == ConsoleKey.Backspace) ch = '\b'; else if (consoleKey == ConsoleKey.Escape) ch = '\x1b'; else if (consoleKey == ConsoleKey.Tab) ch = '\t';
-                ((AndroidSubsystemRawUserInterface)si.Host.UI.RawUI).InputQueue.Add(new KeyInfo((int)consoleKey, ch, (ControlKeyStates)0, true));
-            }
-        } catch { }
-    }
-    [Export("notifyReady")]     [JavascriptInterface] public void NotifyReady()     { _activity.NotifyReactReady(); }
-    [Export("reloadShell")]     [JavascriptInterface] public void ReloadShell()     { _activity.ReloadShell(); }
-
-    // Chat head: show/hide the system-overlay bubble (FloatingChatManager via SubsystemService).
-    // agent.obp's collapse composes showChatHead() + minimizeApp() — Broker keeps floating over
-    // every app; tapping the head reopens the app ONTO the agent presenter (open=agent extra).
-    [Export("showChatHead")] [JavascriptInterface] public void ShowChatHead() {
-        try {
-            if (!Android.Provider.Settings.CanDrawOverlays(_activity)) {
-                _activity.StartActivity(new Android.Content.Intent(
-                    Android.Provider.Settings.ActionManageOverlayPermission,
-                    Android.Net.Uri.Parse("package:" + _activity.PackageName)));
-                return;
-            }
-            var i = new Android.Content.Intent(_activity, typeof(SubsystemService));
-            i.SetAction(SubsystemService.ActionShowBubble);
-            _activity.StartService(i);
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "showChatHead: " + ex.Message); }
-    }
-    [Export("hideChatHead")] [JavascriptInterface] public void HideChatHead() {
-        try {
-            var i = new Android.Content.Intent(_activity, typeof(SubsystemService));
-            i.SetAction(SubsystemService.ActionHideBubble);
-            _activity.StartService(i);
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "hideChatHead: " + ex.Message); }
-    }
-    [Export("minimizeApp")]     [JavascriptInterface] public void MinimizeApp()     { _activity.MoveTaskToBack(true); }
-    [Export("setStatusBarHidden")] [JavascriptInterface] public void SetStatusBarHidden(bool hidden) { _activity.SetStatusBarHidden(hidden); }
-    // Native background blur-behind for the assist popup / system mica (API 31+). radiusPx<=0 clears it.
-    [Export("setWindowBlur")] [JavascriptInterface] public void SetWindowBlur(int radiusPx) { _activity.SetWindowBlur(radiusPx); }
-    [Export("startProjection")] [JavascriptInterface] public void StartProjection() { _activity.StartProjection(); }
-    [Export("startScreenCapture")] [JavascriptInterface] public void StartScreenCapture() { _activity.StartScreenCapture(); }
-    [Export("exitApp")]         [JavascriptInterface] public void ExitApp()         { _activity.FinishAffinity(); Java.Lang.JavaSystem.Exit(0); }
-    
-    [Export("checkPermission")] [JavascriptInterface] public bool CheckPermission(string permission) {
-        return _activity.CheckSelfPermission(permission) == Android.Content.PM.Permission.Granted;
-    }
-
-    // All-files access is an APPOP, not a runtime permission — CheckSelfPermission can NEVER report
-    // it granted (the "always red" bug). The real check is Environment.IsExternalStorageManager and
-    // the real request is the ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION settings screen.
-    [Export("isAllFilesAccess")] [JavascriptInterface] public bool IsAllFilesAccess() {
-        try { return Android.OS.Environment.IsExternalStorageManager; } catch { return false; }
-    }
-
-    [Export("requestAllFilesAccess")] [JavascriptInterface] public void RequestAllFilesAccess() {
-        try {
-            var uri = Android.Net.Uri.Parse("package:" + _activity.PackageName);
-            var intent = new Android.Content.Intent(
-                Android.Provider.Settings.ActionManageAppAllFilesAccessPermission, uri);
-            _activity.StartActivity(intent);
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "requestAllFilesAccess: " + ex.Message); }
-    }
-
-    // Share OUT of the cage: hand text/JSON (Adaptive Cards, command output, file paths) to any
-    // other provider via the system chooser. The renderer holds no authority — it asks, the host shares.
-    [Export("shareText")] [JavascriptInterface] public void ShareText(string title, string text, string mime) {
-        try {
-            var send = new Android.Content.Intent(Android.Content.Intent.ActionSend);
-            send.SetType(string.IsNullOrEmpty(mime) ? "text/plain" : mime);
-            send.PutExtra(Android.Content.Intent.ExtraText, text ?? "");
-            if (!string.IsNullOrEmpty(title)) send.PutExtra(Android.Content.Intent.ExtraTitle, title);
-            var chooser = Android.Content.Intent.CreateChooser(send, title ?? "Share");
-            chooser!.AddFlags(Android.Content.ActivityFlags.NewTask);
-            _activity.StartActivity(chooser);
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "shareText: " + ex.Message); }
-    }
-    
-    // Request an OS runtime permission at use-time (the WebView's getUserMedia needs the *app* to hold
-    // RECORD_AUDIO first). Returns true if already granted (proceed now); false means a request was
-    // dispatched and the decision arrives at window.__onPermissionResult(name, granted) — await that.
-    [Export("requestPermission")] [JavascriptInterface] public bool RequestPermission(string permission) {
-        return _activity.RequestRuntimePermission(permission);
-    }
-    
-    [Export("openAccessibilitySettings")] [JavascriptInterface] public void OpenAccessibilitySettings() {
-        _activity.StartActivity(new Android.Content.Intent(Android.Provider.Settings.ActionAccessibilitySettings));
-    }
-    
-    [Export("isAccessibilityEnabled")] [JavascriptInterface] public bool IsAccessibilityEnabled() {
-        return _activity.IsAccessibilityEnabled();
-    }
-
-    // Destroyable permissions — the owner's "take it back" with teeth. revokeSelfPermissionOnKill (API 33+;
-    // the device is API 36) schedules the runtime permission to be dropped when the app's process next dies,
-    // with no trip to system Settings. The Subsystem-side authority dies IMMEDIATELY anyway (the presenter
-    // also flips \Capability\Consent\* off via Set-Capability, and the possession gate denies at once); this
-    // releases the OS grant too. Returns true if the self-revoke was scheduled, false if the platform is too
-    // old (caller then falls back to openAppSettings).
-    [Export("revokePermission")] [JavascriptInterface] public bool RevokePermission(string permission) {
-        try {
-            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.Tiramisu) {
-                _activity.RevokeSelfPermissionOnKill(permission);
-                return true;
-            }
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "revokePermission: " + ex.Message); }
-        return false;
-    }
-
-    // All-files access (an appop) and the Accessibility grant are not runtime permissions, so they cannot be
-    // self-revoked — open the app's own system settings page where the owner turns them off by hand.
-    [Export("openAppSettings")] [JavascriptInterface] public void OpenAppSettings() {
-        try {
-            var uri = Android.Net.Uri.Parse("package:" + _activity.PackageName);
-            _activity.StartActivity(new Android.Content.Intent(
-                Android.Provider.Settings.ActionApplicationDetailsSettings, uri));
-        } catch (System.Exception ex) { Subsystem.Dg.Log("bridge", "openAppSettings: " + ex.Message); }
-    }
-
-    [Export("setWebcast")] [JavascriptInterface] public void SetWebcast(bool enable) {
-        if (enable) _activity.StartProjection();
-        else _activity.StopProjection();
-    }
-
-    [Export("getAutoListen")] [JavascriptInterface] public bool GetAutoListen() {
-        return AgentSettings.AutoListenAssist(_activity);
-    }
-
-    [Export("setAutoListen")] [JavascriptInterface] public void SetAutoListen(bool enable) {
-        AgentSettings.SetAutoListenAssist(_activity, enable);
-    }
-
-    [Export("getScripts")]      [JavascriptInterface] public string GetScripts() {
-        try {
-            // Embedded catalog (ObpHost), leaf names only — same contract the asset listing had.
-            var files = ObpHost.Enumerate("shell/scripts")
-                .Select(p => p.Substring(p.LastIndexOf('/') + 1)).ToArray();
-            return JsonSerializer.Serialize(files);
-        } catch { return "[]"; }
-    }
 }
 
 public class TerminalBackCallback : Java.Lang.Object, IOnBackInvokedCallback {
@@ -848,34 +685,74 @@ public class TerminalBackCallback : Java.Lang.Object, IOnBackInvokedCallback {
     }
 }
 
+// JS→host data channel.  download.js triggers a standard browser download with a data: URL;
+// the WebView never opens a socket — this listener catches it in-process before anything hits
+// the network stack.  No JNI, no custom scheme, no vom, no open ports.
+public class SubsystemDownloadListener : Java.Lang.Object, Android.Webkit.IDownloadListener {
+    public void OnDownloadStart(string url, string userAgent, string contentDisposition, string mimeType, long contentLength) {
+        try {
+            if (url.StartsWith("data:")) {
+                int comma = url.IndexOf(',');
+                if (comma < 0) return;
+                string header = url.Substring(5, comma - 5);   // e.g. "text/plain;base64"
+                string data   = url.Substring(comma + 1);
+                bool isBase64 = header.EndsWith(";base64", StringComparison.OrdinalIgnoreCase);
+                string text   = isBase64
+                    ? System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(data))
+                    : Uri.UnescapeDataString(data);
+                // Hand the decoded text to the runspace as a share action.
+                _ = Subsystem.SubsystemApi.ExecuteCommandAsJson($"Invoke-Share -Text '{text.Replace("'", "''")}'");
+            }
+        } catch (Exception ex) {
+            Subsystem.Dg.Warn("download", ex);
+        }
+    }
+}
+
 public class SubsystemWebViewClient : WebViewClient {
     // The shell document is up — flush any deep-link the launching intent carried (open=agent from
     // the chat head). The flush is a no-op when nothing is pending.
     public override void OnPageFinished(WebView? view, string? url) {
         base.OnPageFinished(view, url);
-        try { MainActivity.Instance?.FlushPendingOpen(); } catch { }
+        try { MainActivity.Instance?.FlushPendingOpen(); } catch (Exception ex) { Dg.Warn("main", ex); }
+    }
+
+    public static string MimeFor(string path) {
+        if (path.EndsWith(".html") || path.EndsWith(".obp")) return "text/html";
+        if (path.EndsWith(".js")) return "application/javascript";
+        if (path.EndsWith(".css")) return "text/css";
+        if (path.EndsWith(".png")) return "image/png";
+        if (path.EndsWith(".svg")) return "image/svg+xml";
+        if (path.EndsWith(".json")) return "application/json";
+        return "application/octet-stream";
     }
 
     public override WebResourceResponse? ShouldInterceptRequest(WebView? view, IWebResourceRequest? request) {
-        if (request?.Url?.Scheme?.ToLower() == "vom") {
-            var handleName = request.Url.Host;
-            if (!string.IsNullOrEmpty(handleName)) {
-                var bytes = VomInterop.GetTextureBytes(handleName);
-                if (bytes != null && bytes.Length > 0) {
-                    var ms = new System.IO.MemoryStream(bytes);
-                    var response = new WebResourceResponse("application/octet-stream", "UTF-8", ms);
-                    // Add CORS headers so local WebView can fetch it
-                    response.ResponseHeaders = new System.Collections.Generic.Dictionary<string, string> {
-                        { "Access-Control-Allow-Origin", "*" }
-                    };
-                    return response;
+        var url = request?.Url;
+        if (url == null) return null;
+        
+        string host = url.Host ?? "";
+        if (host.Equals("shell", StringComparison.OrdinalIgnoreCase)) {
+            string path = url.Path ?? "/";
+            if (path == "/") path = "/shell.obp";
+
+            try {
+                string resourcePath = "shell" + path;
+                var stream = ObpHost.OpenRead(resourcePath);
+                if (stream != null) {
+                    string mime = MimeFor(path);
+                    return new WebResourceResponse(mime, "UTF-8", stream);
                 }
+            } catch (Exception ex) {
+                Subsystem.Dg.Warn("webview-intercept", ex);
             }
+            return new WebResourceResponse("text/plain", "UTF-8", new System.IO.MemoryStream());
         }
+
         return base.ShouldInterceptRequest(view, request);
     }
 
-    // HARD RULE: V8 can NEVER worm its way online. Allow only the local app origin + vom:// + benign
+    // HARD RULE: V8 can NEVER worm its way online. Allow only the local app origin + benign
     // schemes; swallow everything else. This blocks CDN/phishing/exfiltration — the renderer has zero
     // authority AND zero reach (a leaf, offline-first).
     public override bool ShouldOverrideUrlLoading(WebView? view, IWebResourceRequest? request) {
@@ -883,36 +760,16 @@ public class SubsystemWebViewClient : WebViewClient {
         if (url == null) return false;
         string scheme = (url.Scheme ?? "").ToLowerInvariant();
         string host   = (url.Host ?? "").ToLowerInvariant();
-        bool localHttp = (scheme == "http" || scheme == "https") && (host == "127.0.0.1" || host == "localhost");
-        bool allowed = localHttp || scheme == "vom" || scheme == "file" || scheme == "data" || scheme == "about" || scheme == "blob";
+        bool localHttp = (scheme == "http" || scheme == "https") && (host == "127.0.0.1" || host == "localhost" || host == "shell");
+        bool allowed = localHttp || scheme == "file" || scheme == "data" || scheme == "about" || scheme == "blob";
         if (allowed) return false;                              // let the WebView load it
         Subsystem.Dg.Log("v8", $"blocked off-origin navigation: {url}");
         return true;                                           // swallow — never go online
     }
 }
 
-public class VomBridgeJSInterface : Java.Lang.Object {
-    private readonly MainActivity _activity;
-    public VomBridgeJSInterface(MainActivity activity) { _activity = activity; }
-
-    [Export("sendMessage")] [JavascriptInterface] 
-    public void SendMessage(string payload) {
-        Android.Util.Log.Debug("SubsystemVOM", "Received via JS Interface: " + payload);
-    }
-
-    [Export("apiCommand")] [JavascriptInterface] 
-    public string ApiCommand(string command) {
-        try {
-            return SubsystemApi.ExecuteCommandAsJson(command).GetAwaiter().GetResult();
-        } catch (System.Exception ex) {
-            return $"{{\"error\": \"{ex.Message}\"}}";
-        }
-    }
-}
-
 public class ImageAvailableListener : Java.Lang.Object, Android.Media.ImageReader.IOnImageAvailableListener {
-    private Subsystem.ProjectionServer? _server;
-    public ImageAvailableListener(Subsystem.ProjectionServer? server) { _server = server; }
+    public ImageAvailableListener() { }
     public void OnImageAvailable(Android.Media.ImageReader? reader) {
         try {
             using var image = reader?.AcquireLatestImage();
@@ -929,12 +786,37 @@ public class ImageAvailableListener : Java.Lang.Object, Android.Media.ImageReade
             using var ms = new System.IO.MemoryStream();
             using var cropped = Android.Graphics.Bitmap.CreateBitmap(bitmap, 0, 0, image.Width, image.Height);
             cropped.Compress(Android.Graphics.Bitmap.CompressFormat.Jpeg!, 30, ms);
-            _server?.BroadcastRdpFrame(ms.ToArray());
-        } catch { }
+            // ProjectionServer.cs deleted, broadcast is skipped
+        } catch (Exception ex) { Dg.Warn("main", ex); }
     }
 }
 
 public class CustomWebChromeClient : WebChromeClient {
+    // Constructor takes Context (not MainActivity) so this class has no hard coupling to the
+    // activity. When MainActivity is retired, move this file to Host/ and wire to whatever
+    // replaces the activity — the interop contract stays identical.
+    private readonly Android.Content.Context _ctx;
+    public CustomWebChromeClient(Android.Content.Context ctx) { _ctx = ctx; }
+
+    // ss: prompt interception — the unified JS→host IPC channel.
+    // JS calls: const result = prompt('ss:CmdletName -Param value')
+    // Host intercepts, dispatches through SubsystemApi (same pipe as /api/exec), returns JSON.
+    // Zero JNI, zero network, zero ACW stubs. Fully in-process.
+    public override bool OnJsPrompt(WebView? view, string? url, string? message, string? defaultValue, JsPromptResult? result) {
+        if (message != null && message.StartsWith("ss:")) {
+            try {
+                string cmd = message.Substring(3);
+                string response = Subsystem.SubsystemApi.ExecuteCommandAsJson(cmd).GetAwaiter().GetResult();
+                result!.Confirm(response);
+            } catch (Exception ex) {
+                Subsystem.Dg.Warn("webview", ex);
+                result!.Confirm("{\"error\":\"" + ex.Message.Replace("\"", "'") + "\"}");
+            }
+            return true;
+        }
+        return base.OnJsPrompt(view, url, message, defaultValue, result);
+    }
+
     // Media-capture grant for the shell. The WebView only ever loads the loopback origin
     // (SubsystemWebViewClient blocks every off-origin navigation), so a capture request can only
     // come from our own presenters — granting the mic here lets the chat's voice-in (getUserMedia)
@@ -945,7 +827,7 @@ public class CustomWebChromeClient : WebChromeClient {
     }
 
     public override bool OnJsConfirm(WebView? view, string? url, string? message, JsResult? result) {
-        new AlertDialog.Builder(view!.Context!)
+        new AlertDialog.Builder(_ctx)
             .SetTitle("Subsystem")
             .SetMessage(message)
             .SetPositiveButton(Android.Resource.String.Ok, (s, e) => result!.Confirm())
@@ -956,7 +838,7 @@ public class CustomWebChromeClient : WebChromeClient {
     }
 
     public override bool OnJsAlert(WebView? view, string? url, string? message, JsResult? result) {
-        new AlertDialog.Builder(view!.Context!)
+        new AlertDialog.Builder(_ctx)
             .SetTitle("Subsystem")
             .SetMessage(message)
             .SetPositiveButton(Android.Resource.String.Ok, (s, e) => result!.Confirm())

@@ -368,7 +368,7 @@
         const inputField = document.getElementById('cmd-input');
         const sendBtn = document.getElementById('send-btn');
         let wsApi = null;
-        let isLocalBridge = !!window.AndroidBridge;
+        let isLocalBridge = !!window.__ssCap;
 
         // 'Speak replies' (avatar menu): default OFF; the value lives in the config store
         // (lib/store — backend truth, localStorage cache), not in this presenter.
@@ -391,7 +391,7 @@
                 onOpen: () => {
                     setStatus('ok', 'Connected');
                     apiSend({ type: 'sessions' });
-                    if (isLocalBridge) window.AndroidBridge.notifyReady();
+                    if (isLocalBridge) fetch('/api/exec', { method: 'POST', headers: { 'X-Subsystem-Cap': window.__ssCap }, body: 'Set-ShellReady' });
                 },
                 onMessage: (data) => handleFrame(data),
                 onReconnecting: () => { setStatus('err', 'Reconnecting…'); }
@@ -768,8 +768,11 @@
         // (open=agent). In dev/browser (no bridge): the in-page DOM head below. Invoked from the
         // avatar's context menu (the old dedicated header button sat under the shell's red-X).
         function collapseToHead() {
-            if (window.AndroidBridge && window.AndroidBridge.showChatHead) {
-                try { window.AndroidBridge.showChatHead(); window.AndroidBridge.minimizeApp(); return; } catch (e) {}
+            if (window.__ssCap) {
+                try {
+                    fetch('/api/exec', { method: 'POST', headers: { 'X-Subsystem-Cap': window.__ssCap }, body: 'Set-ChatHead -Show; Minimize-App' });
+                    return;
+                } catch (e) {}
             }
             document.body.classList.add('collapsed');
         }

@@ -47,11 +47,11 @@ public class SpeechOutput : Java.Lang.Object, TextToSpeech.IOnInitListener
         _tts.Speak(text, flush ? QueueMode.Flush : QueueMode.Add, null, uttId);
     }
 
-    public void Stop() { try { _tts?.Stop(); } catch { } }
+    public void Stop() { try { _tts?.Stop(); } catch (Exception ex) { Dg.Warn("speech", ex); } }
 
     protected override void Dispose(bool disposing)
     {
-        try { _tts?.Stop(); _tts?.Shutdown(); } catch { }
+        try { _tts?.Stop(); _tts?.Shutdown(); } catch (Exception ex) { Dg.Warn("speech", ex); }
         _tts = null;
         base.Dispose(disposing);
     }

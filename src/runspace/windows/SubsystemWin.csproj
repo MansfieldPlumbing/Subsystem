@@ -52,6 +52,13 @@
   <ItemGroup>
     <Compile Include="..\Vom\*.cs" LinkBase="Vom" />
     <Compile Include="..\Cm\*.cs" LinkBase="Cm" />
+    <Compile Include="..\Cm\EnvironmentVariables\*.cs" LinkBase="Cm\EnvironmentVariables" />
+    <Compile Include="..\Remedy\*.cs" LinkBase="Remedy" />
+    <!-- Sql: SQLite wrapper used by Remedy/RequestHive. No Android deps. -->
+    <Compile Include="..\Host\Sql.cs" LinkBase="Host" />
+    <!-- ObpHost: serves the embedded shell/* resources from assembly RAM. Pure System.*; no Android. -->
+    <Compile Include="..\Host\ObpHost.cs" LinkBase="Host" />
+    <Compile Include="..\Host\PsrpSeam.cs" LinkBase="Host" />
     <Compile Include="..\Pwsh\VomDrive.cs" LinkBase="Pwsh" />
     <!-- VomInterop: the native Float32-region surface (256-aligned, row-major) — pure Vom + Marshal, no
          Android. The producer side of the WebView DirectPort adapter publishes/reads regions through it. -->
@@ -72,6 +79,7 @@
          floor), GlyphAtlas (MSDF rasterizer), CellShell (multi-session pwsh), Tui (namespace view), Repl
          (the flip). One module compiled into BOTH heads; only the presenter branches per head. -->
     <Compile Include="..\..\shell\cell\*.cs" LinkBase="shell\cell" />
+    <Compile Include="..\..\shell\platform\Windows\*.cs" LinkBase="shell\platform\Windows" />
     <!-- Subsystem.Dpx — dp-onnx folded in-proc (CRQ143 P2 + CRQ164), ambient VOM-facing math, no boundary
          (it moved out from under src/native/dp-onnx, which is for actual native/foreign boundaries). A
          DIRECTORY glob, not an enumerated file list — the enumerated version already went stale once
@@ -136,6 +144,10 @@
     <!-- Self-description payload: ONLY the contract catalog (data, gated, can't rot) rides inside the
          binary. The architecture MAP is NOT embedded: the live map flag on `ss describe` re-derives it
          from the source tree (LiveMap.cs) every call, so a dropped ss.exe describes CURRENT source. -->
+    <!-- Embed shell/* presenters, CSS, JS, OBP files so ObpHost finds them in-process in RAM -->
+    <EmbeddedResource Include="..\..\shell\**\*">
+      <LogicalName>shell/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\..\analyzers\SystemCatalog.json"><LogicalName>SystemCatalog.json</LogicalName></EmbeddedResource>
     <!-- ss carries its OWN source: build-ss.ps1 dumps the repo (♦/♠ CodeContext) to ss-source.dump just
          before publish; `ss extract` writes it back out. A dropped ss.exe reconstitutes its own code.
@@ -146,7 +158,7 @@
          blind rebuild (no repo) still satisfies <ApplicationIcon> above and produces an icon-bearing exe. -->
     <EmbeddedResource Include="app.ico" Condition="Exists('app.ico')"><LogicalName>app.ico</LogicalName></EmbeddedResource>
     <!-- Embed the git-versioned request backlog -->
-    <EmbeddedResource Include="..\Cm\requests.json" Condition="Exists('..\Cm\requests.json')"><LogicalName>requests.json</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="..\Remedy\requests.json" Condition="Exists('..\Remedy\requests.json')"><LogicalName>requests.json</LogicalName></EmbeddedResource>
     <!-- Embed the PII-clean canon (CONTRACT + COLD-START) so `ss onboard` projects doctrine even on a clone
          where docs/ is gitignored and absent. NOT loose markdown in the repo — the binary carries it. -->
     <EmbeddedResource Include="..\..\..\docs\CONTRACT.md" Condition="Exists('..\..\..\docs\CONTRACT.md')"><LogicalName>CONTRACT.md</LogicalName></EmbeddedResource>
@@ -157,6 +169,15 @@
     </EmbeddedResource>
     <EmbeddedResource Include="..\..\..\Registry\Feedback\in-memoriam-dedication.md" Condition="Exists('..\..\..\Registry\Feedback\in-memoriam-dedication.md')">
       <LogicalName>Registry/Feedback/in-memoriam-dedication.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- Shell resources: same recursive glob as the Android head (Subsystem.csproj).
+       Everything under src/shell/** embeds automatically with a path-preserving LogicalName.
+       Drop a file in = ObpHost finds it = http://shell/<path> serves it. No manual registration. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\shell\**\*" Exclude="..\..\shell\cell\**\*.cs;..\..\shell\platform\**\*.cs">
+      <LogicalName>shell/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

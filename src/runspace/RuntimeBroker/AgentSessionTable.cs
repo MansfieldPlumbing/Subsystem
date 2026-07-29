@@ -62,7 +62,7 @@ namespace Subsystem
         {
             var rec = Cm.Cm.Get(Prefix + id);
             if (rec?.ManifestJson == null) return null;
-            try { return JsonSerializer.Deserialize<Session>(rec.ManifestJson, Opt); } catch { return null; }
+            try { return JsonSerializer.Deserialize<Session>(rec.ManifestJson, Opt); } catch (Exception ex) { Dg.Log("session", ex.Message); return null; }
         }
 
         // The session as its raw manifest JSON (what the UI loads to replay a transcript).
@@ -97,7 +97,7 @@ namespace Subsystem
                     if (s == null) continue;
                     list.Add((s.Updated, new AgentChatSummary(s.Id, s.Title, s.Updated, s.Turns.Count)));
                 }
-                catch { }
+                catch (Exception ex) { Dg.Log("session", ex.Message); }
             }
             return list.OrderByDescending(x => x.updated, StringComparer.Ordinal).Select(x => x.row).ToArray();
         }

@@ -27,7 +27,7 @@ public static class Program
         // launch just prints help.
         if (args.Length == 0)
         {
-            if (Interactive.IsDoubleClick()) { Interactive.HideOwnConsole(); return Gateway.Run(Array.Empty<string>()); }
+            if (Interactive.IsDoubleClick()) { Interactive.HideOwnConsole(); return SystemTray.Run(Array.Empty<string>()); }
             return Help.Print();
         }
         var mode = args[0].ToLowerInvariant();
@@ -49,7 +49,8 @@ public static class Program
             "surface" or "-surface" or "--surface"                           => Surface.Run(args[1..]),
             "camera" or "-camera" or "--camera"                              => Camera.Run(args[1..]),
             "view" or "-view" or "--view"                                    => View.Run(args[1..]),
-            "ui" or "-ui" or "--ui"                                          => WinShellUi.Run(args[1..]),
+            "shell" or "-shell" or "--shell"                                 => WinForms.Open("http" + "://shell/shell.obp", args[1..]),
+            "bundle-audit"                                                   => BundleAuditor.Run(),
             "mcp" or "-mcp" or "--mcp"                                       => Mcp.Run(args[1..]),
             "ble-scan"                                                       => DpBleScan.Run(args[1..]),
             "git"                                                            => Git.Run(args[1..]),
@@ -62,7 +63,7 @@ public static class Program
             "tui"                                                            => Subsystem.Shell.Cell.Tui.Run(args[1..]),
             "cell"                                                           => Subsystem.Shell.Cell.CellShell.Run(args[1..], Shim.LoadProjectCmdlets),
             "repl"                                                           => Subsystem.Shell.Cell.Repl.Run(args[1..], Shim.LoadProjectCmdlets),
-            "gateway" or "tray"                                             => Gateway.Run(args[1..]),
+            "gateway" or "tray"                                             => SystemTray.Run(args[1..]),
             _                                                                => Shim.Run(args),
         };
     }

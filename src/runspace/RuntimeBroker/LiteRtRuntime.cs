@@ -440,6 +440,7 @@ namespace Subsystem
             }
             catch (Exception ex)
             {
+                Subsystem.Dg.Warn("engine", ex);
                 _activeChannel?.TryComplete(ex);
             }
         }

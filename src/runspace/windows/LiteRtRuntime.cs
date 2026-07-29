@@ -40,8 +40,9 @@ namespace Subsystem
                 // Register resolver to load companion DLLs from temp/dev directories before litert-lm.dll
                 NativeLibrary.SetDllImportResolver(typeof(LiteRtRuntime).Assembly, ResolveDll);
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
+                Dg.Warn("litert", ex);
                 // Already registered in this process
             }
         }
@@ -194,7 +195,7 @@ namespace Subsystem
                         NativeMethods.litert_lm_conversation_cancel_process(_conversationHandle);
                     }
                 }
-                catch { }
+                catch (Exception ex) { Dg.Warn("litert", ex); }
             });
 
             _activeChannel = channel.Writer;
@@ -289,8 +290,9 @@ namespace Subsystem
                     client.OnChunk(chunk, isFinal, errorMsg);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Subsystem.Dg.Warn("engine", ex);
                 // NEVER let a managed exception cross the native boundary
             }
         }
@@ -341,7 +343,7 @@ namespace Subsystem
                 {
                     NativeLibrary.Load(fullPath);
                 }
-                catch { }
+                catch (Exception ex) { Dg.Warn("litert", ex); }
             }
         }
 
@@ -443,7 +445,7 @@ namespace Subsystem
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Dg.Warn("litert", ex); }
                 return raw;
             }
         }

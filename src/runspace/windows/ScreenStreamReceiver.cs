@@ -99,7 +99,9 @@ internal sealed class ScreenStreamReceiver : IDisposable
             }
 
             // 2. Start binary reader thread
-            _readTask = Task.Run(() => ReadLoopAsync(_adbProcess.StandardOutput.BaseStream, _cts.Token), _cts.Token);
+            var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\ScreenStreamReceiver");
+            Subsystem.Vom.Vom.Spawn(owner, "ReadLoop", _ => ReadLoopAsync(_adbProcess.StandardOutput.BaseStream, _cts.Token).GetAwaiter().GetResult());
+            _readTask = Task.CompletedTask;
             return true;
         }
         catch (Exception ex)
@@ -270,7 +272,7 @@ internal sealed class ScreenStreamReceiver : IDisposable
                 _adbProcess.Kill();
             }
         }
-        catch {}
+        catch (Exception ex) { Dg.Warn("screen", ex); }
         _adbProcess?.Dispose();
         _adbProcess = null;
         _stdinStream = null;

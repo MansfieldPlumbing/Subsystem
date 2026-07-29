@@ -358,8 +358,8 @@ public unsafe class PeLoader
             string localPath = path;
             if (path.StartsWith("\\Device\\Android\\FileSystem\\", StringComparison.OrdinalIgnoreCase))
             {
-                string subPath = path.Substring("\\Device\\Android\\FileSystem\\".Length).Replace('\\', '/');
-                string home = Environment.GetEnvironmentVariable("HOME") ?? "/data/local/tmp";
+                string defaultTmp = Path.Combine(Path.DirectorySeparatorChar.ToString(), "data", "local", "tmp");
+                string home = Environment.GetEnvironmentVariable("HOME") ?? defaultTmp;
                 localPath = Path.Combine(home, subPath);
             }
             else if (path.Contains("\\"))

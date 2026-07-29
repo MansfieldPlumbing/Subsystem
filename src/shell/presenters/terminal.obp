@@ -186,12 +186,89 @@
             }
         }
 
-        // The ONE outbound path — typed text, d-pad keys, and pastes all arrive via term.onData.
+        let localLineBuf = '';
+        let localHistory = [];
+        let historyIdx = -1;
+        const LOCAL_PROMPT = '\x1b[32mPS>\x1b[0m ';
+        term.write(LOCAL_PROMPT);
+
+        async function runLocalLine() {
+            const script = localLineBuf; 
+            if (script.trim()) { localHistory.push(script); historyIdx = localHistory.length; }
+            localLineBuf = ''; term.write('\r\n');
+            if (!script.trim()) { term.write(LOCAL_PROMPT); return; }
+            try {
+                const res = await fetch('/psrp/run', {
+                    method: 'POST',
+                    headers: { 'X-Subsystem-Cap': (window.AndroidBridge?.getCap?.() || window.__ssCap || '') },
+                    body: JSON.stringify({ script })
+                });
+                if (!res.ok) throw new Error('HTTP error ' + res.status);
+                const json = await res.json();
+                if (json.error) throw new Error(json.error);
+                if (json.text) term.write(json.text.replace(/\r?\n/g, '\r\n') + '\r\n');
+            } catch (err) {
+                term.write('\x1b[31m' + String(err.message || err) + '\x1b[0m\r\n');
+            }
+            term.write(LOCAL_PROMPT);
+        }
+
+        let inEsc = false;
         term.onData(data => {
-            if (mode === 'local') ws.send(JSON.stringify({ type: 'text', tabId, text: data }));
-            else feedPsrpEditor(data);
+            if (mode === 'local') {
+                if (ws && ws.ws && ws.ws.readyState === 1) {
+                    ws.send(JSON.stringify({ type: 'text', tabId, text: data }));
+                } else {
+                    for (let i = 0; i < data.length; i++) {
+                        const ch = data[i];
+                        if (inEsc) {
+                            if (ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch === '~') {
+                                inEsc = false;
+                                if (ch === 'A') { // Up arrow
+                                    if (historyIdx > 0) {
+                                        historyIdx--;
+                                        term.write('\b \b'.repeat(localLineBuf.length));
+                                        localLineBuf = localHistory[historyIdx];
+                                        term.write(localLineBuf);
+                                    }
+                                } else if (ch === 'B') { // Down arrow
+                                    if (historyIdx < localHistory.length - 1) {
+                                        historyIdx++;
+                                        term.write('\b \b'.repeat(localLineBuf.length));
+                                        localLineBuf = localHistory[historyIdx];
+                                        term.write(localLineBuf);
+                                    } else if (historyIdx === localHistory.length - 1) {
+                                        historyIdx++;
+                                        term.write('\b \b'.repeat(localLineBuf.length));
+                                        localLineBuf = '';
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        if (ch === '\x1b') {
+                            inEsc = true;
+                            continue;
+                        }
+                        if (ch === '\r' || ch === '\n') {
+                            runLocalLine();
+                        } else if (ch === '\x7f' || ch === '\b') {
+                            if (localLineBuf.length) {
+                                localLineBuf = localLineBuf.slice(0, -1);
+                                term.write('\b \b');
+                            }
+                        } else if (ch === '\x03') {
+                            localLineBuf = '';
+                            term.write('^C\r\n' + LOCAL_PROMPT);
+                        } else if (ch >= ' ') {
+                            localLineBuf += ch;
+                            term.write(ch);
+                        }
+                    }
+                }
+            } else feedPsrpEditor(data);
         });
-        term.onResize(({ cols, rows }) => { if (mode === 'local') ws.send(JSON.stringify({ type: 'resize', tabId, cols, rows })); });
+        term.onResize(({ cols, rows }) => { if (mode === 'local' && ws && ws.ws && ws.ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', tabId, cols, rows })); });
 
         async function setMode(next) {
             if (next === mode) return;

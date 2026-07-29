@@ -66,8 +66,8 @@ public sealed class PsrpSession : IDisposable
     {
         // CoreCLR cannot force-abort a wedged managed thread; the deterministic kill here is
         // Stop → close the runspace → drop the pipe transport (the server side cleans up with it).
-        try { Current?.Stop(); } catch { }
-        try { Runspace.Close(); Runspace.Dispose(); } catch { }
+        try { Current?.Stop(); } catch (Exception ex) { Dg.Warn("rs", ex); }
+        try { Runspace.Close(); Runspace.Dispose(); } catch (Exception ex) { Dg.Warn("rs", ex); }
     }
 }
 
@@ -104,7 +104,7 @@ public static class Rs
     {
         try
         {
-            var tmp = Path.GetTempPath();
+            var tmp = Cm.Cm.Get(@"\System\Config\TempDir")?.ManifestJson ?? AppContext.BaseDirectory;
             if (Directory.Exists(tmp)) return;
             var cache = MainActivity.Instance?.CacheDir?.AbsolutePath;
             if (string.IsNullOrEmpty(cache)) return;
@@ -120,7 +120,7 @@ public static class Rs
     // The PSHOME the grounded app base points at. A real dir under files/ so the PSRP server's
     // file-based type/format loader has somewhere to read (see EnsureAppBase).
     private static string PsHome =>
-        Path.Combine(MainActivity.Instance?.FilesDir?.AbsolutePath ?? Path.GetTempPath(), "pshome");
+        Path.Combine(MainActivity.Instance?.FilesDir?.AbsolutePath ?? (Cm.Cm.Get(@"\System\Config\TempDir")?.ManifestJson ?? AppContext.BaseDirectory), "pshome");
 
     // The PS-runtime support files the out-of-proc server's DEFAULT ISS loads from $PSHOME by name.
     // PowerShell 7 ships the CORE ones (types.ps1xml + the base *.format.ps1xml) as EMBEDDED

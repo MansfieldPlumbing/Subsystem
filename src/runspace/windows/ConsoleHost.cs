@@ -44,7 +44,7 @@ internal sealed class ConsoleHostUserInterface : PSHostUserInterface
         var fg = Console.ForegroundColor; var bg = Console.BackgroundColor;
         try { Console.ForegroundColor = foregroundColor; Console.BackgroundColor = backgroundColor; Console.Out.Write(value); }
         catch { Console.Out.Write(value); }
-        finally { try { Console.ForegroundColor = fg; Console.BackgroundColor = bg; } catch { } }
+        finally { try { Console.ForegroundColor = fg; Console.BackgroundColor = bg; } catch (Exception ex) { Dg.Warn("console", ex); } }
     }
     public override void WriteLine(string value) => Console.Out.WriteLine(value);
     public override void WriteErrorLine(string value) => Console.Error.WriteLine(value);
@@ -70,7 +70,7 @@ internal sealed class ConsoleHostRawUserInterface : PSHostRawUserInterface
     public ConsoleHostRawUserInterface()
     {
         int w = 120;
-        try { if (Console.WindowWidth > 1) w = Console.WindowWidth; } catch { }
+        try { if (Console.WindowWidth > 1) w = Console.WindowWidth; } catch (Exception ex) { Dg.Warn("console", ex); }
         _w = w;
     }
 

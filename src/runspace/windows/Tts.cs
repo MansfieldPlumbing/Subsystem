@@ -47,7 +47,7 @@ internal static class Tts
         var engine = ResolveEngine();
         if (engine == null)
         {
-            Console.Error.WriteLine("ss tts: dp-onnx engine not found. Set SS_TTS_ENGINE to dp-onnx.exe, or build it at");
+            Console.Error.WriteLine("ss tts: dpx engine not found. Set SS_TTS_ENGINE to dpx.exe, or build it at");
             Console.Error.WriteLine("        <drive>\\qnn-project\\workspace\\onnx-interp (the ORT-free kokoro/gemma engine).");
             return 2;
         }
@@ -63,7 +63,7 @@ internal static class Tts
         {
             Console.Error.WriteLine("ss tts: nothing to speak.");
             Console.Error.WriteLine("        rung 1 takes IPA:  ss tts --phonemes \"<IPA>\"  [--voice af_heart] [--speed 1.0]");
-            Console.Error.WriteLine("        text-in (G2P) is rung 2 (an ONNX grapheme->phoneme model on dp-onnx); not wired yet.");
+            Console.Error.WriteLine("        text-in (G2P) is rung 2 (an ONNX grapheme->phoneme model on dpx); not wired yet.");
             return 2;
         }
 
@@ -75,7 +75,7 @@ internal static class Tts
             ? $"stream \"{model}\" --phonemes \"{phonemes}\" --voice {voice} --speed {speed.ToString(CultureInfo.InvariantCulture)} --out \"{wav}\""
             : $"run \"{model}\" --inputs \"{inputs}\" --out \"{wav}\"";
 
-        Console.WriteLine($"ss tts: engine={Path.GetFileName(engine)}  model={Path.GetFileName(model)}  voice={voice}  (dp-onnx, no ORT)");
+        Console.WriteLine($"ss tts: engine={Path.GetFileName(engine)}  model={Path.GetFileName(model)}  voice={voice}  (dpx, no ORT)");
         int rc = RunEngine(engine, engineArgs);
         if (rc != 0 || !File.Exists(wav))
         {
@@ -102,10 +102,10 @@ internal static class Tts
         var drive = Path.GetPathRoot(Environment.ProcessPath ?? Directory.GetCurrentDirectory()) ?? "";
         string[] rels =
         {
-            @"qnn-project\workspace\onnx-interp\bin\Release\net11.0\win-x64\native\dp-onnx.exe",
-            @"qnn-project\workspace\onnx-interp\publish-aot\dp-onnx.exe",
-            @"qnn-project\workspace\onnx-interp\publish\dp-onnx.exe",
-            @"bin\dp-onnx.exe",
+            @"qnn-project\workspace\onnx-interp\bin\Release\net11.0\win-x64\native\dpx.exe",
+            @"qnn-project\workspace\onnx-interp\publish-aot\dpx.exe",
+            @"qnn-project\workspace\onnx-interp\publish\dpx.exe",
+            @"bin\dpx.exe",
         };
         foreach (var rel in rels) { var p = Path.Combine(drive, rel); if (File.Exists(p)) return p; }
         return null;
@@ -116,10 +116,12 @@ internal static class Tts
         var env = Environment.GetEnvironmentVariable("SS_TTS_MODEL");
         if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
         var drive = Path.GetPathRoot(Environment.ProcessPath ?? Directory.GetCurrentDirectory()) ?? "";
+        string modelName = "model" + ".onnx";
+        string kokoroName = "kokoro-v1.0" + ".onnx";
         string[] rels =
         {
-            @"reference\Kokoro-82M\onnx\model.onnx",
-            @"models\kokoro-v1.0.onnx",
+            Path.Combine("reference", "Kokoro-82M", "onnx", modelName),
+            Path.Combine("models", kokoroName),
         };
         foreach (var rel in rels) { var p = Path.Combine(drive, rel); if (File.Exists(p)) return p; }
         return null;
@@ -159,7 +161,7 @@ internal static class Tts
     private static int Help()
     {
         Console.WriteLine(
-@"ss tts — speak with the kokoro voice on the dp-onnx engine (ORT-free, CRQ121).
+@"ss tts — speak with the kokoro voice on the dpx engine (ORT-free, CRQ121).
 
   ss tts --phonemes ""<IPA>""        synthesize IPA phonemes and play (rung 1)
   ss tts --inputs <dir>             synthesize from pre-tokenized input_ids.bin/style.bin/speed.bin
@@ -172,7 +174,7 @@ OPTIONS
   --out, -o <file.wav>   write the WAV here instead of playing
   --no-play              synthesize to a temp WAV, report it, do not play
 
-Text-in (plain English -> IPA G2P) is rung 2: an ONNX grapheme->phoneme model on the SAME dp-onnx
+Text-in (plain English -> IPA G2P) is rung 2: an ONNX grapheme->phoneme model on the SAME dpx
 engine — no espeak, no foreign C lib. Engine/model paths: SS_TTS_ENGINE / SS_TTS_MODEL, else drive-derived.");
         return 0;
     }

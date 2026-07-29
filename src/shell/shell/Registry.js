@@ -17,14 +17,18 @@ export class Registry {
   // The full record set the Shell may resolve. [{ group, name, file, firstClass, ... }].
   // (Records gain a stable `id` once the backend registrar seeds Cm; until then `name` is the id.)
   async list() {
-    if (this._records) return this._records;
+    if (this._records && this._records.length > 0) return this._records;
     try {
-      const r = await fetch(this._base + '/apps', { cache: 'no-store' });
-      this._records = r.ok ? await r.json() : [];
-    } catch (_) {
-      this._records = [];        // never throw, never surface a 404 (project rule); degrade to empty
-    }
-    return this._records.map(rec => ({ id: rec.id || (rec.name || '').toLowerCase(), ...rec }));
+      const r = await fetch(this._base + '/apps');
+      if (r.ok) {
+        const data = await r.json();
+        if (Array.isArray(data) && data.length > 0) {
+          this._records = data.map(rec => ({ id: rec.id || (rec.name || '').toLowerCase(), ...rec }));
+          return this._records;
+        }
+      }
+    } catch (_) {}
+    return this._records || [];
   }
 
   // Resolve exactly one object by id (or, transitionally, by name). Null if not granted/known.

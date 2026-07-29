@@ -56,7 +56,7 @@ public sealed class WpService : WallpaperService
             var root = doc.RootElement;
             if (root.TryGetProperty("color", out var cv) && cv.ValueKind == JsonValueKind.String
                 && !string.IsNullOrWhiteSpace(cv.GetString()))
-                try { c.Color = Color.ParseColor(cv.GetString()!.Trim()); } catch { /* keep the floor */ }
+                try { c.Color = Color.ParseColor(cv.GetString()!.Trim()); } catch (Exception ex) { Dg.Warn("wp", ex); /* keep the floor */ }
             if (root.TryGetProperty("image", out var iv) && iv.ValueKind == JsonValueKind.String
                 && !string.IsNullOrWhiteSpace(iv.GetString()))
                 c.ImagePath = iv.GetString()!.Trim();
@@ -120,7 +120,7 @@ public sealed class WpService : WallpaperService
                 }
             }
             catch (Exception ex) { Dg.Log("wp", "paint failed: " + ex.Message); }
-            finally { try { if (canvas != null) holder.UnlockCanvasAndPost(canvas); } catch { } }
+            finally { try { if (canvas != null) holder.UnlockCanvasAndPost(canvas); } catch (Exception ex) { Dg.Warn("wp", ex); } }
         }
 
         // Cover the surface preserving aspect (center-crop), the way the system still wallpaper does.

@@ -27,9 +27,11 @@ public class PairAdbReceiver : BroadcastReceiver
                         string resultMessage = await SubsystemApi.PairAdbLoopback(port, codeStr);
                         
                         var notifManager = (NotificationManager)context!.GetSystemService(Context.NotificationService)!;
+                        var reopenIntent = context.PackageManager!.GetLaunchIntentForPackage(context.PackageName!)!;
+                        reopenIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop);
                         var reopen = PendingIntent.GetActivity(
                             context, 0,
-                            new Intent(Intent.ActionView, Android.Net.Uri.Parse(Subsystem.ProjectionServer.LoopbackBase)),
+                            reopenIntent,
                             PendingIntentFlags.Immutable)!;
 
                         var updatedNotif = new Notification.Builder(context, "terminal_bg_v2")
@@ -47,9 +49,11 @@ public class PairAdbReceiver : BroadcastReceiver
                 {
                     // Handle invalid port instantly
                     var notifManager = (NotificationManager)context!.GetSystemService(Context.NotificationService)!;
+                    var reopenIntent = context.PackageManager!.GetLaunchIntentForPackage(context.PackageName!)!;
+                    reopenIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop);
                     var reopen = PendingIntent.GetActivity(
                         context, 0,
-                        new Intent(Intent.ActionView, Android.Net.Uri.Parse(Subsystem.ProjectionServer.LoopbackBase)),
+                        reopenIntent,
                         PendingIntentFlags.Immutable)!;
 
                     var updatedNotif = new Notification.Builder(context, "terminal_bg_v2")

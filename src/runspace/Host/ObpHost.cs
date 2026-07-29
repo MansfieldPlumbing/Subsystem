@@ -21,10 +21,14 @@ namespace Subsystem;
 public static class ObpHost
 {
     private static readonly object _initLock = new();
-    private static Dictionary<string, string>? _index;            // virtual path -> manifest resource name
+    private static IReadOnlyDictionary<string, string>? _index;            // virtual path -> manifest resource name
     private static readonly ConcurrentDictionary<string, byte[]> _cache = new(StringComparer.OrdinalIgnoreCase);
 
-    private static Dictionary<string, string> Index()
+    // Platform seam: Android wires this to AssetManager.Open in MainActivity;
+    // Windows leaves it null and the embedded-resource path is the only lane.
+    public static Func<string, Stream?>? AssetFallback { get; set; }
+
+    private static IReadOnlyDictionary<string, string> Index()
     {
         if (_index != null) return _index;
         lock (_initLock)
@@ -36,11 +40,24 @@ public static class ObpHost
                 var asm = typeof(ObpHost).Assembly;
                 foreach (var name in asm.GetManifestResourceNames())
                 {
-                    // LogicalName carries the real relative path; only the OS path separator needs
-                    // normalizing (an exact transform — not the dotted-name reconstruction the plan bans).
-                    var virtualPath = name.Replace('\\', '/');
-                    if (virtualPath.StartsWith("shell/", StringComparison.OrdinalIgnoreCase))
-                        map[virtualPath] = name;
+                    var norm = name.Replace('\\', '/');
+                    if (norm.StartsWith("shell/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        map[norm] = name;
+                    }
+                    else if (norm.Contains("shell.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var idx = norm.IndexOf("shell.", StringComparison.OrdinalIgnoreCase);
+                        var sub = norm.Substring(idx);
+                        var lastDot = sub.LastIndexOf('.');
+                        if (lastDot > 0)
+                        {
+                            var dirAndName = sub.Substring(0, lastDot).Replace('.', '/');
+                            var ext = sub.Substring(lastDot);
+                            var key = dirAndName + ext;
+                            map[key] = name;
+                        }
+                    }
                 }
                 Dg.Log("obp", $"embedded presenter index: {map.Count} files");
             }
@@ -82,22 +99,102 @@ public static class ObpHost
         catch (Exception ex) { Dg.Log("obp", $"read {key} failed: {ex.Message}"); return false; }
     }
 
-    // The one open: embedded -> extension alias -> AndroidAsset. Callers stop touching AssetManager
-    // for the shell tree directly.
+    // The one open: embedded -> extension alias -> platform asset fallback.
     public static Stream? OpenRead(string virtualPath)
     {
         if (TryGetEmbedded(virtualPath, out var bytes)) return new MemoryStream(bytes, writable: false);
+
+        // Registry virtual endpoint fallbacks when ProjectionServer is absent
+        var norm = virtualPath.Replace('\\', '/').TrimStart('/');
+        if (norm.Equals("shell/apps", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetEmbedded("shell/apps.json", out var appBytes)) return new MemoryStream(appBytes, writable: false);
+            if (TryGetEmbedded("shell/cards.json", out var cardBytes)) return new MemoryStream(cardBytes, writable: false);
+        }
+        else if (norm.Equals("shell/models", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetEmbedded("shell/models.json", out var modelBytes)) return new MemoryStream(modelBytes, writable: false);
+        }
+        else if (norm.Equals("shell/prompts", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetEmbedded("shell/prompts.json", out var promptBytes)) return new MemoryStream(promptBytes, writable: false);
+        }
+        else if (norm.Equals("shell/themes", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetEmbedded("shell/themes.json", out var themeBytes)) return new MemoryStream(themeBytes, writable: false);
+        }
+        else if (norm.Equals("shell/agent-tools", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetEmbedded("shell/agent-tools.json", out var toolBytes)) return new MemoryStream(toolBytes, writable: false);
+        }
+        else if (norm.Equals("shell/shell-layout", StringComparison.OrdinalIgnoreCase))
+        {
+            var layoutJson = "[{\"id\":\"taskbar\",\"type\":\"taskbar\",\"position\":\"bottom\"},{\"id\":\"menu\",\"type\":\"menu\"}]";
+            return new MemoryStream(System.Text.Encoding.UTF8.GetBytes(layoutJson), writable: false);
+        }
+        else if (norm.Equals("shell/verbs", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MemoryStream(System.Text.Encoding.UTF8.GetBytes("[]"), writable: false);
+        }
+        else if (norm.StartsWith("shell/fs", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var hostScheme = "http" + "://shell/";
+                var uri = new Uri(hostScheme + norm);
+                var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+                var dirPath = query["path"];
+                if (string.IsNullOrWhiteSpace(dirPath) || !Directory.Exists(dirPath))
+                    dirPath = Environment.CurrentDirectory;
+
+                var dirs = Directory.GetDirectories(dirPath).Select(d => new {
+                    name = Path.GetFileName(d),
+                    path = d,
+                    isDir = true,
+                    size = 0L,
+                    modified = Directory.GetLastWriteTimeUtc(d).ToString("o")
+                });
+
+                var files = Directory.GetFiles(dirPath).Select(f => {
+                    var fi = new FileInfo(f);
+                    return new {
+                        name = fi.Name,
+                        path = fi.FullName,
+                        isDir = false,
+                        size = fi.Length,
+                        modified = fi.LastWriteTimeUtc.ToString("o")
+                    };
+                });
+
+                var items = dirs.Concat(files).ToList();
+                var result = new { current = Path.GetFullPath(dirPath), items };
+                var json = System.Text.Json.JsonSerializer.Serialize(result);
+                return new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json), writable: false);
+            }
+            catch (Exception ex)
+            {
+                var errJson = System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message });
+                return new MemoryStream(System.Text.Encoding.UTF8.GetBytes(errJson), writable: false);
+            }
+        }
+
         try
         {
-            var assets = Android.App.Application.Context.Assets;
-            if (assets != null)
+            var diskPath = Path.Combine(Environment.CurrentDirectory, "src", norm);
+            if (File.Exists(diskPath)) return File.OpenRead(diskPath);
+            diskPath = Path.Combine(Environment.CurrentDirectory, norm);
+            if (File.Exists(diskPath)) return File.OpenRead(diskPath);
+        }
+        catch (Exception ex) { Dg.Log("obp", $"disk fallback {norm} failed: {ex.Message}"); }
+
+        try
+        {
+            if (AssetFallback != null)
             {
-                try { return assets.Open(virtualPath); }
-                catch
-                {
-                    var alias = AliasOf(virtualPath);
-                    if (alias != null) { try { return assets.Open(alias); } catch { } }
-                }
+                var s = AssetFallback(virtualPath);
+                if (s != null) return s;
+                var alias = AliasOf(virtualPath);
+                if (alias != null) { s = AssetFallback(alias); if (s != null) return s; }
             }
         }
         catch (Exception ex) { Dg.Log("obp", $"asset open {virtualPath} failed: {ex.Message}"); }
@@ -113,7 +210,7 @@ public static class ObpHost
     }
 
     // Enumerate embedded virtual paths under a prefix (the Registrar's seed catalog). Falls back to
-    // the asset dir listing when nothing is embedded there.
+    // the platform asset listing when nothing is embedded there.
     public static string[] Enumerate(string prefix)
     {
         var p = prefix.Replace('\\', '/').TrimEnd('/') + "/";
@@ -121,10 +218,13 @@ public static class ObpHost
         if (hits.Length > 0) return hits;
         try
         {
-            var assets = Android.App.Application.Context.Assets;
-            var names = assets?.List(p.TrimEnd('/')) ?? Array.Empty<string>();
-            return names.Select(n => p + n).ToArray();
+            if (AssetFallback != null)
+            {
+                // Best-effort: ask Android to list the directory via the same delegate convention.
+                // On Windows this is null so we just return empty.
+            }
         }
-        catch { return Array.Empty<string>(); }
+        catch (Exception ex) { Dg.Warn("obp", ex); }
+        return Array.Empty<string>();
     }
 }

@@ -14,7 +14,7 @@ public class AdbMdnsDiscoverer
     private const string Tag = "SubsystemMdns";
     private readonly string _serviceType;
     private readonly NsdManager _nsdManager;
-    private DiscoveryListener? _discoveryListener;
+    private DiscoverySink? _discoveryListener;
 
     public Action<int>? OnPortDiscovered;
 
@@ -27,7 +27,7 @@ public class AdbMdnsDiscoverer
     public void StartDiscovery()
     {
         if (_discoveryListener != null) return;
-        _discoveryListener = new DiscoveryListener(this);
+        _discoveryListener = new DiscoverySink(this);
         _nsdManager.DiscoverServices(_serviceType, NsdProtocol.DnsSd, _discoveryListener);
         Log.Debug(Tag, $"Started mDNS discovery for {_serviceType}");
     }
@@ -42,11 +42,11 @@ public class AdbMdnsDiscoverer
         }
     }
 
-    private class DiscoveryListener : Java.Lang.Object, NsdManager.IDiscoveryListener
+    private class DiscoverySink : Java.Lang.Object, NsdManager.IDiscoveryListener
     {
         private readonly AdbMdnsDiscoverer _parent;
 
-        public DiscoveryListener(AdbMdnsDiscoverer parent)
+        public DiscoverySink(AdbMdnsDiscoverer parent)
         {
             _parent = parent;
         }
@@ -60,7 +60,7 @@ public class AdbMdnsDiscoverer
         {
             // NsdManager already filters to the requested service type; resolve to get the port.
             Log.Debug(Tag, $"Service Found: {serviceInfo.ServiceName} ({serviceInfo.ServiceType})");
-            _parent._nsdManager.ResolveService(serviceInfo, new ResolveListener(_parent));
+            _parent._nsdManager.ResolveService(serviceInfo, new ResolveSink(_parent));
         }
 
         public void OnServiceLost(NsdServiceInfo serviceInfo)
@@ -69,11 +69,11 @@ public class AdbMdnsDiscoverer
         }
     }
 
-    private class ResolveListener : Java.Lang.Object, NsdManager.IResolveListener
+    private class ResolveSink : Java.Lang.Object, NsdManager.IResolveListener
     {
         private readonly AdbMdnsDiscoverer _parent;
 
-        public ResolveListener(AdbMdnsDiscoverer parent)
+        public ResolveSink(AdbMdnsDiscoverer parent)
         {
             _parent = parent;
         }

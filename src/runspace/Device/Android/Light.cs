@@ -20,7 +20,7 @@ public static class Light
     private static readonly object _gate = new();
     private static SensorManager? _sm;
     private static Sensor? _sensor;
-    private static Listener? _listener;
+    private static LightObserver? _listener;
     private static readonly Queue<Morse.LightSample> _ring = new(RingCapacity + 1);
     private static readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
 
@@ -49,7 +49,7 @@ public static class Light
                 _sm = (SensorManager?)ctx.GetSystemService(Android.Content.Context.SensorService);
                 _sensor = _sm?.GetDefaultSensor(SensorType.Light);
                 if (_sm == null || _sensor == null) { Subsystem.Dg.Warn("light", "no ambient-light sensor"); return false; }
-                _listener = new Listener();
+                _listener = new LightObserver();
                 // FASTEST: the demo needs the highest sample rate the sensor offers to resolve a 200ms dot.
                 _sm.RegisterListener(_listener, _sensor, SensorDelay.Fastest);
                 return true;
@@ -100,7 +100,7 @@ public static class Light
         return Samples();
     }
 
-    private sealed class Listener : Java.Lang.Object, ISensorEventListener
+    private sealed class LightObserver : Java.Lang.Object, ISensorEventListener
     {
         public void OnSensorChanged(SensorEvent? e)
         {

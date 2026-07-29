@@ -36,6 +36,6 @@ public readonly struct Handle
 // A mount's callable surface (VOM-SPEC §6). ONE JSON that is simultaneously the agent/FunctionGemma
 // tool schema, the UI widget type, AND the permission surface. Registered into the control plane when
 // a capability or a real-time cmdlet mounts.
-public sealed record Manifest(string Prefix, string Type, IReadOnlyList<Verb> Verbs, int SchemaVersion);
+public sealed record HandleManifest(string Prefix, string Type, IReadOnlyList<Verb> Verbs, int SchemaVersion);
 public sealed record Verb(string Name, string Summary, IReadOnlyList<Param> Parameters, string ReturnType);
 public sealed record Param(string Name, string Type, bool Required, string? Summary);

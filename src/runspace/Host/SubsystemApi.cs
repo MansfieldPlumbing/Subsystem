@@ -16,7 +16,7 @@ public static class SubsystemApi
     // "key on disk" as the paired signal (see SubsystemService), so IsAdbPaired reads the same truth
     // instead of a hardcoded stub.
     public static string AdbKeyPath =>
-        System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal), "adbkey.bin");
+        System.IO.Path.Combine(Subsystem.Cm.Cm.Get(@"\System\Config\PersonalDir")?.ManifestJson ?? AppContext.BaseDirectory, "adbkey.bin");
 
     public static bool IsAdbPaired() => System.IO.File.Exists(AdbKeyPath);
 
@@ -86,7 +86,7 @@ public static class SubsystemApi
     {
         if (ws.State != WebSocketState.Open) return;
         var bytes = Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(frame));
-        try { await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token); } catch { }
+        try { await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token); } catch (Exception ex) { Dg.Warn("api", ex); }
     }
 
     // Parse the `offer_choices` tool result (a JSON string array) into chip strings. Resilient to a
@@ -104,7 +104,7 @@ public static class SubsystemApi
             if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.String)
                 return new[] { doc.RootElement.GetString() };
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("api", ex); }
         return new[] { json.Trim() };
     }
 
@@ -206,7 +206,7 @@ public static class SubsystemApi
                         catch (Exception ex) { Subsystem.Dg.Warn("agent", ex); }
                     }
                 }
-                catch { /* not JSON after all — treat as text */ }
+                catch (Exception ex) { Dg.Warn("api", ex); /* not JSON after all — treat as text */ }
             }
 
             try
@@ -322,79 +322,68 @@ public static class SubsystemApi
 
     public static async Task<string> ExecuteCommandAsJson(string command)
     {
-        return await Task.Run(async () =>
+        await Task.CompletedTask;
+        try
         {
-            try
+            if (_apiPool == null) return "{\"error\": \"API RunspacePool not initialized\"}";
+
+            using var ps = PowerShell.Create();
+            ps.RunspacePool = _apiPool;
+            ps.AddScript(EnsureSubsystemModule + $"{command} | ConvertTo-Json -Depth 3 -Compress");
+
+            Android.Util.Log.Info("SubsystemApi", $"Executing command ({command?.Length ?? 0} chars)");
+            var results = ps.Invoke();
+
+            if (ps.HadErrors && (results == null || results.Count == 0))
             {
-                if (_apiPool == null) return "{\"error\": \"API RunspacePool not initialized\"}";
-
-                using var ps = PowerShell.Create();
-                ps.RunspacePool = _apiPool;
-                ps.AddScript(EnsureSubsystemModule + $"{command} | ConvertTo-Json -Depth 3 -Compress");
-
-                Android.Util.Log.Info("SubsystemApi", $"Executing command ({command?.Length ?? 0} chars)");
-                var results = await ps.InvokeAsync().ConfigureAwait(false);
-                Android.Util.Log.Info("SubsystemApi", $"Finished command ({command?.Length ?? 0} chars), Results: {results.Count}");
-
-                if (ps.HadErrors) 
-                {
-                    var errors = new System.Collections.Generic.List<string>();
-                    foreach (var err in ps.Streams.Error) errors.Add(err.ToString());
-                    return System.Text.Json.JsonSerializer.Serialize(new { error = string.Join("; ", errors) });
-                }
-
-                if (results.Count == 0) return "{}";
-                if (results.Count == 1) return results[0]?.ToString() ?? "null";
-
-                var sb = new StringBuilder("[");
-                for (int i = 0; i < results.Count; i++) {
-                    sb.Append(results[i]?.ToString() ?? "null");
-                    if (i < results.Count - 1) sb.Append(",");
-                }
-                sb.Append("]");
-                return sb.ToString();
+                var errStr = string.Join("; ", ps.Streams.Error.Select(e => e.ToString()));
+                Android.Util.Log.Error("SubsystemApi", $"Command error: {errStr}");
+                return $"{{\"error\": \"{errStr.Replace("\"", "\\\"")}\"}}";
             }
-            catch (Exception ex)
-            {
-                return System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message });
-            }
-        });
+
+            if (results == null || results.Count == 0) return "[]";
+            if (results.Count == 1) return results[0]?.BaseObject?.ToString() ?? "null";
+            return "[" + string.Join(",", results.Select(r => r?.BaseObject?.ToString() ?? "null")) + "]";
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Error("SubsystemApi", $"Exception executing command: {ex}");
+            return $"{{\"error\": \"{ex.Message.Replace("\"", "\\\"")}\"}}";
+        }
     }
 
-    // PSRP-flavored object remoting: run the command raw and serialize the result objects
+    // High-fidelity object channel (PSRP-like over simple HTTP/TLS): returns the raw PSObjects
     // (and any error records) as CLIXML — full type + stream fidelity, deserializes back into
     // live PSObjects in any PowerShell client. This is the payload for the TLS conhost channel
     // and an object-fidelity mode for the projection /api.
     public static async Task<string> ExecuteCommandAsClixml(string command, int depth = 4)
     {
-        return await Task.Run(async () =>
+        await Task.CompletedTask;
+        try
         {
-            try
+            if (_apiPool == null)
+                return PSSerializer.Serialize("Error: API RunspacePool not initialized");
+
+            using var ps = PowerShell.Create();
+            ps.RunspacePool = _apiPool;
+            ps.AddScript(EnsureSubsystemModule + command);
+
+            var results = ps.Invoke();
+
+            if (ps.HadErrors)
             {
-                if (_apiPool == null)
-                    return PSSerializer.Serialize("Error: API RunspacePool not initialized");
-
-                using var ps = PowerShell.Create();
-                ps.RunspacePool = _apiPool;
-                ps.AddScript(EnsureSubsystemModule + command); // raw — no ConvertTo-Json; objects stay objects
-
-                var results = await ps.InvokeAsync().ConfigureAwait(false);
-
-                if (ps.HadErrors)
-                {
-                    var errs = new System.Collections.Generic.List<object>();
-                    foreach (var e in ps.Streams.Error) errs.Add(e);
-                    return PSSerializer.Serialize(errs.ToArray(), depth);
-                }
-
-                var objs = new System.Collections.Generic.List<object>();
-                foreach (var r in results) objs.Add(r);
-                return PSSerializer.Serialize(objs.ToArray(), depth);
+                var errs = new System.Collections.Generic.List<object>();
+                foreach (var e in ps.Streams.Error) errs.Add(e);
+                return PSSerializer.Serialize(errs.ToArray(), depth);
             }
-            catch (Exception ex)
-            {
-                return PSSerializer.Serialize(ex);
-            }
-        });
+
+            var objs = new System.Collections.Generic.List<object>();
+            foreach (var r in results) objs.Add(r);
+            return PSSerializer.Serialize(objs.ToArray(), depth);
+        }
+        catch (Exception ex)
+        {
+            return PSSerializer.Serialize(ex);
+        }
     }
 }

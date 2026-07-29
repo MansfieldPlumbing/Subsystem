@@ -98,7 +98,7 @@ public readonly ref struct FlatReader
 // Array.MaxLength; the directory lives in the first block, the payloads are seeked.
 public static class LiteRtLm
 {
-    public readonly record struct Section(int DataType, long Begin, long End);
+    public readonly record struct LiteRtSection(int DataType, long Begin, long End);
 
     // AnySectionDataType enum (litertlm_header_schema.fbs).
     public static string TypeName(int t) => t switch
@@ -107,7 +107,7 @@ public static class LiteRtLm
         5 => "LlmMetadata", 6 => "HF_Tokenizer_Zlib", 7 => "TFLiteWeights", _ => $"type{t}"
     };
 
-    public static List<Section> ReadSections(string path)
+    public static List<LiteRtSection> ReadSections(string path)
     {
         using var fs = File.OpenRead(path);
         if (fs.Length < 16) throw new InvalidDataException("not a LITERTLM file (too small)");
@@ -123,7 +123,7 @@ public static class LiteRtLm
 
     // Parse the section directory assuming the metadata FlatBuffer base is `b`. Structural validation
     // (root in range, sane count, offsets inside the file) rejects a wrong base; the real base parses clean.
-    static bool TryDir(byte[] hdr, int b, long fileLen, out List<Section> secs)
+    static bool TryDir(byte[] hdr, int b, long fileLen, out List<LiteRtSection> secs)
     {
         secs = new();
         try
@@ -143,7 +143,7 @@ public static class LiteRtLm
                 long end = fr.FieldI64(ot, 2);
                 int dt = fr.FieldU8(ot, 3);
                 if (begin < 0 || end <= begin || end > fileLen) return false;
-                secs.Add(new Section(dt, begin, end));
+                secs.Add(new LiteRtSection(dt, begin, end));
             }
             return secs.Count > 0;
         }
@@ -151,7 +151,7 @@ public static class LiteRtLm
     }
 
     // Seek+read one section's bytes (each section < 2GB; the GB bulk is split across TFLiteWeights).
-    public static byte[] ReadSectionBytes(string path, Section s)
+    public static byte[] ReadSectionBytes(string path, LiteRtSection s)
     {
         long len = s.End - s.Begin;
         if (len > Array.MaxLength) throw new InvalidDataException($"section {len} bytes > Array.MaxLength — needs chunked load");
@@ -176,7 +176,7 @@ public static class Tflite
 {
     // BuiltinOperator code -> name (the LLM-relevant subset; unknown -> OP_<code>). builtin_code resolves
     // as max(deprecated_builtin_code, builtin_code) per the tflite GetBuiltinCode rule.
-    static readonly Dictionary<int, string> Builtin = new()
+    static readonly IReadOnlyDictionary<int, string> Builtin = new Dictionary<int, string>
     {
         [0] = "ADD", [2] = "CONCATENATION", [3] = "CONV_2D", [4] = "DEPTHWISE_CONV_2D", [6] = "DEQUANTIZE",
         [7] = "EMBEDDING_LOOKUP", [9] = "FULLY_CONNECTED", [14] = "LOGISTIC", [18] = "MUL", [22] = "RESHAPE",
@@ -192,7 +192,7 @@ public static class Tflite
 
     // tflite op name -> dp-onnx (ONNX) OpType when an existing kernel covers it; null = no mapping yet
     // (shows MISSING in the probe — the work the probe is meant to surface).
-    static readonly Dictionary<string, string> ToOnnx = new()
+    static readonly IReadOnlyDictionary<string, string> ToOnnx = new Dictionary<string, string>
     {
         ["ADD"] = "Add", ["SUB"] = "Sub", ["MUL"] = "Mul", ["DIV"] = "Div", ["CONCATENATION"] = "Concat",
         ["RESHAPE"] = "Reshape", ["TRANSPOSE"] = "Transpose", ["SOFTMAX"] = "Softmax", ["TANH"] = "Tanh",
@@ -600,7 +600,7 @@ public static class Tflite
                 continue;
             }
 
-            string onnx = MapToOnnx(tf) ?? throw new NotImplementedException($"op[{o}] {tf}: no dp-onnx kernel mapping (subgraph not fully covered)");
+            string onnx = MapToOnnx(tf) ?? throw new NotImplementedException($"op[{o}] {tf}: no dpx kernel mapping (subgraph not fully covered)");
             int boType = fr.FieldU8(op, 3);                 // builtin_options_type (union discriminator)
             int boVal = fr.Sub(fr.Field(op, 4));            // builtin_options value table
             var node = new NodeProto { OpType = onnx, Name = $"{tf}_{o}" };

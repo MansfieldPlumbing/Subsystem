@@ -215,7 +215,7 @@ public sealed class DpGang : IDisposable
     }
 
     // One lane's whole life: park on its OWN work fence at each phase, run LaneWork(lane, phase),
-    // ring its OWN done fence. Brutally synchronous - fences only, no Task, no pool, no async
+    // ring its OWN done fence. Account for all memory within our runspace - fences only, no Task, no pool, no async
     // (mirrors DpxRace.LaneLoop exactly, generalized from 2 named lanes to N indexed lanes).
     private void LaneLoop(int lane)
     {

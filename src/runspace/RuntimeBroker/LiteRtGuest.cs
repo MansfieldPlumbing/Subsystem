@@ -43,7 +43,7 @@ public static class LiteRtGuest
                 s = s.Substring("<|think|>".Length).TrimStart('\n');
             return s;
         }
-        catch { return ""; }
+        catch (Exception ex) { Dg.Warn("litert", ex); return ""; }
     }
 
     // Resolve the active unit's engine through the handle table. False when no engine object exists
@@ -68,12 +68,12 @@ public static class LiteRtGuest
     // Telemetry surface (Dg.Snapshot / the state texture): reads through the handle table.
     public static bool IsReady
     {
-        get { try { return TryAcquire(Android.App.Application.Context, out var r) && r.IsAlive; } catch { return false; } }
+        get { try { return TryAcquire(Android.App.Application.Context, out var r) && r.IsAlive; } catch (Exception ex) { Dg.Warn("litert", ex); return false; } }
     }
 
     public static string? BackendName
     {
-        get { try { return TryAcquire(Android.App.Application.Context, out var r) ? r.BackendName : null; } catch { return null; } }
+        get { try { return TryAcquire(Android.App.Application.Context, out var r) ? r.BackendName : null; } catch (Exception ex) { Dg.Warn("litert", ex); return null; } }
     }
 
     // Acquire the active unit's serviceable engine, constructing it under admission control and

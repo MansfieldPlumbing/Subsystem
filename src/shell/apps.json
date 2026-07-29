@@ -1,0 +1,70 @@
+[
+  {
+    "id": "agent",
+    "name": "agent",
+    "icon": "🤖",
+    "file": "presenters/agent.obp",
+    "group": "core",
+    "firstClass": true
+  },
+  {
+    "id": "terminal",
+    "name": "terminal",
+    "icon": "▶",
+    "file": "presenters/terminal.obp",
+    "group": "core",
+    "firstClass": true
+  },
+  {
+    "id": "settings",
+    "name": "settings",
+    "icon": "⚙",
+    "file": "presenters/settings.obp",
+    "group": "system",
+    "firstClass": true
+  },
+  {
+    "id": "files",
+    "name": "files",
+    "icon": "📁",
+    "file": "presenters/files.obp",
+    "group": "tools",
+    "firstClass": true
+  },
+  {
+    "id": "edit",
+    "name": "edit",
+    "icon": "📝",
+    "file": "presenters/edit.obp",
+    "group": "tools",
+    "firstClass": true
+  },
+  {
+    "id": "graph",
+    "name": "graph",
+    "icon": "📈",
+    "file": "presenters/graph.obp",
+    "group": "tools"
+  },
+  {
+    "id": "morse",
+    "name": "morse",
+    "icon": "📻",
+    "file": "presenters/morse.obp",
+    "group": "tools"
+  },
+  {
+    "id": "screen",
+    "name": "screen",
+    "icon": "🖥",
+    "file": "presenters/screen.obp",
+    "group": "system"
+  },
+  {
+    "id": "dptest",
+    "name": "DirectPort Interop",
+    "icon": "🌊",
+    "file": "tests/DirectPortInterop.obp",
+    "group": "tools"
+  }
+]

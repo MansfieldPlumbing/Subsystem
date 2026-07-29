@@ -87,9 +87,10 @@ public sealed class StartAndroidAudioStreamCmdlet : WrapperCmdlet
             var listener = new TcpListener(IPAddress.Loopback, Port);
             listener.Start();
 
-            Task.Run(() => AudioPump(
+            var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\AudioStream");
+            Subsystem.Vom.Vom.Spawn(owner, "AudioPump", _ => AudioPump(
                 Source, Codec, Bitrate, SampleRate, Channels,
-                KeepPlaying.IsPresent, listener, cts.Token), cts.Token);
+                KeepPlaying.IsPresent, listener, cts.Token));
 
             AudioStreamRegistry.Register(sessionId, new AudioStreamSession(listener, cts));
 

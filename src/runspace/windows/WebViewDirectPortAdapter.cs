@@ -70,12 +70,12 @@ internal sealed class WebViewDirectPortAdapter : IDisposable
         }
         long fv = System.Threading.Interlocked.Increment(ref _frameValue);
         // The fence/doorbell — DirectPort signal_frame(): tell the consumer a new frame landed in the region.
-        try { _web.CoreWebView2.PostWebMessageAsString("frame:" + fv); } catch { }
+        try { _web.CoreWebView2.PostWebMessageAsString("frame:" + fv); } catch (Exception ex) { Dg.Warn("webview", ex); }
     }
 
     public void Dispose()
     {
-        try { _buffer?.Close(); } catch { }
+        try { _buffer?.Close(); } catch (Exception ex) { Dg.Warn("webview", ex); }
         _buffer = null;
     }
 

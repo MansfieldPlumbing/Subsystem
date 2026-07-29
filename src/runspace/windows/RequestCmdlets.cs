@@ -1,6 +1,7 @@
 using System;
 using System.Management.Automation;
 using Subsystem.Cm;
+using Subsystem.Remedy;
 
 namespace Subsystem.Windows;
 

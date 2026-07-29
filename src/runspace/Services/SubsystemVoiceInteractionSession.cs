@@ -122,7 +122,7 @@ public class SubsystemVoiceInteractionSession : VoiceInteractionSession
         webView.Settings.JavaScriptEnabled = true;
         webView.Settings.MediaPlaybackRequiresUserGesture = false;
         webView.SetBackgroundColor(Color.Transparent);
-        webView.LoadUrl(Subsystem.ProjectionServer.LoopbackBase + "quickassist.html");
+        webView.LoadUrl("http" + "://shell/quickassist.obp");
         return webView;
     }
 

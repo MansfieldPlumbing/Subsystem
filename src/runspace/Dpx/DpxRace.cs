@@ -8,7 +8,7 @@
 // at the recheck resolves to index 0 = cpu; WaitAny scans in order), Fence.WaitAll closes the barrier, then
 // the two outputs are parity-checked against each other and - once, on iteration 1 - against the scalar
 // oracle (Dp.ForceScalarMatMulNBits path). Each lane times ITS OWN compute: Stopwatch around the kernel
-// call, recorded by the worker. Brutally synchronous - fences only, no Task, no pool, no async.
+// call, recorded by the worker. Account for all memory within our runspace - fences only, no Task, no pool, no async.
 using System;
 using System.Diagnostics;
 using System.Runtime.Intrinsics;

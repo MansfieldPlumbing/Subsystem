@@ -338,6 +338,46 @@ internal static class SelfBuild
             }
         }
 
+        // Embed shell/* presenters & assets so ObpHost finds them in-process in RAM (no 404s).
+        var shellDir = Path.Combine(sourceRoot, "src", "shell");
+        var addedShell = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(shellDir))
+        {
+            foreach (var f in Directory.EnumerateFiles(shellDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(shellDir, f);
+                if (rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) continue;
+                var logicalName = "shell/" + rel.Replace('\\', '/');
+                try
+                {
+                    var bytes = File.ReadAllBytes(f);
+                    resources.Add(new ResourceDescription(logicalName, () => new MemoryStream(bytes), isPublic: true));
+                    addedShell.Add(logicalName);
+                }
+                catch (Exception ex) { Dg.Log("selfbuild", $"shell file read {f} failed: {ex.Message}"); }
+            }
+        }
+        var executingAsm = Assembly.GetExecutingAssembly();
+        foreach (var resName in executingAsm.GetManifestResourceNames())
+        {
+            var normName = resName.Replace('\\', '/');
+            if (normName.StartsWith("shell/", StringComparison.OrdinalIgnoreCase) && !addedShell.Contains(normName))
+            {
+                try
+                {
+                    using var s = executingAsm.GetManifestResourceStream(resName);
+                    if (s != null)
+                    {
+                        using var ms = new MemoryStream();
+                        s.CopyTo(ms);
+                        var bytes = ms.ToArray();
+                        resources.Add(new ResourceDescription(normName, () => new MemoryStream(bytes), isPublic: true));
+                    }
+                }
+                catch (Exception ex) { Dg.Log("selfbuild", $"shell manifest res {resName} failed: {ex.Message}"); }
+            }
+        }
+
         using var pe = new MemoryStream();
         var result = compilation.Emit(pe, manifestResources: resources);
         if (!result.Success)
@@ -375,17 +415,33 @@ internal static class SelfBuild
                 return 3;
             }
 
-            var dbPath = Path.Combine(root, "subsystem-requests.db");
-            if (File.Exists(dbPath))
+            // Clean up requests and config DBs from the resolved unified location
+            var requestsDb = Subsystem.Cm.EnvironmentVariables.Db.Requests;
+            var configDb = Subsystem.Cm.EnvironmentVariables.Db.Config;
+            foreach (var path in new[] { requestsDb, configDb })
             {
-                try { File.Delete(dbPath); Console.WriteLine($"ss build self: deleted local database for release ({dbPath})"); }
-                catch (Exception ex) { Console.Error.WriteLine($"ss build self: failed to delete database: {ex.Message}"); }
+                if (File.Exists(path))
+                {
+                    try { File.Delete(path); Console.WriteLine($"ss build self: deleted unified database for release ({path})"); }
+                    catch (Exception ex) { Console.Error.WriteLine($"ss build self: failed to delete database {path}: {ex.Message}"); }
+                }
             }
-            var selfDbPath = Path.Combine(AppContext.BaseDirectory, "subsystem-requests.db");
-            if (File.Exists(selfDbPath))
+
+            // Legacy paths clean up
+            var legacyPaths = new[]
             {
-                try { File.Delete(selfDbPath); Console.WriteLine($"ss build self: deleted self database for release ({selfDbPath})"); }
-                catch (Exception ex) { Console.Error.WriteLine($"ss build self: failed to delete self database: {ex.Message}"); }
+                Path.Combine(root, "subsystem-requests.db"),
+                Path.Combine(AppContext.BaseDirectory, "subsystem-requests.db"),
+                Path.Combine(root, "subsystem-registry.db"),
+                Path.Combine(AppContext.BaseDirectory, "subsystem-registry.db")
+            };
+            foreach (var path in legacyPaths)
+            {
+                if (File.Exists(path))
+                {
+                    try { File.Delete(path); Console.WriteLine($"ss build self: deleted legacy database ({path})"); }
+                    catch (Exception ex) { Console.Error.WriteLine($"ss build self: failed to delete legacy database {path}: {ex.Message}"); }
+                }
             }
         }
 
@@ -442,7 +498,7 @@ internal static class SelfBuild
     // stale-dump gap. Pure C#, no runspace, no dotnet: it belongs in the zero-dep self-build path.
     private static byte[] GenerateSourceDump(string sourceRoot)
     {
-        var blockedDirs = new[] { "node_modules", "bin", "obj", "dist", "build", ".git", ".vs", "packages", "vendor", "reference" };
+        var blockedDirs = new[] { "node_modules", "bin", "obj", "dist", "build", ".git", ".vs", "packages", "vendor", "reference", ".claude", ".gemini", ".agents", ".idea", ".vscode", "scratch", "tmp" };
         var whitelist   = new[] { ".cs", ".ps1", ".js", ".ts", ".html", ".css", ".json", ".csproj", ".xml", ".config", ".props", ".targets", ".sln" };
         const long maxFileSize = 500L * 1024;
         var rootFull = Path.GetFullPath(sourceRoot);

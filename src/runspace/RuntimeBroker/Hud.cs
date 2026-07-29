@@ -27,13 +27,13 @@ namespace Subsystem
                 sb.Append(" | batt ").Append(b.Level).Append('%');
                 if (b.IsCharging) sb.Append(" charging");
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             try
             {
                 var n = Subsystem.Device.Network.GetNetworkInfo();
                 sb.Append(" | net ").Append(n.HasWiFi ? "wifi" : n.HasCellular ? "cellular" : n.IsConnected ? "connected" : "offline");
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             try
             {
                 var m = Subsystem.Device.Memory.GetMemoryInfo();
@@ -41,7 +41,7 @@ namespace Subsystem
                   .Append(Math.Round(m.AvailableBytes / 1073741824.0, 1)).Append('/')
                   .Append(Math.Round(m.TotalBytes / 1073741824.0, 1)).Append("GB free");
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("hud", ex); }
             if (!string.IsNullOrEmpty(model)) sb.Append(" | model ").Append(model).Append('/').Append(backend);
             sb.Append(']');
             return sb.ToString();

@@ -64,7 +64,7 @@ public static class Haptics
                 using var effect = Android.OS.VibrationEffect.CreateOneShot(durationMs, Android.OS.VibrationEffect.DefaultAmplitude);
                 vib.Vibrate(effect);
             }
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("vibrate", ex.Message); }
     }
 }
 
@@ -84,7 +84,7 @@ public static class Audio
                 d["Alarm"] = am.GetStreamVolume(Android.Media.Stream.Alarm);
                 d["AlarmMax"] = am.GetStreamMaxVolume(Android.Media.Stream.Alarm);
             }
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("audio", ex.Message); }
         return d;
     }
 
@@ -98,7 +98,7 @@ public static class Audio
                 if (stream.Equals("Alarm", StringComparison.OrdinalIgnoreCase)) s = Android.Media.Stream.Alarm;
                 am.SetStreamVolume(s, level, Android.Media.VolumeNotificationFlags.ShowUi);
             }
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("audio", ex.Message); }
     }
 
     public static void PlayBeep() {
@@ -106,7 +106,7 @@ public static class Audio
             var uri = Android.Media.RingtoneManager.GetDefaultUri(Android.Media.RingtoneType.Notification);
             var r = Android.Media.RingtoneManager.GetRingtone(Android.App.Application.Context, uri);
             r?.Play();
-        } catch { }
+        } catch (System.Exception ex) { Subsystem.Dg.Warn("beep", ex.Message); }
     }
 }
 

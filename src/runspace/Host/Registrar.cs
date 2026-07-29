@@ -19,7 +19,7 @@ public static class Registrar
     // Default NF glyph icons the bootstrap assigns by id. A manifest-declared icon overrides this later;
     // for now the registrar seeds a sensible default. Values are literal Nerd-Font PUA glyphs — keep
     // this file UTF-8 and don't let tooling that assumes ASCII rewrite it.
-    private static readonly Dictionary<string, string> IconById = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, string> IconById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["agent"]       = "",  // comment
         ["terminal"]    = "",  // terminal
@@ -39,7 +39,7 @@ public static class Registrar
 
     // Launcher group per presenter id (the registry's truth — presenters live FLAT on disk; a
     // folder name is never a group). Unlisted ids default to "tools" so a drop-in just appears.
-    private static readonly Dictionary<string, string> GroupById = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, string> GroupById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["terminal"] = "core",
         ["agent"]    = "core",
@@ -116,8 +116,7 @@ public static class Registrar
             // 2b. The BACKGROUND (bg) — the spatial PowerShell desktop (src/shell/bg/, outside presenters/).
             // role:"desktop" — the Shell's RESTING LAYER (mounted under every window), not a launchable
             // applet: launcher presenters (Menu/TaskView) skip desktop-role records; the Shell resolves
-            // it by role. Renamed from "surface" 2026-06-19 (Scott): "Surface" collides with Android's
-            // Android.Views.Surface / SurfaceView / SurfaceHolder.
+            // it by role.
             {
                 // The file field reflects whichever presenter actually shipped (.obp post-rename;
                 // ObpHost's extension alias covers the transition either way).
@@ -252,7 +251,7 @@ public static class Registrar
                     present.Add(tp);
                 }
             }
-            catch { }
+            catch (Exception ex) { Dg.Warn("registrar", ex); }
 
             // 3c-2. Gr's shader catalog — fragment-shader programs as PLAYLIST objects
             // (\Capability\Shader\<playlist>). "Shader" is the mechanism name (Cutler law); the

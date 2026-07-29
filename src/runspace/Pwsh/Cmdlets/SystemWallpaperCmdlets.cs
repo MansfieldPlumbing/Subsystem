@@ -29,7 +29,7 @@ public sealed class GetSystemWallpaperCmdlet : WrapperCmdlet
                     playlist = plv.GetString() ?? playlist;
             }
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("wallpaper", ex); }
         var shaders = Subsystem.Cm.Cm.List()
             .Where(r => r.Type == "Shader" && r.Enabled)
             .OrderBy(r => r.Path, StringComparer.OrdinalIgnoreCase)

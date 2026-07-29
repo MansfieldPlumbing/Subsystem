@@ -11,7 +11,7 @@ namespace Subsystem.Pp;
 // provisioning template (extract from one device -> apply to another, or re-apply after reinstall).
 //
 // Register at boot with:  Pp.RegisterHandler(new CapabilitiesHandler());   // not yet wired.
-public sealed class CapabilitiesHandler : IProvisioningHandler
+public sealed class CapabilitiesSeam : IProvisioningSeam
 {
     public string Name => "Capabilities";
 

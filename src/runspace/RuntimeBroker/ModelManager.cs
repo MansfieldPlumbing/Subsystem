@@ -293,7 +293,7 @@ public static class ModelCatalog
                 DegradedDetail: degradedDetail,
                 Sampler: sampler);
         }
-        catch { return null; }
+        catch (Exception ex) { Dg.Warn("model", ex); return null; }
     }
 
     // ---- file mechanics (unchanged semantics) ----
@@ -326,7 +326,7 @@ public static class ModelCatalog
             am.GetMemoryInfo(mi);
             return mi.TotalMem;
         }
-        catch { return 0; }
+        catch (Exception ex) { Dg.Warn("model", ex); return 0; }
     }
 
     // E4B-class models want headroom; flag devices under ~10 GB (covers the 8 GB S23).
@@ -348,7 +348,7 @@ public static class ModelCatalog
                 var dest = LocalPath(context, spec);
                 if (File.Exists(legacy) && !File.Exists(dest)) File.Move(legacy, dest);
             }
-            catch { /* best-effort */ }
+            catch (Exception ex) { Dg.Warn("model", ex); /* best-effort */ }
         }
     }
 
@@ -450,7 +450,7 @@ public static class ModelCatalog
             var p = LocalPath(context, spec);
             if (File.Exists(p)) { File.Delete(p); return true; }
         }
-        catch { }
+        catch (Exception ex) { Dg.Warn("model", ex); }
         return false;
     }
 

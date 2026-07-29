@@ -1,4 +1,4 @@
-﻿// dp-onnx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
+// dp-onnx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
 //
 // "ONNX is protobuf": Onnx.dll already decomposes a .onnx into walkable objects.
 // This walks graph.Node in topological order over a Dictionary<string,Tensor>,
@@ -99,7 +99,7 @@ static int NodeInfo(string[] args)
 // resident (the 818MB decoder must not co-reside with the 1.28GB PLE).
 static int ToDb(string[] args)
 {
-    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx db <model.onnx|.litertlm> <out.db> [--section <N>]"); return 1; }
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dpx db <model.onnx|.litertlm> <out.db> [--section <N>]"); return 1; }
     string srcPath = args[1], dbPath = args[2];
     int section = -1;
     for (int i = 3; i < args.Length - 1; i++) if (args[i] == "--section") int.TryParse(args[i + 1], out section);
@@ -149,7 +149,7 @@ static ModelProto LoadGraphFromDb(int sig, string dbPath) => ModelDb.LoadGraphFr
 // loaddb <model.db> [sig] — verify the db->GraphProto loader reconstructs the graph (op histogram + data presence).
 static int LoadDbTest(string[] args)
 {
-    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx loaddb <model.db> [sig]"); return 1; }
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dpx loaddb <model.db> [sig]"); return 1; }
     int sig = args.Length > 2 ? int.Parse(args[2]) : 0;
     var m = LoadGraphFromDb(sig, args[1]);
     Console.WriteLine($"nodes={m.Graph.Node.Count} inits={m.Graph.Initializer.Count} in={m.Graph.Input.Count} out={m.Graph.Output.Count}");
@@ -168,7 +168,7 @@ static int LoadDbTest(string[] args)
 // baked into the graph). No ORT, no litert lib — gemma talking on our own interpreter, on the VOM.
 static int Generate(string[] args)
 {
-    if (args.Length < 4) { Console.Error.WriteLine("usage: dp-onnx generate <model.litertlm> <tokenizer.spm> \"<prompt>\" [maxNewTokens]"); return 1; }
+    if (args.Length < 4) { Console.Error.WriteLine("usage: dpx generate <model.litertlm> <tokenizer.spm> \"<prompt>\" [maxNewTokens]"); return 1; }
     string path = args[1], spmPath = args[2], prompt = args[3];
     int maxNew = args.Length > 4 && int.TryParse(args[4], out var mn) ? mn : 32;
 
@@ -268,7 +268,7 @@ static int Generate(string[] args)
 // This is the de-obfuscated KV contract litert hides behind a fixed 32003-slot buffer: 15 caches shared across 35L.
 static int GenOnnx(string[] args)
 {
-    if (args.Length < 5) { Console.Error.WriteLine("usage: dp-onnx gen-onnx <embed.db> <decoder.db> <tokenizer.spm> \"<prompt>\" [maxNew]"); return 1; }
+    if (args.Length < 5) { Console.Error.WriteLine("usage: dpx gen-onnx <embed.db> <decoder.db> <tokenizer.spm> \"<prompt>\" [maxNew]"); return 1; }
     string embDb = args[1], decDb = args[2], spmPath = args[3], prompt = args[4];
     int maxNew = args.Length > 5 && int.TryParse(args[5], out var mn) ? mn : 64;
 
@@ -335,7 +335,7 @@ static int GenOnnx(string[] args)
 // tokenize <spm> "<text>" — diagnose the SentencePiece tokenizer (piece scores, segmentation) without a model.
 static int Tokenize(string[] args)
 {
-    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx tokenize <spm> \"<text>\""); return 1; }
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dpx tokenize <spm> \"<text>\""); return 1; }
     var spm = SpModelProto.Parse(File.ReadAllBytes(args[1]));
     Console.WriteLine($"pieces={spm.Pieces.Count}");
     for (int i = 0; i < 6 && i < spm.Pieces.Count; i++)
@@ -354,7 +354,7 @@ static int Tokenize(string[] args)
 // dumpsg <model.litertlm> <section> <subgraph> — raw subgraph structure for composite-recursion debugging.
 static int DumpSg(string[] args)
 {
-    if (args.Length < 4) { Console.Error.WriteLine("usage: dp-onnx dumpsg <model.litertlm> <section> <subgraph>"); return 1; }
+    if (args.Length < 4) { Console.Error.WriteLine("usage: dpx dumpsg <model.litertlm> <section> <subgraph>"); return 1; }
     var secs = LiteRtLm.ReadSections(args[1]);
     int sec = int.Parse(args[2]), sgix = int.Parse(args[3]);
     Tflite.DumpSubgraph(LiteRtLm.ReadSectionBytes(args[1], secs[sec]), sgix);
@@ -363,7 +363,7 @@ static int DumpSg(string[] args)
 
 static int DbStats(string[] args)
 {
-    if (args.Length < 2) { Console.Error.WriteLine("usage: dp-onnx db-stats <model.db>"); return 1; }
+    if (args.Length < 2) { Console.Error.WriteLine("usage: dpx db-stats <model.db>"); return 1; }
     using var c = new SqliteConnection($"Data Source={args[1]}");
     c.Open();
     long Scalar(string sql) { using var cmd = c.CreateCommand(); cmd.CommandText = sql; return Convert.ToInt64(cmd.ExecuteScalar() ?? (object)0L); }
@@ -377,7 +377,7 @@ static int DbStats(string[] args)
     return 0;
 }
 
-static int Usage() { Console.WriteLine("usage: dp-onnx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db> | gpu-tune-q4 [srcRoot]"); return 1; }
+static int Usage() { Console.WriteLine("usage: dpx selftest | probe <model.onnx|.tflite|.litertlm> | run <model.onnx> [--inputs <dir>] [--out <wav>] | run <model.litertlm> --section <N> | db <model.onnx|.litertlm> <out.db> [--section <N>] | addoutput <in> <out> <tensorName...> | emit <model.onnx> <out.cs> | gpu-tune <model.db> | gpu-tune-q4 [srcRoot]"); return 1; }
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
@@ -394,7 +394,7 @@ static int Emit(string[] args)
     var inits = new HashSet<string>(g.Initializer.Select(i => i.Name));
     var nodes = g.Node;
     var sb = new System.Text.StringBuilder();
-    sb.AppendLine("// AUTO-EMITTED by `dp-onnx emit` — Tier-1 straight-line forward pass (calls Dp.Dispatch).");
+    sb.AppendLine("// AUTO-EMITTED by `dpx emit` — Tier-1 straight-line forward pass (calls Dp.Dispatch).");
     sb.AppendLine("using System;");
     sb.AppendLine("using System.Collections.Generic;");
     sb.AppendLine("using Onnx;");
@@ -437,13 +437,14 @@ static int GpuTest(string[] args)
     var A = new float[M * K]; for (int i = 0; i < A.Length; i++) A[i] = (float)(rnd.NextDouble() * 2 - 1);
     var B = new float[K * N]; for (int i = 0; i < B.Length; i++) B[i] = (float)(rnd.NextDouble() * 2 - 1);
     var C = new float[M * N];
-    string dxilPath = args.Length > 1 ? args[1] : @"S:\qnn-project\workspace\onnx-interp\_gpu\gemm.dxil";
-    byte[] dxil = File.ReadAllBytes(dxilPath);
+    string fallback = Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\", "qnn-project", "workspace", "onnx-interp", "_gpu", "gemm.dxil");
+    string dxilPath = args.Length > 1 ? args[1] : fallback;
+    byte[] dxil = File.Exists(dxilPath) ? File.ReadAllBytes(dxilPath) : Array.Empty<byte>();
     int rc = Gpu.dpgpu_gemm(A, B, C, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
     if (rc != 0) { Console.WriteLine($"dpgpu_gemm failed rc={rc}"); return 1; }
     var cpu = Dp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, M, K), Tensor.F(B, K, N) })[0].Fp;
     double maxd = 0; for (int i = 0; i < C.Length; i++) maxd = Math.Max(maxd, Math.Abs(C[i] - cpu[i]));
-    Console.WriteLine($"dp-onnx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Dp.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dp-onnx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
+    Console.WriteLine($"dpx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Dp.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dpx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
     return maxd < 1e-3 ? 0 : 2;
 }
 
@@ -460,7 +461,8 @@ static int GpuTestQ4(string[] args)
 
     var ident = new float[Kd * Kd]; for (int i = 0; i < Kd; i++) ident[i * Kd + i] = 1.0f;   // A = I(64)
 
-    string dxilPath = args.Length > 1 ? args[1] : @"S:\qnn-project\workspace\onnx-interp\_gpu\gemm_q4.dxil";
+    string fallbackQ4 = Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\", "qnn-project", "workspace", "onnx-interp", "_gpu", "gemm_q4.dxil");
+    string dxilPath = args.Length > 1 ? args[1] : fallbackQ4;
     byte[] dxil = File.Exists(dxilPath) ? File.ReadAllBytes(dxilPath) : Array.Empty<byte>();
     var c = new float[Kd * Nd];
     int rc = Gpu.dpgpu_gemm_q4(ident, packed, scales, Array.Empty<byte>(), c, (uint)Kd, (uint)Nd, (uint)Kd, (uint)bs, false, dxil);
@@ -486,7 +488,8 @@ static int GpuTestQ4(string[] args)
 static int GpuBench(string[] args)
 {
     int S = args.Length > 1 ? int.Parse(args[1]) : 512;
-    byte[] dxil = File.ReadAllBytes(@"S:\qnn-project\workspace\onnx-interp\_gpu\gemm.dxil");
+    string dxilDefault = Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\", "qnn-project", "workspace", "onnx-interp", "_gpu", "gemm.dxil");
+    byte[] dxil = File.Exists(dxilDefault) ? File.ReadAllBytes(dxilDefault) : Array.Empty<byte>();
     var rnd = new Random(1);
     var A = new float[S * S]; for (int i = 0; i < A.Length; i++) A[i] = (float)(rnd.NextDouble() * 2 - 1);
     var B = new float[S * S]; for (int i = 0; i < B.Length; i++) B[i] = (float)(rnd.NextDouble() * 2 - 1);
@@ -848,8 +851,9 @@ int Run(string[] args)
 // 2.5-3.5s breath group ~= 25-40 tokens (dp-onnx-receipts + breath-group prosody).
 int Stream(string[] args)
 {
-    string model = null, phonemes = null, phonemesFile = null, outPath = "stream.wav", voice = "af_heart";
-    string configPath = @"S:\reference\Kokoro-82M\config.json", voicesDir = @"S:\reference\Kokoro-82M\voices";
+    string drive = Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\";
+    string configPath = Path.Combine(drive, "reference", "Kokoro-82M", "config.json");
+    string voicesDir = Path.Combine(drive, "reference", "Kokoro-82M", "voices");
     float speed = 1.0f; int budget = 32, min = 12; double xfadeMs = 6, gapMs = 0;
     for (int i = 1; i < args.Length; i++)
         switch (args[i])
@@ -870,7 +874,7 @@ int Stream(string[] args)
         }
     if (phonemesFile != null) phonemes = File.ReadAllText(phonemesFile, System.Text.Encoding.UTF8).Trim();
     if (model == null || phonemes == null)
-    { Console.Error.WriteLine("usage: dp-onnx stream <model.onnx> --phonemes-file <ipa.txt> [--voice af_heart] [--out out.wav] [--budget 32] [--min 12] [--xfade-ms 6] [--gap-ms 0]"); return 1; }
+    { Console.Error.WriteLine("usage: dpx stream <model.onnx> --phonemes-file <ipa.txt> [--voice af_heart] [--out out.wav] [--budget 32] [--min 12] [--xfade-ms 6] [--gap-ms 0]"); return 1; }
 
     const int SR = 24000;
     var vocab = LoadVocab(configPath);
@@ -1083,7 +1087,7 @@ static double Peak(ReadOnlySpan<float> s) { double p = 0; foreach (var f in s) p
 //     dp-onnx specdiff <wavA> <wavB>
 static int SpecDiff(string[] args)
 {
-    if (args.Length < 3) { Console.Error.WriteLine("usage: dp-onnx specdiff <wavA> <wavB>"); return 1; }
+    if (args.Length < 3) { Console.Error.WriteLine("usage: dpx specdiff <wavA> <wavB>"); return 1; }
     var a = ReadWav(args[1]); var b = ReadWav(args[2]);
     double rmsA = Rms(a), rmsB = Rms(b);
     Console.WriteLine($"A {Path.GetFileName(args[1])}: {a.Length} samp  rms={rmsA:F5}  peak={Peak(a):F5}");

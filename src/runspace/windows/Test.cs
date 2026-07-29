@@ -6,6 +6,7 @@ using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Text;
 using Subsystem.Cm;
+using Subsystem.Remedy;
 
 namespace Subsystem.Windows;
 

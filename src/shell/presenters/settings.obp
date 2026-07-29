@@ -520,9 +520,6 @@ parent=Settings.About
         try {
           const d = await (await fetch('/diag', { cache: 'no-store' })).json();
           const r = d.runtime || {};
-          const vom = (d.vom || []);
-          const vomHandles = vom.reduce((n, o) => n + (o.handles || 0), 0);
-          const vomBytes = vom.reduce((n, o) => n + (o.bytes || 0), 0);
           el.innerHTML =
             row('Build', d.build) +
             row('Uptime', uptime(d.uptimeSec || 0)) +
@@ -533,7 +530,6 @@ parent=Settings.About
             row('RAM', r.ramGb != null ? r.ramGb + ' GB' : '?') +
             row('Model', r.activeModel + (d.modelReady ? ` · ${r.modelBackend || ''}` : ' · not loaded')) +
             row('Registry objects', r.registryCount) +
-            row('VOM', `${vom.length} owners · ${vomHandles} handles · ${(vomBytes/1_000_000).toFixed(1)} MB`) +
             row('Sessions', `${(d.sessions || []).length} local · ${(d.psrpSessions || []).length} psrp`);
         } catch (e) {
           el.innerHTML = `<div class="ctrl-caption" style="padding:20px;">Telemetry unavailable — backend offline.</div>`;
@@ -687,21 +683,23 @@ parent=Settings.About
     }
 
     let modelsWs=null; const mProgress={};
-    function mountModels(el) { el.innerHTML = `<div id="models-mount" class="surface"><div class="ctrl-row"><div class="ctrl-caption">Connecting...</div></div></div>`; connectModels(); }
+    function mountModels(el) { el.innerHTML = `<div id="models-mount" class="surface"><div class="ctrl-row"><div class="ctrl-caption">Loading models...</div></div></div>`; connectModels(); }
     function connectModels() {
+      fetch('/models')
+        .then(r => r.ok ? r.json() : fetch('/models.json').then(r2 => r2.json()))
+        .then(models => { if (Array.isArray(models)) renderModels(models.filter(m => m.id !== '_about')); })
+        .catch(_ => fetch('/models.json').then(r2 => r2.json()).then(models => renderModels(models.filter(m => m.id !== '_about'))).catch(_ => {}));
+
       modelsWs = new WebSocketClient('/models', {
         onMessage: (data) => {
           let f; try { f = JSON.parse(data); } catch { return; }
-          if (f.type === 'manifest') renderModels(f.models);
+          if (f.type === 'manifest') renderModels((f.models || []).filter(m => m.id !== '_about'));
           else if (f.type === 'progress') { mProgress[f.id] = { text: f.text, pct: f.pct }; updMP(f.id); }
           else if (f.type === 'done') { delete mProgress[f.id]; }
           else if (f.type === 'error') { mProgress[f.id] = { text: 'Error: ' + f.text, pct: null }; updMP(f.id); }
         },
         onReconnecting: () => {
-          const mount = document.getElementById('models-mount');
-          if (mount && !mount.querySelector('.surface-item')) {
-            mount.innerHTML = `<div class="ctrl-row"><div class="ctrl-caption">Reconnecting...</div></div>`;
-          }
+          // Keep rendered models on screen while reconnecting
         }
       });
       modelsWs.connect();
