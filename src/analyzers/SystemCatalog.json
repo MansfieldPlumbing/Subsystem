@@ -34,7 +34,7 @@
                 "src/runspace/Device/", "src/runspace/Diagnostics/", "src/runspace/Dpx/",
                 "src/runspace/Vom/", "src/runspace/Cm/", "src/runspace/Pp/"],
 
-  "_synchronousCore_about": "Components that are brutally synchronous — SS018 refuses async/await + sync-over-async here.",
+  "_synchronousCore_about": "Components that are node-synchronous internally (Compute to Scratch -> Blit Buffer) and decoupled across the pipeline — SS018 refuses async/await + sync-over-async here.",
   "synchronousCore": ["Vom", "Dg", "Cm", "Pp"],
 
   "unassigned": {
