@@ -122,7 +122,7 @@ static int inspect(const std::string& path) {
 // HTP can delegate: a strided Conv1d against a precomputed cos/sin*window basis,
 // reshaped to the ONNX STFT output layout [batch, frames, n_bins, 2].
 //
-// Math (matches chatterbox brutal_decomposed_stft, minus torch center-pad — the
+// Math (matches chatterbox decomposed_stft, minus torch center-pad — the
 // ONNX STFT op does NOT center-pad; framing starts at sample 0):
 //   N = frame_length (n_fft),  hop = frame_step,  K = onesided ? N/2+1 : N
 //   weight[k][0][n]   = cos(-2*pi*k*n/N) * window[n]    (real bank, channels 0..K-1)
