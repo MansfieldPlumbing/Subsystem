@@ -1,4 +1,4 @@
-#nullable disable
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -187,7 +187,7 @@ namespace Subsystem.Dpx
             }
         }
 
-        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[] audioBytes, CancellationToken ct = default)
+        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default)
             => StreamTurnAsync(prompt, audioBytes, null, ct);
 
         // Strips literal turn markers from the VISIBLE token stream. The model sometimes emits
@@ -237,7 +237,7 @@ namespace Subsystem.Dpx
             }
         }
 
-        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[] audioBytes, byte[] imageBytes, CancellationToken ct = default)
+        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[] audioBytes, byte[]? imageBytes, CancellationToken ct = default)
         {
             var fault = BringUp();
             if (fault != null)

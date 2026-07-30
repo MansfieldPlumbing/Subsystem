@@ -1,4 +1,4 @@
-#nullable disable
+#nullable enable
 // SentencePiece.cs — home-rolled SentencePiece (.spm/.model) reader + Unigram tokenizer: the textual sibling
 // of OnnxProto.cs (ONNX protobuf) and LiteRt.cs (.tflite FlatBuffers). No sentencepiece lib, no protobuf lib —
 // it parses the SentencePiece ModelProto by hand, then encodes with the Unigram best-path (Viterbi over piece

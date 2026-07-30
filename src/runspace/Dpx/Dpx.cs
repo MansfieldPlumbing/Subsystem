@@ -2619,7 +2619,7 @@ public class Dpx
                 int byteLen = t.RawData.Span.Length;
                 if (owner != null)
                 {
-                    string? nm = string.IsNullOrEmpty(t.Name) ? null : t.Name;
+                    string nm = string.IsNullOrEmpty(t.Name) ? null : t.Name;
                     // Android: back the weight bytes with an AHardwareBuffer blob so GpuVulkan can import the
                     // SAME memory (zero-copy residency on UMA). Fault-degrades to a plain VOM region (inv-9):
                     // AHB alloc can fail under fragmentation/OOM, and the CPU rung (ReadRawb over Resource)
