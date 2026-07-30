@@ -192,9 +192,9 @@ Set-Alias ls dir -Force
 // Name is pinned (not crc-mangled) so AndroidManifest activity-aliases — the FEDERATION's per-door
 // launcher icons (Editor/Terminal/Settings/…) — can target this activity by a stable component name.
 [Activity(Name = "dev.mansfieldplumbing.subsystem.MainActivity", Label = "@string/app_name", Icon = "@mipmap/appicon", RoundIcon = "@mipmap/appicon_round", MainLauncher = true, Theme = "@android:style/Theme.DeviceDefault.NoActionBar", WindowSoftInputMode = Android.Views.SoftInput.AdjustResize, ConfigurationChanges = Android.Content.PM.ConfigChanges.Orientation | Android.Content.PM.ConfigChanges.ScreenSize | Android.Content.PM.ConfigChanges.KeyboardHidden | Android.Content.PM.ConfigChanges.ScreenLayout)]
-// ADB-free USB (CRQ185 rung 2 / DpAoa.cs): the OS relaunches THIS activity with the matching intent
+// ADB-free USB (CRQ185 rung 2 / DpxAoa.cs): the OS relaunches THIS activity with the matching intent
 // when a host puts the phone into accessory mode (device role) or when a peer already in accessory
-// mode is plugged in via OTG (host role) — HandleUsbIntent (OnCreate/OnNewIntent) routes both to DpAoa.
+// mode is plugged in via OTG (host role) — HandleUsbIntent (OnCreate/OnNewIntent) routes both to DpxAoa.
 [IntentFilter(new[] { UsbManager.ActionUsbAccessoryAttached })]
 [MetaData(UsbManager.ActionUsbAccessoryAttached, Resource = "@xml/accessory_filter")]
 [IntentFilter(new[] { UsbManager.ActionUsbDeviceAttached })]
@@ -213,7 +213,7 @@ public class MainActivity : Activity
     public ConcurrentDictionary<long, TerminalSession> Sessions { get; } = new();
     public static MainActivity? Instance { get; private set; }
 
-    // DpAoa — at most one active role at a time (device XOR host); re-attaching tears down the prior one.
+    // DpxAoa — at most one active role at a time (device XOR host); re-attaching tears down the prior one.
     private DpAoaDevice? _aoaDevice;
     private DpAoaHost? _aoaHost;
 
@@ -349,10 +349,10 @@ public class MainActivity : Activity
         if (!string.IsNullOrEmpty(open)) OpenPresenter(open!);
     }
 
-    // Route a USB accessory/device-attached intent to DpAoa. Permission is granted implicitly for the
+    // Route a USB accessory/device-attached intent to DpxAoa. Permission is granted implicitly for the
     // app named in the matching accessory_filter/device_filter resource (the OS asks the user once,
     // "Open Subsystem when this USB accessory is connected?", before this activity is even launched) —
-    // HasPermission inside DpAoa.Open/DpAoaHost.Open still re-checks fail-closed for the hot-attach path
+    // HasPermission inside DpxAoa.Open/DpAoaHost.Open still re-checks fail-closed for the hot-attach path
     // where a filter match did NOT imply permission (e.g. a bare device attach with no matching filter).
     private void HandleUsbIntent(Android.Content.Intent? intent)
     {

@@ -1,3 +1,4 @@
+#nullable disable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -5,7 +6,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using Onnx;
 using Subsystem.Dpx;
 
 namespace Subsystem.Windows;
@@ -142,7 +142,7 @@ public static class ModelDbConsolidate
         Console.WriteLine($"[consolidate] QueryFaces -> [{string.Join(", ", facesQ)}]");
     }
 
-    // Synthetic chunked-tensor roundtrip receipt (drives tests/test.dp-onnx.model-db-chunking.ps1): write ONE
+    // Synthetic chunked-tensor roundtrip receipt (drives tests/test.dpx.model-db-chunking.ps1): write ONE
     // tensor of tensorBytes with a SMALL chunkBytes override, read it back, and prove byte-identical + the
     // expected chunk count. Returns JSON. No giant fixture — the caller passes e.g. 8MB chunks / 20MB tensor.
     public static string RoundtripChunk(long chunkBytes, long tensorBytes)
@@ -196,12 +196,12 @@ public static class ModelDbConsolidate
 
     private sealed class FaceSource
     {
-        public string Face;
-        public string Quant;
-        public string Path;
-        public long Length;
-        public int Sig;
-        public string Sha256;
+        public string Face { get; set; } = "";
+        public string Quant { get; set; } = "";
+        public string Path { get; set; } = "";
+        public long Length { get; set; }
+        public int Sig { get; set; }
+        public string Sha256 { get; set; } = "";
     }
 
     // "gemma4-e2b-onnx-embed-q4" -> (embed, q4); "…-onnx-vision-fp16" -> (vision, fp16). The face is the token

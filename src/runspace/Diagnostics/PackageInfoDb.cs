@@ -6,7 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
-namespace Subsystem;
+namespace Subsystem.Diagnostics;
 
 // One package-metadata record in the UAD/Canta shape. dependencies/neededBy = the package dependency
 // graph ("what breaks if I disable this"), mirroring Cm's DependsOn.

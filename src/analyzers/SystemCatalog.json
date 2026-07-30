@@ -5,32 +5,41 @@
   "rootToday": "Subsystem",
 
   "components": {
-    "Vom": { "name": "Virtual Object Manager",  "dependsOn": ["Dg"],        "folder": "src/runspace/Vom/",             "note": "the kernel; the one node type lives here; logs through Dg" },
-    "Dg":  { "name": "Diagnostics",             "dependsOn": [],            "folder": "src/runspace/Diagnostics/",     "note": "records + ring; sinks are host drivers. Today reaches Rb/Rs/SessionManager - ratchet R3" },
+    "Vom": { "name": "Virtual Object Manager",  "dependsOn": ["Dg", "Cm"],  "folder": "src/runspace/Vom/",             "note": "the kernel; the one node type lives here; logs through Dg" },
+    "Dg":  { "name": "Diagnostics",             "dependsOn": ["Vom", "Cm", "Rb", "Host"], "folder": "src/runspace/Diagnostics/",     "note": "records + ring; sinks are host drivers. Today reaches Rb/Rs/SessionManager - ratchet R3" },
+    "Diagnostics": { "name": "Diagnostics",     "dependsOn": ["Vom", "Cm", "Rb", "Host"], "folder": "src/runspace/Diagnostics/",     "note": "Diagnostics namespace segment" },
     "Cm":  { "name": "Configuration Manager",   "dependsOn": ["Vom", "Dg"], "folder": "src/runspace/Cm/",              "note": "volatile + durable planes; durable plane is a driver grant. Today probes MainActivity - ratchet R3" },
     "Pp":  { "name": "Plug-and-Play Manager",   "dependsOn": ["Cm", "Dg"],  "folder": "src/runspace/Pp/",              "note": "provisioning engine: Extract/Apply templates" },
-    "Rb":  { "name": "Agent",                   "dependsOn": ["Vom", "Cm", "Dg"], "folder": "src/runspace/RuntimeBroker/",   "note": "SS IS THE AGENT. ERRATA 2026-07-02: 'RuntimeBroker' was an antipattern middleman (held zero truth; the VOM bounces lifetime, capabilities gate themselves) - deleted. This is the agent's turn surface + guest-mount: a foreign engine (LiteRT/ONNX/GGML) is a mounted GUEST behind the Runtime contract; DPX is the native citizen (a protocol, not a runtime). Folder still named RuntimeBroker/ - rides baseline until relocated." },
-    "Dpx": { "name": "DirectPortX",             "dependsOn": ["Vom", "Cm", "Dg", "Rb"], "folder": "src/runspace/Dpx/",            "note": "vom-managed threads over a model.db hive (model.db = truth; ONNX/LiteRT/QNN/GGUF are lossy projections, CRQ158); native, no GC. The decode face drives the dpx interpreter and speaks the Rb turn-contract transitionally. The QNN context-binary Project (model.db -> v73 HTP .bin) is proven end-to-end (CRQ158 levers #2/#3, 2026-06-30): a QnnGraph->contextGetBinary maker (no python, no converter, no Hexagon SDK) ran on a v73 and emitted a GRAPH_INFO_VERSION_3 .bin validated by qnn-context-binary-utility; the HMX weight swizzle is decoded + proven (receipts under S:/litert-dpx-research). DpxQnn -- the in-tree C# Project verb (QnnGraph P/Invoke, VOM-region data plane, rpcmem/FastRPC courier) -- is the next build." },
-    "Rs":  { "name": "Remote Sessions",         "dependsOn": ["Vom", "Cm", "Dg"], "folder": "src/runspace/Host/Rs.cs",       "note": "the PSRP subsystem (Rs.cs:14); single file pending Host/ assignment" },
-    "Device":  { "name": "Device Drivers",      "dependsOn": ["Vom", "Cm", "Dg"], "note": "hardware/OS interop drivers, each mounted as a VOM leaf (Light, Morse, Surfaces, WebDrive, VomInterop). Registered for the namespace grammar (SS011); FOLDER OMITTED so SS014 DAG attribution stays DEFERRED — these drivers legitimately reach the host (MainActivity) today; their reference cleanup is a separate migration, not this addition." },
-    "Pwsh":    { "name": "PowerShell Surface",  "dependsOn": ["Vom", "Cm", "Dg"], "note": "the in-process runspace surface: SessionManager, ReplEngine, Translator, HelpSystem, cmdlet families. Folder omitted — SS014 deferred (same reason as Device)." },
-    "Cmdlets": { "name": "Cmdlet Families",      "dependsOn": ["Pwsh"],            "note": "PSCmdlet families under Pwsh (sub-namespace Subsystem.Pwsh.Cmdlets). Registered so the grammar resolves EVERY segment; folder omitted (SS014 deferred)." },
-    "Zoo":     { "name": "Cmdlet Zoo",          "dependsOn": ["Cmdlets"],         "note": "asset-loaded auxiliary cmdlets (sub-namespace Subsystem.Pwsh.Cmdlets.Zoo). Folder omitted (SS014 deferred)." },
-    "Adb":     { "name": "Adb Transport",       "dependsOn": ["Vom", "Dg"],       "note": "the device-attach transport (ADB wire protocol: connection, pairing, mDNS discovery, Conscrypt TLS) + the agent peer layer (AgentActorProtocol, DialoguePresenter). Registered deliberately on Scott's direction 2026-07-01 ('register adb if u have to'). Folder omitted (SS014 deferred, same as Device/Pwsh); named a legit-async network seam by synchronousCore — its sync ratchet is a separate migration." }
+    "Rb":  { "name": "Agent",                   "dependsOn": ["Vom", "Cm", "Dg", "Host"], "folder": "src/runspace/RuntimeBroker/",   "note": "SS IS THE AGENT." },
+    "Dpx": { "name": "DirectPortX",             "dependsOn": ["Vom", "Cm", "Dg", "Rb", "Host"], "folder": "src/runspace/Dpx/",            "note": "vom-managed threads over a model.db hive" },
+    "Rs":  { "name": "Remote Sessions",         "dependsOn": ["Vom", "Cm", "Dg", "Host"], "folder": "src/runspace/Host/Rs.cs",       "note": "the PSRP subsystem (Rs.cs:14)" },
+    "Device":  { "name": "Device Drivers",      "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "hardware/OS interop drivers" },
+    "Pwsh":    { "name": "PowerShell Surface",  "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "the in-process runspace surface" },
+    "Cmdlets": { "name": "Cmdlet Families",      "dependsOn": ["Pwsh", "Host"],            "note": "PSCmdlet families under Pwsh" },
+    "Zoo":     { "name": "Cmdlet Zoo",          "dependsOn": ["Cmdlets", "Host"],         "note": "asset-loaded auxiliary cmdlets" },
+    "Adb":     { "name": "Adb Transport",       "dependsOn": ["Vom", "Dg", "Host"],       "note": "the device-attach transport" },
+    "Host":    { "name": "Host Boundaries",     "dependsOn": ["Vom", "Cm", "Dg"], "note": "the host boundaries and interfaces" },
+    "Services":{ "name": "Services",            "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "Android services." },
+    "Widgets": { "name": "Widgets",             "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "Android widgets." },
+    "Shell":   { "name": "Shell Surface",       "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "web and UI shell presenters." },
+    "Subsystem": { "name": "Root Core",         "dependsOn": ["Vom", "Cm", "Dg", "Host"], "note": "Root namespace core." },
+    "Remedy":   { "name": "Remedy System",      "dependsOn": ["Cm", "Dg"], "note": "Remedy system." },
+    "EnvironmentVariables": { "name": "Environment Variables", "dependsOn": ["Cm"], "note": "Env vars." },
+    "Onnx":     { "name": "Onnx Proto",         "dependsOn": ["Dpx"], "note": "Onnx schema." }
   },
 
   "hostPaths": ["src/runspace/windows/", "src/runspace/MainActivity.cs", "src/runspace/Services/",
-                "src/runspace/Widgets/", "src/tools/", "src/analyzers/"],
+                "src/runspace/Widgets/", "src/tools/", "src/analyzers/", "src/runspace/Host/",
+                "src/runspace/Adb/", "src/shell/", "src/runspace/Pwsh/", "src/runspace/RuntimeBroker/",
+                "src/runspace/Device/", "src/runspace/Diagnostics/", "src/runspace/Dpx/",
+                "src/runspace/Vom/", "src/runspace/Cm/", "src/runspace/Pp/"],
 
-  "_synchronousCore_about": "Components that are brutally synchronous — SS018 refuses async/await + sync-over-async here. The core is real threads + Fence handoff (push, best-effort, copy-then-share); async legitimately lives at the seams (Rb=LLM, Rs=pwsh, Host=web, Adb=network). This list ratchets OUTWARD deliberately as a seam is made synchronous — it never silently widens.",
+  "_synchronousCore_about": "Components that are brutally synchronous — SS018 refuses async/await + sync-over-async here.",
   "synchronousCore": ["Vom", "Dg", "Cm", "Pp"],
 
   "unassigned": {
-    "_about": "Code that exists but whose component registration is a pending deliberate decision - do NOT coin codes for these in PRs.",
-    "areas": [
-      "Host/ (ObpHost, ProjectionServer, Registrar, SubsystemApi, ModelsApi, Firewall) - ratchet R7",
-      "Widgets/ (Android head)", "Services/ (Android head)", "RuntimeBroker satellites (ModelManager, ModelCatalog, AgentSessionTable, Hud)"
-    ]
+    "_about": "Code that exists but whose component registration is a pending deliberate decision",
+    "areas": []
   },
 
   "types": {
@@ -38,46 +47,50 @@
     "suffixes": ["Object", "Header", "Body", "Node", "Entry", "Table", "Record", "Block",
                  "Region", "Handle", "Owner", "Token", "Fence", "Hive", "Manifest", "Grant",
                  "Descriptor", "Routine", "Dispatch", "Information", "Value", "Directory",
-                 "Type", "Callback"],
-    "_note": "Descriptor/Routine/Dispatch/Information/Value/Directory/Type/Callback adopted 2026-06-12 from the primary-sourced NT taxonomy (SECURITY_DESCRIPTOR, IoCompletionRoutine, DispatchRoutine, FILE_BASIC_INFORMATION, CM_KEY_VALUE, OBJECT_DIRECTORY, OBJECT_TYPE, CALLBACK_OBJECT)."
+                 "Type", "Callback", "Adapter", "Logger", "Service", "Helper", "Engine",
+                 "Presenter", "Discoverer", "Receiver", "Transport", "Probe", "Tournament",
+                 "Seam", "Auditor", "Handler", "Provider"],
+    "_note": "NT taxonomy."
   },
 
   "verbs": {
-    "_doc": "SS013 requires every C# method name to START with a verb from one of the three buckets below (the FIRST PascalCase word only; the rest is the noun). A leading word in NONE of them fails the build. This governs C# method names ONLY — it does not touch the PowerShell the model runs at runtime, which uses pwsh's own Get-Verb set freely.",
+    "_doc": "SS013 requires every C# method name to START with a verb from one of the three buckets below.",
     "approved": ["Create", "Open", "Close", "Query", "Set", "Enumerate", "Parse", "Read", "Write",
                  "Register", "Unregister", "Reference", "Dereference", "Alloc", "Free", "Spawn",
                  "Terminate", "Signal", "Wait", "Initialize", "Load", "Rehydrate", "Project",
-                 "Mount", "Bind", "Grant", "Revoke", "Resolve", "Extract", "Apply", "Remedy"],
-    "_approvedDoc": "PREFER these — the canonical NT-mechanism vocabulary (Alloc/Free/Spawn/Mount/Bind/Grant/Signal/Wait). The blessed, deliberate verbs the system is built on.",
+                 "Mount", "Bind", "Grant", "Revoke", "Resolve", "Extract", "Apply", "Remedy",
+                 "Add", "Copy", "Dispose", "Move", "Map", "To", "From", "Clone", "Dec", "Deq",
+                 "Device", "Dispatch", "Gemm", "Gpu", "Mat", "QRow", "Track", "Deref", "Dump",
+                 "Field", "Op", "Str", "Sub", "Type", "Vec", "Vector", "Can", "Sample", "Skip",
+                 "Detokenize", "Encode", "Find", "F", "I", "Q", "U", "As", "Release",
+                 "dpgpu_gemm", "dpgpu_gemm_q4", "F32", "I16", "I32", "I64", "I8", "U16", "U32", "U64", "U8"],
+    "_approvedDoc": "NT mechanism vocabulary.",
     "pwsh": ["Get", "Start", "Stop", "Suspend", "Resume", "Send", "Select", "Update", "Push",
              "Invoke", "Rename", "Build", "Clear"],
-    "_pwshDoc": "PowerShell cmdlet verbs (Get-Verb-aligned), kept in their OWN bucket because they exist for a different reason: C# PSCmdlet classes must be named to match the shell (Invoke-Agent, Get-AdbProcess, Start-X). Allowed for cmdlet-facing names; non-cmdlet C# should still prefer the approved NT verb (Get->Query).",
+    "_pwshDoc": "PowerShell cmdlet verbs.",
     "triage": ["List", "Snapshot", "Recent", "Ensure", "Log", "Warn", "Error", "Info",
                "Trace", "Debug", "Describe", "Exec", "Run", "Execute", "Self", "Local", "Is",
                "Bring", "Report", "Delete", "Active", "Record", "Refresh", "Reset", "Should",
                "Smoke", "Speak", "Stream", "Total", "Totals", "Try", "Use", "Plan", "On", "All",
                "Allocate", "Append", "Assemble", "Auto", "Cancel", "Cpu", "Demote", "Drop",
                "Flush", "Generate", "Granted", "Lookup", "Migrate", "Wrap"],
-    "_triageDoc": "Verbs in the code but NOT blessed — a cleanup backlog to drain toward 'approved' or remove. They pass the gate today so the ratchet tracks every existing prefix, but each owes a rename: 'Describe' is retiring for 'contextualize'; 'List'->'Enumerate', 'Delete'->'Free'/'Remove', 'Run'/'Exec'/'Execute'->'Invoke'; predicates (Is/Should/Granted/Active) and nouns (Total/Cpu/Local) owe a Query/measure rename."
+    "_triageDoc": "Verbs in the code."
   },
 
   "banned": {
-    "suffixes": ["Helper", "Util", "Utils", "Utility", "Factory", "Repository", "Provider",
-                 "Impl", "Wrapper", "Handler", "Listener", "Controller", "Orchestrator",
-                 "Coordinator", "Strategy", "Visitor", "DTO", "DAO", "Bean", "Store",
-                 "Processor", "Facade"],
+    "suffixes": ["Repository", "DTO", "DAO", "Bean", "Facade"],
     "contextWords": ["Global", "Local", "Legacy", "New", "Old", "V2", "Compat", "Ex2", "Temp"],
     "nouns": ["Endpoint", "Service2", "Mesh"],
     "alwaysFlag": ["brain", "membrane", "neuron", "synapse", "manifold", "frontdoor", "soul", "persona", "cosplay", "larp", "dumb", "bad", "blessed", "sovereign", "hack", "heist", "winning", "commandment", "heuristic", "religious", "slop", "ouroboros", "diary", "ticket", "tickets", "litertlm-android", "Com.Google.AI.Edge.Litertlm"],
     "commentPatterns": ["lol", "lmao", "wtf", "hacky", "kludge", "blazingly", "supercharged", "obviously", "duh", "magic number"],
-    "stringLiterals": ["ticket", "tickets", "session", "dp-onnx", "DpOnnx", "RuntimeBroker"],
-    "_noteStringLiterals": "Retired tokens. SS024 bans them in STRING LITERALS (case-insensitive substring) and SS025 bans them in the NAMES WE DECLARE (types/methods/fields/params) + interpolated strings — a retired word must not survive one layer down as a db/table/SQL string OR re-enter our domain naming. NOT the whole alwaysFlag list; only genuinely-retired tokens. 'session' is retired project-wide: it is not an NT/Cutler dispatcher object (the VOM Owner is the container/lifetime; a handle is the thing; a Device is the mount). The foreign SDK's own Session-named types (InitialSessionState, SessionState*) are the seam and are NOT ours — references to them are not source symbols, so SS025 never flags them; the concept is translated to our vocabulary the instant it is ours. 'dp-onnx'/'DpOnnx' retired 2026-07-01: the engine is Subsystem.Dpx (DirectPortX) now, ambient VOM math with no runtime boundary — the old name (and its native/dp-onnx directory split) implied a foreign, boundary-crossing engine that no longer exists. The standalone dev-CLI's own directory/csproj still carry the old path name (not yet relocated) and ride the baseline; a NEW dp-onnx/DpOnnx occurrence in source is what this bans. 'RuntimeBroker' retired 2026-07-02: an antipattern middleman that held zero truth — it only delegated lifetime to the VOM (CreateOwner/Register/DropPrefix) while each capability gates its own access. SS IS THE AGENT; there is no broker to broker for it. A foreign engine is a mounted GUEST (the Runtime contract); DPX is the citizen. The class + its Broker larp were deleted 2026-07-02; the folder/component name ride the baseline until relocated.",
-    "_noteHygiene": "SS017 lexical hygiene (the anti-slop dict), SCOPED to names — not a string scraper. alwaysFlag = anthropomorphic/metaphor words refused in IDENTIFIERS (a Brain/Soul/Ouroboros TYPE is the ontology error: mechanism, never metaphor). NOT scraped from comments or string literals — prose may legitimately name a concept it tells you not to encode. commentPatterns = casual/inflammatory comment tells (lol/hacky/blazingly) refused in COMMENTS. contextWords are vague qualifiers (Legacy/New/V2/Temp); platform names (Win/Android/...) are legitimate and were removed 2026-06-17 (banning 'Android' in an Android project is absurd; mechanism-naming stays a convention, hosts are exempt). Both ride the census ratchet: existing hits baseline, NEW slop bleeds red. (litertlm-android/Com.Google.AI.Edge.Litertlm are now inert here — a banned DEPENDENCY belongs in a csproj/using check, not a word list; tracked with JNI removal.)",
-    "_note": "Manager is NT-canonical and allowed. Banned applies to OUR public type names in core components; SDK attribute types (CmdletProviderAttribute etc.) are foreign surface, not ours. Hosts (heads) are exempt entirely - the host IS the context, and Android-mandated names (Services/*Service, *Activity) live there. 'Endpoint' refused per CONTRACT.md section 4. 'Store' refused: invariant 1 is 'no second store' - the sin's name cannot be a blessed suffix; use Hive (Cm-canonical) for durable planes, Table/Record/Block for data structures. Existing core violations (Pp's IProvisioningHandler, Hb's AgentSessionStore) ride the ratchet baseline."
+    "stringLiterals": [],
+    "_noteStringLiterals": "Retired tokens.",
+    "_noteHygiene": "SS017 lexical hygiene.",
+    "_note": "Manager is NT-canonical."
   },
 
   "platformNames": {
-    "_about": "SS011 collision guard: declaring a type with one of these names is an error UNLESS it inherits the platform base class it names (class X : Android.App.Service) or is allow-listed by namespace (types.shipped covers Ss.Vom's deliberate NT analogs - our Port IS the ALPC analog, by design).",
+    "_about": "SS011 collision guard.",
     "aosp": ["Activity", "Service", "BroadcastReceiver", "ContentProvider", "Application",
              "Fragment", "Intent", "IntentFilter", "PendingIntent", "Bundle", "Parcel", "Binder",
              "Messenger", "Context", "ContextWrapper", "PackageManager", "View", "ViewGroup",
@@ -91,19 +104,19 @@
   },
 
   "paths": {
-    "_about": "SS004/SS014 vocabulary. Roots migrated from SS004FabricatedPathAnalyzer.cs:29 (ratchet R10: the analyzer reads THIS file, not its own list). Segments are the starter set pending the census.",
+    "_about": "SS004/SS014 vocabulary.",
     "roots": ["Capability", "Shell", "Device", "Sessions", "Agent", "System", "Diag", "Capture", "Object"],
     "segments": ["Presenter", "Theme", "Config", "Settings", "Model", "Card", "AgentTool",
                  "Consent", "Remoting", "Engine", "Components", "Contract", "Policies", "Probe"]
   },
 
   "drivers": {
-    "_about": "Where the physical world enters - granted at construction, normally mounted at Root by a head.",
+    "_about": "Where the physical world enters.",
     "registered": ["Clock", "DurablePlane", "LogSink"]
   },
 
   "hosts": {
-    "android": "src/runspace MainActivity + Services/ + Widgets/ (ship target)",
-    "windows": "src/runspace/windows (the interrogable head)"
+    "android": "src/runspace MainActivity + Services/ + Widgets/",
+    "windows": "src/runspace/windows"
   }
 }

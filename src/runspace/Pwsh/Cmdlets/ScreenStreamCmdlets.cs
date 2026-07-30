@@ -383,14 +383,15 @@ internal sealed class ScreenStreamSession(
 
 internal static class ScreenStreamRegistry
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ScreenStreamSession>
-        _sessions = new();
+    private static System.Collections.Immutable.ImmutableDictionary<string, ScreenStreamSession>
+        _sessions = System.Collections.Immutable.ImmutableDictionary<string, ScreenStreamSession>.Empty;
 
-    public static void Register(string id, ScreenStreamSession s) => _sessions[id] = s;
+    public static void Register(string id, ScreenStreamSession s) =>
+        System.Collections.Immutable.ImmutableInterlocked.Update(ref _sessions, dict => dict.SetItem(id, s));
 
     public static bool Stop(string id)
     {
-        if (!_sessions.TryRemove(id, out var s)) return false;
+        if (!System.Collections.Immutable.ImmutableInterlocked.TryRemove(ref _sessions, id, out var s)) return false;
         s.Cts.Cancel();
         s.Encoder.Stop();
         s.Encoder.Release();

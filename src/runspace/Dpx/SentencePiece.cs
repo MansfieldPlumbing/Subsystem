@@ -1,16 +1,17 @@
+#nullable disable
 // SentencePiece.cs — home-rolled SentencePiece (.spm/.model) reader + Unigram tokenizer: the textual sibling
 // of OnnxProto.cs (ONNX protobuf) and LiteRt.cs (.tflite FlatBuffers). No sentencepiece lib, no protobuf lib —
 // it parses the SentencePiece ModelProto by hand, then encodes with the Unigram best-path (Viterbi over piece
 // scores, per-byte fallback) and detokenizes the inverse. Salvaged from the gemma-talking-layer wip (the only
 // sovereign, engine-independent part of it); the model bytes / .spm path are supplied by the caller — nothing
-// is hardcoded here. Receipt: tests/test.dp-onnx.sentencepiece.ps1.
+// is hardcoded here. Receipt: tests/test.dpx.sentencepiece.ps1.
 
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-namespace Onnx;
+namespace Subsystem.Dpx;
 
 // SentencePiece piece kinds (ModelProto.SentencePiece.Type): the closed enum the .spm stores per piece.
 public enum SentencePieceType { Normal = 1, Unknown = 2, Control = 3, UserDefined = 4, Unused = 5, Byte = 6 }

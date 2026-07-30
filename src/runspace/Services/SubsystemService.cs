@@ -316,8 +316,8 @@ public class SubsystemService : Service
             .SetSmallIcon(this.ApplicationInfo!.Icon)
             .SetAutoCancel(true)
             .SetTimeoutAfter(30_000)
-            .AddAction(new Notification.Action.Builder(Resource.Mipmap.appicon, "Confirm shutdown", confirmPi).Build())
-            .AddAction(new Notification.Action.Builder(Resource.Mipmap.appicon, "Keep running", keepPi).Build())
+            .AddAction(new Notification.Action.Builder(Resource.Mipmap.appicon, new Java.Lang.String("Confirm shutdown"), confirmPi).Build())
+            .AddAction(new Notification.Action.Builder(Resource.Mipmap.appicon, new Java.Lang.String("Keep running"), keepPi).Build())
             .Build()!;
         ((NotificationManager)GetSystemService(NotificationService)!).Notify(ConfirmNotificationId, n);
     }

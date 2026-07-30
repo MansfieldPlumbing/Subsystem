@@ -1,6 +1,7 @@
-// OnnxProto.cs — home-rolled ONNX protobuf (read + write) for the dp-onnx subset.
+#nullable disable
+// OnnxProto.cs — home-rolled ONNX protobuf (read + write) for the dpx subset.
 //
-// Replaces Google.Protobuf + Grpc.Tools so dp-onnx folds into the in-proc Roslyn build
+// Replaces Google.Protobuf + Grpc.Tools so dpx folds into the in-proc Roslyn build
 // (`ss build self`) with no codegen step and no NuGet dependency — own the artifact (CRQ143).
 // Only the messages the interpreter actually touches are modeled; unknown wire fields are
 // skipped on read and dropped on write. proto2 wire format: a tag is (field<<3)|wiretype;
@@ -15,7 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Onnx;
+namespace Subsystem.Dpx;
 
 // ── ByteString: the bytes-field type (proto `bytes`). Mirrors the Google.Protobuf surface used. ──
 public sealed class ByteString

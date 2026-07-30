@@ -52,7 +52,7 @@ public static class Program
             "shell" or "-shell" or "--shell"                                 => WinForms.Open("http" + "://shell/shell.obp", args[1..]),
             "bundle-audit"                                                   => BundleAuditor.Run(),
             "mcp" or "-mcp" or "--mcp"                                       => Mcp.Run(args[1..]),
-            "ble-scan"                                                       => DpBleScan.Run(args[1..]),
+            "ble-scan"                                                       => DpxBleScan.Run(args[1..]),
             "git"                                                            => Git.Run(args[1..]),
             "status" or "st"                                                 => Status.Run(args[1..]),
             "refs"                                                           => Refs.Run(args[1..]),

@@ -48,7 +48,6 @@ public static class HelpSystem
                     
                     _helpCache = cache;
                 }
-                }
                 catch (Exception ex)
                 {
                     return $"Error loading help system: {ex.Message}";

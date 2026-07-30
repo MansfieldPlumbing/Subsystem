@@ -136,7 +136,7 @@ public static unsafe partial class Vom
     }
 
     // Open by id (the by-path Open's counterpart, matching Close(Owner, uint id) below): id-keyed
-    // callers (DpGang's role table, which addresses buffers by Handle.Id, not by path) bump the SAME
+    // callers (DpxGang's role table, which addresses buffers by Handle.Id, not by path) bump the SAME
     // registry refcount Close(id) decrements — one counter, read through QueryRefCount below, never a
     // caller-local shadow (invariant 3: the registry projects the namespace, nothing downstream holds truth).
     public static bool Open(Owner owner, uint id)

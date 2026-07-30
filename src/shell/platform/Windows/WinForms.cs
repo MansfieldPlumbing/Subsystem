@@ -48,6 +48,7 @@ internal static class WinForms
         {
             try
             {
+                EnsureNativeWebView2Loader();
                 Directory.CreateDirectory(DataDir);
                 var env = await CoreWebView2Environment.CreateAsync(null, DataDir);
                 await webView.EnsureCoreWebView2Async(env);
@@ -162,6 +163,45 @@ internal static class WinForms
                 FormBorderStyle = _savedBorder; Bounds = _savedBounds; WindowState = _savedState;
                 _full = false;
             }
+        }
+    }
+
+    private static void EnsureNativeWebView2Loader()
+    {
+        try
+        {
+            var dir = AppDomain.CurrentDomain.BaseDirectory;
+            if (File.Exists(Path.Combine(dir, "WebView2Loader.dll")))
+            {
+                CoreWebView2Environment.SetLoaderDllFolderPath(dir);
+                return;
+            }
+
+            var asm = typeof(WinForms).Assembly;
+            var resourceName = System.Linq.Enumerable.FirstOrDefault(
+                asm.GetManifestResourceNames(),
+                n => n.EndsWith("WebView2Loader.dll", StringComparison.OrdinalIgnoreCase));
+
+            if (resourceName != null)
+            {
+                using var stream = asm.GetManifestResourceStream(resourceName);
+                if (stream != null)
+                {
+                    var tempDir = Path.Combine(Path.GetTempPath(), "subsystem_wv2");
+                    Directory.CreateDirectory(tempDir);
+                    var extractedPath = Path.Combine(tempDir, "WebView2Loader.dll");
+                    if (!File.Exists(extractedPath) || new FileInfo(extractedPath).Length != stream.Length)
+                    {
+                        using var fs = File.Create(extractedPath);
+                        stream.CopyTo(fs);
+                    }
+                    CoreWebView2Environment.SetLoaderDllFolderPath(tempDir);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Dg.Warn("winforms", ex);
         }
     }
 }

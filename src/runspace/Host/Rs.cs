@@ -85,8 +85,7 @@ public static class Rs
     private const string BootstrapAsset = "shell/cli/psrp-bootstrap.ps1";
     private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
 
-    private static readonly ConcurrentDictionary<string, PsrpSession> _sessions =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, PsrpSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _connectGate = new();
     private static string? _bootstrap;
 
@@ -106,11 +105,15 @@ public static class Rs
         {
             var tmp = Cm.Cm.Get(@"\System\Config\TempDir")?.ManifestJson ?? AppContext.BaseDirectory;
             if (Directory.Exists(tmp)) return;
+#if ANDROID || __ANDROID__
             var cache = MainActivity.Instance?.CacheDir?.AbsolutePath;
-            if (string.IsNullOrEmpty(cache)) return;
-            Directory.CreateDirectory(cache);
-            Environment.SetEnvironmentVariable("TMPDIR", cache);
-            Dg.Log("rs", $"TMPDIR was unusable ({tmp}); grounded to {cache}");
+            if (!string.IsNullOrEmpty(cache))
+            {
+                Directory.CreateDirectory(cache);
+                Environment.SetEnvironmentVariable("TMPDIR", cache);
+                Dg.Log("rs", $"TMPDIR was unusable ({tmp}); grounded to {cache}");
+            }
+#endif
         }
         catch (Exception ex) { Dg.Log("rs", "EnsureTempDir: " + ex.Message); }
     }

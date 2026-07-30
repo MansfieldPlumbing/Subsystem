@@ -20,7 +20,7 @@ public sealed class ConscryptAdbTransport : IAdbTransport
 
     public async Task<Stream> ConnectAsync(string host, int port, CancellationToken ct = default)
     {
-        _socket = await Task.Run(() => new Java.Net.Socket(host, port), ct);
+        _socket = new Java.Net.Socket(host, port);
         Dg.Log("adb", $"TCP connected to {host}:{port}");
         return new DuplexStream(_socket.InputStream!, _socket.OutputStream!);
     }
@@ -59,7 +59,7 @@ public sealed class ConscryptAdbTransport : IAdbTransport
         // Layer an SSLSocket over the already-connected plaintext socket (autoClose=true).
         _sslSocket = (Javax.Net.Ssl.SSLSocket)sslContext.SocketFactory!.CreateSocket(_socket, host, port, true)!;
         _sslSocket.UseClientMode = true;
-        await Task.Run(() => _sslSocket.StartHandshake(), ct);
+        _sslSocket.StartHandshake();
         Dg.Log("adb", $"TLS OK (Conscrypt): {_sslSocket.Session?.Protocol} {_sslSocket.Session?.CipherSuite}");
 
         return new DuplexStream(_sslSocket.InputStream!, _sslSocket.OutputStream!);

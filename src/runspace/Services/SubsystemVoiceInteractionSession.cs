@@ -67,7 +67,8 @@ public class SubsystemVoiceInteractionSession : VoiceInteractionSession
                 }
             }
 
-            _ = Task.Run(async () =>
+            var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\Voice");
+            Subsystem.Vom.Vom.Spawn(owner, "VoiceAssist", async _ =>
             {
                 try
                 {
@@ -128,7 +129,9 @@ public class SubsystemVoiceInteractionSession : VoiceInteractionSession
 
     private Task<byte[]> RecordAudioAsync(int maxSeconds)
     {
-        return Task.Run(() =>
+        var tcs = new TaskCompletionSource<byte[]>();
+        var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\Voice");
+        Subsystem.Vom.Vom.Spawn(owner, "RecordAudio", _ =>
         {
             try
             {
@@ -141,7 +144,8 @@ public class SubsystemVoiceInteractionSession : VoiceInteractionSession
                 if (audioRecord.State != State.Initialized)
                 {
                     Log.Warn(Tag, "AudioRecord failed to initialize.");
-                    return Array.Empty<byte>();
+                    tcs.SetResult(Array.Empty<byte>());
+                    return;
                 }
 
                 audioRecord.StartRecording();
@@ -158,14 +162,15 @@ public class SubsystemVoiceInteractionSession : VoiceInteractionSession
                 
                 audioRecord.Stop();
                 Log.Info(Tag, $"Captured {ms.Length} bytes of raw audio.");
-                return ms.ToArray();
+                tcs.SetResult(ms.ToArray());
             }
             catch (Exception ex)
             {
                 Log.Error(Tag, $"Audio recording failed: {ex.Message}");
-                return Array.Empty<byte>();
+                tcs.SetResult(Array.Empty<byte>());
             }
         });
+        return tcs.Task;
     }
 
     public override void OnHandleScreenshot(Bitmap? screenshot)

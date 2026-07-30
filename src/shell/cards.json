@@ -2,21 +2,21 @@
   {
     "id": "clock",
     "name": "Clock",
-    "icon": "🕐",
+    "icon": "󱑒",
     "ext": { "native": "clock" },
     "size": { "w": 240, "h": 150 }
   },
   {
     "id": "ps",
     "name": "PowerShell",
-    "icon": "▶",
+    "icon": "",
     "ext": { "native": "ps" },
     "size": { "w": 360, "h": 280 }
   },
   {
     "id": "battery",
     "name": "Battery",
-    "icon": "🔋",
+    "icon": "󰁹",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -33,7 +33,7 @@
   {
     "id": "network",
     "name": "Network",
-    "icon": "📶",
+    "icon": "󰤨",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -53,7 +53,7 @@
   {
     "id": "storage",
     "name": "Storage",
-    "icon": "💾",
+    "icon": "󰋊",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -70,7 +70,7 @@
   {
     "id": "memory",
     "name": "Memory",
-    "icon": "🧠",
+    "icon": "󰍛",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -91,7 +91,7 @@
   {
     "id": "torch",
     "name": "Flashlight",
-    "icon": "🔦",
+    "icon": "󰌵",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -109,7 +109,7 @@
   {
     "id": "volume",
     "name": "Volume",
-    "icon": "🔊",
+    "icon": "󰕾",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -135,7 +135,7 @@
   {
     "id": "remote",
     "name": "Touch Remote",
-    "icon": "🎮",
+    "icon": "󰊴",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -157,7 +157,7 @@
   {
     "id": "switchboard",
     "name": "Switchboard",
-    "icon": "🎚",
+    "icon": "󰓃",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",
@@ -188,7 +188,7 @@
   {
     "id": "buzzer",
     "name": "Buzzer",
-    "icon": "📳",
+    "icon": "󰂚",
     "presentation": {
       "type": "AdaptiveCard",
       "version": "1.5",

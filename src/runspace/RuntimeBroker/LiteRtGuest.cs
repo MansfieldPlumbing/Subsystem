@@ -104,7 +104,7 @@ public static class LiteRtGuest
 
             // Bring-up + verification BEFORE publication into the namespace. Off the caller's
             // synchronization context — engine init is ~10 s of native work.
-            var fault = await Task.Run(() => runtime.BringUp(), ct);
+            var fault = runtime.BringUp();
             if (fault != null)
             {
                 try { runtime.Dispose(); } catch (Exception ex) { Dg.Warn("engine", ex); }

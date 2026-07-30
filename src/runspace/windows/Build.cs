@@ -40,7 +40,7 @@ internal static class Build
         int srcFiles = SafeCount(root, "*.cs");
         Console.WriteLine($"  [ok] source: {root} ({srcFiles} .cs files)");
 
-        var csproj = Path.Combine(root, "src", "runspace", "windows", "SubsystemWin.csproj");
+        var csproj = Path.Combine(root, "subsystem.master.csproj");
         if (!File.Exists(csproj)) { Console.Error.WriteLine($"  [FAIL] project: {csproj} missing."); return 2; }
         Console.WriteLine($"  [ok] project: {csproj}");
 
@@ -182,7 +182,7 @@ internal static class Build
         if (root == null) { Console.Error.WriteLine("  [FAIL] source: no repo beside the exe and no embedded source."); return 2; }
         Console.WriteLine($"  [ok] source: {root}");
 
-        var csproj = Path.Combine(root, "src", "runspace", "Subsystem.csproj");
+        var csproj = Path.Combine(root, "subsystem.master.csproj");
         if (!File.Exists(csproj)) { Console.Error.WriteLine($"  [FAIL] project: {csproj} missing."); return 2; }
         Console.WriteLine($"  [ok] project: {csproj}");
 
@@ -301,10 +301,10 @@ needs dotnet + the .NET-Android workload + a JDK by nature (aapt2/r8/apksigner) 
         // Look ONLY at the exe's own location — NEVER walk up into an unrelated repo elsewhere on the drive
         // (that defeated the blind build: from S:\ss it found S:\subsystem and ignored the embed).
         // 1. the exe sits inside the repo (S:\subsystem\ss.exe).
-        if (File.Exists(Path.Combine(exeDir, "src", "runspace", "Subsystem.csproj"))) return exeDir;
+        if (File.Exists(Path.Combine(exeDir, "subsystem.master.csproj"))) return exeDir;
         // 2. a `subsystem` repo right beside the exe (S:\ss.exe -> S:\subsystem, or one we grew before).
         var beside = Path.Combine(exeDir, "subsystem");
-        if (File.Exists(Path.Combine(beside, "src", "runspace", "Subsystem.csproj"))) return beside;
+        if (File.Exists(Path.Combine(beside, "subsystem.master.csproj"))) return beside;
         // 3. blind: no repo on disk. Reconstitute the embedded source into a FRESH temp dir — NEVER delete or
         //    hydrate a populated directory (a dropped ss.exe may sit in a folder full of the user's files).
         var temp = Path.Combine(Path.GetTempPath(), "subsystem-src-" + Guid.NewGuid().ToString("N").Substring(0, 8));

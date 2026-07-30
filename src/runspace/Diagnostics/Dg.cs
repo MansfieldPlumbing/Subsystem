@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Android.Content;
 
-namespace Subsystem;
+namespace Subsystem.Diagnostics;
 
 // Dg — Diagnostics (NT-shaped; replaces the old /sdcard 'Dom' text-appender). The system's one logging
 // sink: leveled, structured records held in a bounded in-memory ring AND appended to an app-PRIVATE file

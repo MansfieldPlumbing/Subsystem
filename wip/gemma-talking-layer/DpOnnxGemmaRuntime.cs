@@ -582,7 +582,7 @@ namespace Subsystem.RuntimeBroker
     public readonly record struct AgentDelta(AgentDeltaKind Kind, string Text, string Name = null, object Fault = null);
     public sealed record SamplerSpec(string Type, int TopK, float TopP, float Temperature, int Seed);
 
-    public class DpOnnxGemmaRuntime : IDisposable
+    public class dpxGemmaRuntime : IDisposable
     {
         private readonly string _modelPath;
         private readonly string _unitId;
@@ -599,7 +599,7 @@ namespace Subsystem.RuntimeBroker
         private readonly Subsystem.Vom.Owner _vomOwner;
         private readonly List<string> _vomKvPaths = new();
 
-        public DpOnnxGemmaRuntime(string modelPath, string unitId, string systemInstruction = null, SamplerSpec sampler = null)
+        public dpxGemmaRuntime(string modelPath, string unitId, string systemInstruction = null, SamplerSpec sampler = null)
         {
             _modelPath = modelPath;
             _unitId = unitId;
@@ -609,7 +609,7 @@ namespace Subsystem.RuntimeBroker
             _vomOwner = Subsystem.Vom.Vom.CreateOwner($"\\Agent\\Rb\\Engine\\{_unitId}\\KVCache", maxBytes: 8L * 1024 * 1024 * 1024);
         }
 
-        public string BackendName => "DP-ONNX-GEMMA4";
+        public string BackendName => "dpx-GEMMA4";
         public bool IsAlive => _isAlive;
 
         public string BringUp()
@@ -1076,7 +1076,7 @@ namespace Subsystem.RuntimeBroker
             }
 
             Console.WriteLine("[Receipt] test.decode.loop-synthetic - bringup...");
-            var runtime = new DpOnnxGemmaRuntime("gemma-4-e2b.spm", "gemma_unit_test", "You are helpful.", new SamplerSpec("argmax", 0, 0f, 0f, 0));
+            var runtime = new dpxGemmaRuntime("gemma-4-e2b.spm", "gemma_unit_test", "You are helpful.", new SamplerSpec("argmax", 0, 0f, 0f, 0));
             string bringupErr = runtime.BringUp();
             if (bringupErr != null)
             {

@@ -1,3 +1,4 @@
+#nullable disable
 using System;
 using System.Collections.Generic;
 using Microsoft.Data.Sqlite;
@@ -53,7 +54,7 @@ public static class Sql
         return command.ExecuteScalar();
     }
 
-    public static void ExecuteReader(string dbPath, string sql, Dictionary<string, object?>? parameters = null, Action<SqliteDataReader> onRow = null!)
+    public static void ExecuteReader(string dbPath, string sql, Dictionary<string, object> parameters = null, Action<SqliteDataReader> onRow = null!)
     {
         using var conn = new SqliteConnection(GetConnectionString(dbPath));
         conn.Open();
@@ -84,7 +85,7 @@ public static class Sql
         }
     }
 
-    private static void BindParameters(SqliteCommand cmd, Dictionary<string, object?>? parameters)
+    private static void BindParameters(SqliteCommand cmd, Dictionary<string, object> parameters)
     {
         if (parameters == null) return;
         foreach (var kvp in parameters)

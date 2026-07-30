@@ -85,8 +85,7 @@ public static class SessionManager
 {
     private static InitialSessionState? _iss;
     private static PSHost? _host;
-    private static readonly ConcurrentDictionary<string, ManagedSession> _sessions =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ManagedSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
     // Captured from the live runspace bootstrap so new sessions match (same cmdlets/aliases/modules).
     public static void Initialize(InitialSessionState iss, PSHost host)

@@ -84,7 +84,7 @@ export class Menu extends UiObject {
   }
 
   _back(to = 'root') {
-    return this._btn('Back', { icon: '‹', onClick: () => this._navigate(to, 'left') });
+    return this._btn('Back', { icon: '', onClick: () => this._navigate(to, 'left') });
   }
 
   _sep(f) { const s = document.createElement('div'); s.className = 'menu-sep'; f.appendChild(s); }
@@ -97,18 +97,18 @@ export class Menu extends UiObject {
     const groups = await this._nonEmptyGroups();   // File/Edit/View/Tools appear only if they present options
     if (pos === 'top') {
       for (const g of groups) f.appendChild(this._btn(g.label, { chevron: true, onClick: () => this._navigate(g.key, 'right') }));
-      f.appendChild(this._btn('Apps', { icon: '▦', chevron: true, onClick: () => this._navigate('presenters', 'right') }));
+      f.appendChild(this._btn('Apps', { icon: '󰏖', chevron: true, onClick: () => this._navigate('presenters', 'right') }));
     } else {
       // START personality (bottom dock): a real Start menu shape — Presenters cascades the whole app list
       // (no flat dump at the root), Menu cascades the active object's File/Edit/View/Tools (only if any exist).
-      f.appendChild(this._btn('Apps', { icon: '▦', chevron: true, onClick: () => this._navigate('presenters', 'right') }));
+      f.appendChild(this._btn('Apps', { icon: '󰏖', chevron: true, onClick: () => this._navigate('presenters', 'right') }));
       if (groups.length) f.appendChild(this._btn('Menu', { chevron: true, onClick: () => this._navigate('context', 'right') }));
     }
     this._sep(f);
     this._title(f, 'System');
-    f.appendChild(this._btn('Settings', { icon: '⚙', onClick: () => { this.hide(); this.ctx.shell.open('settings'); } }));
+    f.appendChild(this._btn('Settings', { icon: '', onClick: () => { this.hide(); this.ctx.shell.open('settings'); } }));
     // Charms — the charm bar's ONE explicit opening affordance (owner directive: no edge gesture).
-    f.appendChild(this._btn('Charms', { icon: '❖', onClick: () => { this.hide(); this.ctx.shell.toggleCharms(); } }));
+    f.appendChild(this._btn('Charms', { icon: '', onClick: () => { this.hide(); this.ctx.shell.toggleCharms(); } }));
     // Taskbar — a contextually-aware arrow in the icon slot points where the bar will GO (↑ when it's at
     // the bottom, ↓ when at the top). Tap to send it there. Icon + label = meaning + function, no verbose
     // text. (User-facing word is "Taskbar" — never "dock"; the identifier below may stay.)

@@ -1,4 +1,5 @@
-// GpuD3D12.cs — pure-C# D3D12 compute dispatch for dp-onnx's GPU seam. NO dpgpu.dll, NO C++, NO MSVC.
+#nullable disable
+// GpuD3D12.cs — pure-C# D3D12 compute dispatch for dpx's GPU seam. NO dpgpu.dll, NO C++, NO MSVC.
 // Drives D3D12 by hand-rolled COM vtable interop + a serialized root sig; reuses the caller's gemm DXIL.
 // Reproduces dpgpu.cpp's dpgpu_gemm bit-exactly (verified 0-diff vs CPU under net11/CoreCLR). The whole
 // engine is now managed + shader bytecode -> sovereign; the same shape ports to Vulkan (vulkan-1.dll / SPIR-V).
@@ -89,7 +90,7 @@ unsafe static class GpuD3D12
     // Persistent command allocator/list (Reset, not recreate) and grow-only A-upload/C-readback/C-default
     // buffers round out the "no per-call D3D12 object churn" story for the q4 seam.
     struct ResidentQ4 { public IntPtr Bq, Scales, Zp; public long BqVA, ScVA, ZpVA; public ulong BqB, ScB, ZpB; }
-    static readonly Dictionary<long, ResidentQ4> s_q4Cache = new();
+    static System.Collections.Immutable.ImmutableDictionary<long, ResidentQ4> s_q4Cache = System.Collections.Immutable.ImmutableDictionary<long, ResidentQ4>.Empty;
 
     // True when this weightKey's Bq/scales/zp already live in the resident cache - the caller may then
     // skip materializing the managed copies GemmQ4 would ignore on a cache hit.
@@ -310,7 +311,7 @@ unsafe static class GpuD3D12
                 rw.Scales = UploadResident(resIID, scBytes, scB); rw.ScB = scB; rw.ScVA = Fn<DGpuVA>(rw.Scales, 11)(rw.Scales);
                 byte[] zpBytes = (hasZp && Zp != null && Zp.Length > 0) ? Zp : new byte[Math.Max(1, Zp?.Length ?? 1)];
                 rw.Zp = UploadResident(resIID, zpBytes, zpB); rw.ZpB = zpB; rw.ZpVA = Fn<DGpuVA>(rw.Zp, 11)(rw.Zp);
-                s_q4Cache[weightKey] = rw;
+                s_q4Cache = s_q4Cache.SetItem(weightKey, rw);
             }
             bqVA = rw.BqVA; scVA = rw.ScVA; zpVA = rw.ZpVA;
         }

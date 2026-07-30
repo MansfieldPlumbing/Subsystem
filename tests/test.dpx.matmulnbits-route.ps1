@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 # test.dpx.matmulnbits-route.ps1 - CRQ190 R0: the per-shape CPU/GPU router for MatMulNBits. Proves the
 # MECHANISM, not a winner table: winners are derived at RUNTIME (first sight of a (M,N,K,block_size)
 # shape races a direct timed comparison and caches the verdict for the table's lifetime), so this test
@@ -7,7 +7,7 @@
 # (every bare Dispatch caller) preserves the standing knob behavior, and prints the raced winner table
 # as the receipt. Which lane wins is adapter truth, not an assertion. The proof body is C# compiled
 # in-proc against the running bundle (the decode-loop test's shape) - the router is exercised through
-# the same compiled surface Dp.Run uses, not a shell re-implementation.
+# the same compiled surface Dpx.Run uses, not a shell re-implementation.
 # SKIPS clean without gemm_q4.dxil next to the exe or without a live D3D12 device (the router's GPU
 # lane faults -> _gpuQ4Dead latch, the inv-9 degrade), or if that latch was already set in-proc.
 #   Dogfood:  ss -File tests/test.dpx.matmulnbits-route.ps1
@@ -17,7 +17,7 @@ function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundC
 
 $dxil = Join-Path (Split-Path ([Environment]::ProcessPath) -Parent) 'gemm_q4.dxil'
 if (-not (Test-Path $dxil)) {
-    Write-Host "SKIP - no gemm_q4.dxil next to the exe (dxc -T cs_6_2 -E main src/native/dp-onnx/gpu/gemm_q4.hlsl -Fo gemm_q4.dxil)." -ForegroundColor Yellow
+    Write-Host "SKIP - no gemm_q4.dxil next to the exe (dxc -T cs_6_2 -E main src/native/dpx/gpu/gemm_q4.hlsl -Fo gemm_q4.dxil)." -ForegroundColor Yellow
     return
 }
 
@@ -79,12 +79,12 @@ public static class RouteProof
     public static string RunTest()
     {
         var sb = new StringBuilder();
-        var gpuDead = typeof(Dp).GetField("_gpuQ4Dead", BindingFlags.NonPublic | BindingFlags.Static);
+        var gpuDead = typeof(Dpx).GetField("_gpuQ4Dead", BindingFlags.NonPublic | BindingFlags.Static);
         if ((bool)gpuDead.GetValue(null)) return "skip:latched\n";
 
         var route = new DpxRoute();
         var px = CreateCase(1, 2048, 256, out var pn);    // probe shape is NOT in the asserted set below
-        Dp.Dispatch(pn, px, route);                       // probe: first sight races; a GPU fault latches
+        Dpx.Dispatch(pn, px, route);                       // probe: first sight races; a GPU fault latches
         if ((bool)gpuDead.GetValue(null)) return "skip:gpu\n";
         sb.AppendLine($"probe_entries:{route.EnumerateRoutes().Length}");
 
@@ -98,17 +98,17 @@ public static class RouteProof
         {
             var x = CreateCase(s.M, s.K, s.N, out var n);
             int before = route.EnumerateRoutes().Length;
-            var y1 = Dp.Dispatch(n, x, route)[0];         // first sight: races + registers
+            var y1 = Dpx.Dispatch(n, x, route)[0];         // first sight: races + registers
             int afterFirst = route.EnumerateRoutes().Length;
-            var y2 = Dp.Dispatch(n, x, route)[0];         // cached: dispatches the winner
+            var y2 = Dpx.Dispatch(n, x, route)[0];         // cached: dispatches the winner
             int afterSecond = route.EnumerateRoutes().Length;
             bool known = route.Query(s.M, s.N, s.K, 32, out bool gpuWins);
 
-            Dp.ForceScalarMatMulNBits = true;             // scalar oracle, null route = the standing path
+            Dpx.ForceScalarMatMulNBits = true;             // scalar oracle, null route = the standing path
             Tensor oracle;
-            try { oracle = Dp.Dispatch(n, x)[0]; }
-            finally { Dp.ForceScalarMatMulNBits = false; }
-            var plain = Dp.Dispatch(n, x)[0];             // default knobs, null route: standing SIMD path
+            try { oracle = Dpx.Dispatch(n, x)[0]; }
+            finally { Dpx.ForceScalarMatMulNBits = false; }
+            var plain = Dpx.Dispatch(n, x)[0];             // default knobs, null route: standing SIMD path
 
             sb.AppendLine($"shape:{s.name}|{before}|{afterFirst}|{afterSecond}|{known}|{(gpuWins ? "gpu" : "cpu")}"
                 + $"|{MaxRel(oracle.AsF(), y2.AsF()):E2}|{MaxRel(oracle.AsF(), plain.AsF()):E2}"

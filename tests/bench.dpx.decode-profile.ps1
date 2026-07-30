@@ -1,7 +1,7 @@
 #requires -Version 7
 # bench.dpx.decode-profile.ps1 — Names the hot op in the gemma4-e2b DPX decode loop (CRQ190 step 1: know the
-# op class before porting a ggml recipe for it). Runs `ss dpx-generate --profile`, which flips Dp.Profile and
-# prints Dp.Prof (per-OpType total ms / call count / ms-per-call), accumulated over both prefill and decode
+# op class before porting a ggml recipe for it). Runs `ss dpx-generate --profile`, which flips Dpx.Profile and
+# prints Dpx.Prof (per-OpType total ms / call count / ms-per-call), accumulated over both prefill and decode
 # via the interpreter's own Dispatch loop — a real per-op receipt, not a guess.
 #   Dogfood:  ss run tests/bench.dpx.decode-profile.ps1
 
@@ -46,4 +46,4 @@ Assert ($totalMs -gt 0)                              'profiled total time is non
 $pass = $fails.Count -eq 0
 Write-Host ""
 Write-Host ($(if($pass){"PASS — hot op named: $($top.Op) ($([math]::Round($top.Pct,1))% of decode time)."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
-[pscustomobject]@{ bench='dpx.decode-profile'; pass=$pass; hotOp=$top.Op; hotOpPct=$top.Pct; totalMs=$totalMs; verdict=$(if($pass){"named the hot op via Dp.Profile - no more guessing which kernel to accelerate first"}else{'see failures'}) }
+[pscustomobject]@{ bench='dpx.decode-profile'; pass=$pass; hotOp=$top.Op; hotOpPct=$top.Pct; totalMs=$totalMs; verdict=$(if($pass){"named the hot op via Dpx.Profile - no more guessing which kernel to accelerate first"}else{'see failures'}) }

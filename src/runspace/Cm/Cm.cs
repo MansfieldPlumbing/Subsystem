@@ -19,8 +19,7 @@ namespace Subsystem.Cm;
 // layer + the rocker-toggle settings. Lazy-inits on first use; db lives in the app's private files dir.
 public static class Cm
 {
-    private static readonly ConcurrentDictionary<string, CapabilityRecord> _records =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CapabilityRecord> _records = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _initLock = new();
     private static bool _initialized;
     private static string _dbPath = "";

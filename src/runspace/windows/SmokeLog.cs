@@ -59,9 +59,9 @@ internal static class SmokeLog
     {
         if (!string.IsNullOrWhiteSpace(pathArg) && Directory.Exists(pathArg)) return Path.GetFullPath(pathArg);
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? Directory.GetCurrentDirectory();
-        if (File.Exists(Path.Combine(exeDir, "src", "runspace", "Subsystem.csproj"))) return exeDir;
+        if (File.Exists(Path.Combine(exeDir, "subsystem.master.csproj"))) return exeDir;
         var beside = Path.Combine(exeDir, "subsystem");
-        if (File.Exists(Path.Combine(beside, "src", "runspace", "Subsystem.csproj"))) return beside;
+        if (File.Exists(Path.Combine(beside, "subsystem.master.csproj"))) return beside;
         return null;
     }
 }

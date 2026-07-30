@@ -167,7 +167,7 @@ internal static class InProcGate
     // set, so it is exact. SS027 fails closed if this is ever absent.
     static AdditionalText CsprojText(string root)
     {
-        var path = Path.Combine(root, "src", "runspace", "Subsystem.csproj");
+        var path = Path.Combine(root, "subsystem.master.csproj");
         var content = File.Exists(path) ? File.ReadAllText(path) : "";
         return new InMemoryAdditionalText(path, content);
     }

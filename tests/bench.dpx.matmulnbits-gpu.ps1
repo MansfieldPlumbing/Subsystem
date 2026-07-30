@@ -1,12 +1,12 @@
 #requires -Version 7
-# bench.dpx.matmulnbits-gpu.ps1 - CPU vs GPU receipt for the q4-aware GEMM seam (Dp.UseGpuMatMulNBits ->
+# bench.dpx.matmulnbits-gpu.ps1 - CPU vs GPU receipt for the q4-aware GEMM seam (Dpx.UseGpuMatMulNBits ->
 # Gpu.dpgpu_gemm_q4 -> GpuD3D12.GemmQ4). Packed uint8 B/zp + fp32 scales go to the GPU AS-IS (SEQUENTIAL
 # nibble layout, tests/test.dpx.q4-packing-order.ps1) - dequant+multiply+accumulate fused in the shader, fp32
 # weight never materialized on CPU. Two stages:
 #   1. ShaderTournament.ResolveQ4 (CRQ190): compiles gemm_q4.hlsl (naive rung) + gemm_q4_gemv.hlsl (M==1
 #      GEMV, groupshared A + Load4 blocks) + gemm_q4_tiled.hlsl (M>1 16x16 tile) with dxc, prints per-shape
 #      naive-vs-variant ms + max|diff| vs the SCALAR oracle, and places only measured winners beside the exe.
-#   2. End-to-end Dp.MatMulNBits rows: CPU (default SIMD path) vs GPU (the tournament-selected rung) per
+#   2. End-to-end Dpx.MatMulNBits rows: CPU (default SIMD path) vs GPU (the tournament-selected rung) per
 #      shape, parity vs the scalar oracle (ForceScalarMatMulNBits) with max|diff| printed.
 # All ms on this box are PROVISIONAL (other builders share it); parity verdicts are binding.
 # SKIPS clean without dxc (Windows Kits) or the in-proc Subsystem.Dpx assembly.
@@ -28,8 +28,8 @@ $mmnb = $dpType.GetMethod('MatMulNBits', [System.Reflection.BindingFlags]'NonPub
 $useGpuField = $dpType.GetField('UseGpuMatMulNBits', [System.Reflection.BindingFlags]'Public,Static')
 $forceScalarField = $dpType.GetField('ForceScalarMatMulNBits', [System.Reflection.BindingFlags]'Public,Static')
 $gpuDeadField = $dpType.GetField('_gpuQ4Dead', [System.Reflection.BindingFlags]'NonPublic,Static')
-Assert ($null -ne $mmnb) 'Dp.MatMulNBits reachable in-proc'
-Assert ($null -ne $useGpuField) 'Dp.UseGpuMatMulNBits reachable in-proc'
+Assert ($null -ne $mmnb) 'Dpx.MatMulNBits reachable in-proc'
+Assert ($null -ne $useGpuField) 'Dpx.UseGpuMatMulNBits reachable in-proc'
 
 # --- stage 1: the tournament compiles all q4 kernel variants, prints naive-vs-variant per shape, places winners
 $tournT = $asm.GetType('Subsystem.Dpx.ShaderTournament')
@@ -42,7 +42,7 @@ $gemvPlaced  = Test-Path (Join-Path $exeDir 'gemm_q4_gemv.dxil')
 $tiledPlaced = Test-Path (Join-Path $exeDir 'gemm_q4_tiled.dxil')
 Write-Host "  variant files placed by measurement: gemv=$gemvPlaced tiled=$tiledPlaced (absent = naive won that class)"
 
-# --- stage 2: end-to-end Dp.MatMulNBits rows, CPU default path vs GPU tournament-selected rung
+# --- stage 2: end-to-end Dpx.MatMulNBits rows, CPU default path vs GPU tournament-selected rung
 $rng = [Random]::new(190)
 function RandBytes([int]$n) { $b = New-Object 'byte[]' $n; $rng.NextBytes($b); ,$b }
 function RandFloats([int]$n) { $f = New-Object 'float[]' $n; for ($i = 0; $i -lt $n; $i++) { $f[$i] = [float]($rng.NextDouble() * 2.0 - 1.0) }; ,$f }

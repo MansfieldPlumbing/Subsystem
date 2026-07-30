@@ -19,7 +19,7 @@ static class Runner
     public static async Task<int> Run(string[] args)
     {
         var repoRoot = FindRepoRoot();
-        var projectPath = Path.Combine(repoRoot, "src", "runspace", "Subsystem.csproj");
+        var projectPath = Path.Combine(repoRoot, "subsystem.master.csproj");
 
         string? refsSymbol = null;
         bool gate = false, writeBaseline = false, list = false;
@@ -236,7 +236,7 @@ static class Runner
         // Walk up from the executable to the dir containing 'src\runspace\Subsystem.csproj'.
         var dir = AppContext.BaseDirectory;
         for (var d = new DirectoryInfo(dir); d != null; d = d.Parent)
-            if (File.Exists(Path.Combine(d.FullName, "src", "runspace", "Subsystem.csproj")))
+            if (File.Exists(Path.Combine(d.FullName, "subsystem.master.csproj")))
                 return d.FullName;
         // Fallback: assume <drive>\subsystem relative to a <drive>\bin install.
         var driveRoot = Path.GetPathRoot(dir)

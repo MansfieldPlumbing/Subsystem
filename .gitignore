@@ -16,7 +16,7 @@ src/runspace/boringssl/
 # Prebuilt native libraries are build outputs — rebuilt from source (e.g. src/native/directport/build.ps1).
 *.dll
 # ONNX model weights are re-derivable data (public Kokoro-82M etc.), NEVER in the repo — guard the
-# vendored dp-onnx engine (src/native/dp-onnx) from ever swallowing a ~310 MB model.onnx.
+# vendored dpx engine (src/native/dpx) from ever swallowing a ~310 MB model.onnx.
 *.onnx
 # Compiled shader blobs — re-derivable from the .hlsl source (dxc/D3DCompile).
 *.dxil
@@ -82,8 +82,8 @@ ss-source.dump
 *.md
 !README.md
 !Registry/Feedback/in-memoriam-dedication.md
-# the vendored dp-onnx engine carries its own provenance README (CRQ143 P0)
-!src/native/dp-onnx/README.md
+# the vendored dpx engine carries its own provenance README (CRQ143 P0)
+!src/native/dpx/README.md
 # wip/ is the workshop: parked scattered projects (clone-and-rebuild sovereignty).
 # Their docs/state ARE the point, so md is tracked under wip (heavy data still ignored
 # by the *.dll/*.exe/*.onnx/*.zip/bin/obj rules above).

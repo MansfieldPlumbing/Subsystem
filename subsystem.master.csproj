@@ -1,0 +1,125 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net11.0-windows;net11.0-android</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
+    <!-- Keep the toxic diagnostic thread disabled -->
+    <EnableEventPipe>false</EnableEventPipe>
+    <EventSourceSupport>false</EventSourceSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <DefineConstants Condition="'$(SubsystemRelease)' != 'true'">$(DefineConstants);DEV</DefineConstants>
+    <RootItemExcludes>src\analyzers\**;src\shell\Frontend\**;src\tools\**;wip\**</RootItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(RootItemExcludes)</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Windows Head Properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows'">
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ss</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>src\runspace\windows\app.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <DefaultItemExcludes>$(RootItemExcludes);src\runspace\Adb\AdbCommands.cs;src\runspace\Adb\AdbPairingClient.cs;src\runspace\Adb\ConscryptAdbTransport.cs;src\runspace\Adb\PairAdbReceiver.cs;src\runspace\Adb\AdbMdnsDiscoverer.cs;src\runspace\Device\Android\**;src\runspace\Device\WebDrive.cs;src\runspace\Device\Morse.cs;src\runspace\Device\PeLoader.cs;src\runspace\Device\V21.cs;src\runspace\Services\**;src\runspace\Widgets\**;src\runspace\MainActivity.cs;src\runspace\Dpx\Program.cs;src\runspace\windows\RuntimeTypes.cs;src\runspace\Pwsh\AndroidSubsystemHost.cs;src\runspace\Pwsh\ReplEngine.cs;src\runspace\Pwsh\SubsystemAliases.cs;src\runspace\Pwsh\Cmdlets\**;src\runspace\scripts\**;src\runspace\RuntimeBroker\LiteRtNative.cs;src\runspace\RuntimeBroker\ModelManager.cs;src\runspace\RuntimeBroker\LiteRtGuest.cs;src\runspace\RuntimeBroker\LiteRtRuntime.cs;src\runspace\RuntimeBroker\Hud.cs;src\runspace\Host\ModelsApi.cs;src\runspace\Host\Firewall.cs;src\runspace\Host\SubsystemApi.cs;src\runspace\Host\Registrar.cs;src\runspace\Diagnostics\AgentSettings.cs;src\runspace\Diagnostics\Dg.cs;src\runspace\Diagnostics\PackageInfoDb.cs;src\runspace\Diagnostics\TerminalAccessibilityService.cs;src\runspace\Diagnostics\SqliteProbe.cs;src\native\dpx\onnx-interp\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Android Head Properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-android'">
+    <RuntimeIdentifiers Condition="'$(SsX64)' == 'true'">android-arm64;android-x64</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition="'$(RuntimeIdentifiers)' == ''">android-arm64</RuntimeIdentifiers>
+    <SupportedOSPlatformVersion Condition="'$(SsLegacyApi)' == 'true'">35.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="'$(SupportedOSPlatformVersion)' == ''">36.0</SupportedOSPlatformVersion>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>dev.mansfieldplumbing.subsystem</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <DefaultItemExcludes>$(RootItemExcludes);src\runspace\windows\**;src\shell\platform\Windows\**;src\runspace\Dpx\Program.cs;src\native\dpx\onnx-interp\**</DefaultItemExcludes>
+
+    <AndroidSdkDirectory Condition="'$(SS_ANDROID)' != ''">$(SS_ANDROID)</AndroidSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))bin\android-sdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))bin\android-sdk</AndroidSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' And Exists('$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))android-sdk')">$([System.IO.Path]::GetPathRoot($(MSBuildProjectDirectory)))android-sdk</AndroidSdkDirectory>
+
+    <LatestSupportedJavaVersion Condition="'$(LatestSupportedJavaVersion)' == '' Or '$(LatestSupportedJavaVersion)' &lt; '25.0'">25.0.99</LatestSupportedJavaVersion>
+    <JavacSourceVersion>11</JavacSourceVersion>
+    <JavacTargetVersion>11</JavacTargetVersion>
+
+    <SsLibs Condition="'$(SS_LIBS)' != ''">$(SS_LIBS)</SsLibs>
+    <SsLibs Condition="'$(SsLibs)' == ''">$(MSBuildProjectDirectory)\src\runspace\libs</SsLibs>
+
+    <SsQnn Condition="'$(SS_QNN)' != ''">$(SS_QNN)</SsQnn>
+    <SsQnn Condition="'$(SsQnn)' == ''">S:\qairt\2.42.0.251225</SsQnn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.7.0-preview.2">
+      <ExcludeAssets>native</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.AI" Version="9.0.0-preview.9.24556.5" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageReference Include="VtNetCore" Version="1.0.30" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" Condition="'$(TargetFramework)' == 'net11.0-windows'" />
+    <Compile Include="$(MSBuildProjectDirectory)\src\native\dpx\onnxnet\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-android'">
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libpsl-android.so" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtp.so"        Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtp.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpPrepare.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnHtpV73Stub.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\aarch64-android\libQnnSystem.so"     Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\aarch64-android\libQnnSystem.so')" />
+    <AndroidNativeLibrary Include="$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so" Abi="arm64-v8a" Condition="Exists('$(SsQnn)\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so')" />
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libcdsprpc.so" Condition="Exists('$(SsLibs)\arm64-v8a\libcdsprpc.so')" />
+    <AndroidNativeLibrary Include="$(SsLibs)\arm64-v8a\libqnnworker.so" Condition="Exists('$(SsLibs)\arm64-v8a\libqnnworker.so')" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-android' And '$(SsX64)' == 'true'">
+    <AndroidNativeLibrary Include="$(SsLibs)\x86_64\libpsl-android.so" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-android'">
+    <AndroidEnvironment Include="src\runspace\environment.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Registry\Reference\**\*.md" Condition="Exists('Registry\Reference')">
+      <LogicalName>Registry/Reference/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Registry\Feedback\in-memoriam-dedication.md" Condition="Exists('Registry\Feedback\in-memoriam-dedication.md')">
+      <LogicalName>Registry/Feedback/in-memoriam-dedication.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="src\analyzers\SystemCatalog.json" />
+    <AdditionalFiles Include="subsystem.master.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="src\shell\**\*" Exclude="src\shell\cell\**\*.cs">
+      <LogicalName>shell/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows'">
+    <EmbeddedResource Include="S:\bin\nuget\packages\microsoft.web.webview2\1.0.2903.40\runtimes\win-x64\native\WebView2Loader.dll">
+      <LogicalName>WebView2Loader.dll</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-android'">
+    <AndroidAsset Include="src\runspace\scripts\zoo\**\*.ps1" Link="zoo\%(RecursiveDir)%(Filename)%(Extension)" />
+    <AndroidAsset Include="content\html-applets\**\*.html" Link="shell\html-applets\%(RecursiveDir)%(Filename)%(Extension)" />
+    <AndroidAsset Include="content\web-fixtures\**\*.html" Link="shell\web-fixtures\%(RecursiveDir)%(Filename)%(Extension)" />
+    <AndroidAsset Include="src\native\dpx\onnx-interp\gemm.spv" Link="shaders\gemm.spv" />
+    <AndroidAsset Include="src\native\dpx\onnx-interp\gemm_q4.spv" Link="shaders\gemm_q4.spv" Condition="Exists('src\native\dpx\onnx-interp\gemm_q4.spv')" />
+    <AndroidAsset Include="src\native\dpx\onnx-interp\gemm_q4_gemv.spv" Link="shaders\gemm_q4_gemv.spv" Condition="Exists('src\native\dpx\onnx-interp\gemm_q4_gemv.spv')" />
+    <AndroidAsset Include="src\native\dpx\onnx-interp\gemm_q4_gemv_f16.spv" Link="shaders\gemm_q4_gemv_f16.spv" Condition="Exists('src\native\dpx\onnx-interp\gemm_q4_gemv_f16.spv')" />
+  </ItemGroup>
+</Project>

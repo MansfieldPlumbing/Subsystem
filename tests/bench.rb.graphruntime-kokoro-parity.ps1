@@ -10,7 +10,7 @@
 #   Dogfood:  ss run tests/bench.rb.graphruntime-kokoro-parity.ps1
 #
 # Assets (external — this exercises the qnn-project standalone runtime, like test.staging.*):
-#   exe   S:\qnn-project\workspace\onnx-interp\publish\dp-onnx.exe   (build: S:\bin\dotnet\dotnet.exe publish -c Release -r win-x64 --self-contained -o publish)
+#   exe   S:\qnn-project\workspace\onnx-interp\publish\dpx.exe   (build: S:\bin\dotnet\dotnet.exe publish -c Release -r win-x64 --self-contained -o publish)
 #   model S:\reference\Kokoro-82M\onnx\model.onnx                    (HF onnx-community/Kokoro-82M-v1.0-ONNX, dynamic fp32)
 #   io    S:\qnn-project\workspace\onnx-interp\io                    (input_ids/style/speed/oracle .bin + io\all per-node ORT dump)
 
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }
 
-$exe   = 'S:\qnn-project\workspace\onnx-interp\publish\dp-onnx.exe'
+$exe   = 'S:\qnn-project\workspace\onnx-interp\publish\dpx.exe'
 $model = 'S:\reference\Kokoro-82M\onnx\model.onnx'
 $io    = 'S:\qnn-project\workspace\onnx-interp\io'
 $RMSE_FLOOR = 3.0e-2   # regression guard just above the known 2.516e-2 baseline

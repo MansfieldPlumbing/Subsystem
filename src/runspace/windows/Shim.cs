@@ -136,7 +136,6 @@ internal static class Shim
     {
         var assemblies = new[]
         {
-            typeof(Subsystem.Tools.CodeContext.Cmdlets.GetCodeContextCmdlet).Assembly,
             typeof(Shim).Assembly,
         }.Distinct();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

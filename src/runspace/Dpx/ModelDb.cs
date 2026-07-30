@@ -1,10 +1,9 @@
-﻿using System;
+#nullable disable
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.Data.Sqlite;
-using Onnx;
-
 namespace Subsystem.Dpx
 {
     // Reverse of Program.cs's WriteModelDb: rebuild a runnable ModelProto from the SQLite model store

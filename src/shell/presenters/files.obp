@@ -53,7 +53,7 @@
     .file-row:hover { background: rgba(127,127,127,.15); }
     .file-row td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
     
-    .file-icon { font-size: 16px; margin-right: 8px; display: inline-block; vertical-align: middle; }
+    .file-icon { font-size: 16px; margin-right: 8px; display: inline-block; vertical-align: middle; font-family: var(--font-mono); }
     .file-name { font-weight: 500; display: inline-block; vertical-align: middle; }
     .file-size { color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
     .file-date { color: var(--muted); font-size: 12px; }
@@ -70,59 +70,100 @@
         <input type="text" class="path-input" id="path-input" placeholder="Path..." />
       </div>
     </div>
+    
     <div class="file-list-container">
       <table class="file-table">
         <thead>
           <tr>
             <th>Name</th>
-            <th style="width: 120px;">Size</th>
+            <th style="width: 100px;">Size</th>
             <th style="width: 160px;">Modified</th>
           </tr>
         </thead>
-        <tbody id="file-body">
+        <tbody id="file-tbody">
+          <!-- Rows dynamically generated -->
         </tbody>
       </table>
-      <div id="empty-msg" class="empty-msg" style="display:none;">Directory is empty</div>
+      <div class="empty-msg" id="empty-msg" style="display: none;">Directory is empty</div>
     </div>
   </div>
 
-  <script type="module">
+  <script>
     let currentPath = '';
 
+    window.addEventListener('load', () => {
+      loadDirectory('');
+
+      document.getElementById('btn-up').addEventListener('click', () => {
+        if (!currentPath || currentPath === '\\' || currentPath === '/') return;
+        const parts = currentPath.replace(/\\/g, '/').split('/').filter(Boolean);
+        parts.pop();
+        const parentPath = parts.length > 0 ? parts.join('/') : '';
+        loadDirectory(parentPath);
+      });
+
+      document.getElementById('btn-refresh').addEventListener('click', () => {
+        loadDirectory(currentPath);
+      });
+
+      document.getElementById('path-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          loadDirectory(e.target.value);
+        }
+      });
+    });
+
     async function loadDirectory(path) {
-      const url = '/fs?path=' + encodeURIComponent(path || '');
+      const tbody = document.getElementById('file-tbody');
+      const emptyMsg = document.getElementById('empty-msg');
+      const pathInput = document.getElementById('path-input');
+
+      tbody.innerHTML = '';
+      emptyMsg.style.display = 'none';
+
       try {
-        const res = await fetch(url);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.error) {
-          alert('Error: ' + data.error);
+        let items = [];
+        if (window.parent && window.parent.SubsystemApi) {
+          items = await window.parent.SubsystemApi.listDir(path);
+        } else {
+          // Mock data if loaded outside shell
+          items = [
+            { name: 'src', isDir: true, path: 'src', modified: Date.now() },
+            { name: 'README.md', isDir: false, size: 1024, path: 'README.md', modified: Date.now() }
+          ];
+        }
+
+        currentPath = path;
+        pathInput.value = path || '\\';
+
+        if (!items || items.length === 0) {
+          emptyMsg.style.display = 'block';
           return;
         }
-        currentPath = data.current;
-        document.getElementById('path-input').value = currentPath;
-        renderItems(data.items || []);
-      } catch (e) {
-        console.error('Failed to load directory', e);
+
+        // Sort: directories first, then files alphabetically
+        items.sort((a, b) => {
+          if (a.isDir && !b.isDir) return -1;
+          if (!a.isDir && b.isDir) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        renderRows(items);
+      } catch (err) {
+        console.error('Failed to load directory:', err);
+        emptyMsg.textContent = 'Error loading directory: ' + err.message;
+        emptyMsg.style.display = 'block';
       }
     }
 
-    function renderItems(items) {
-      const tbody = document.getElementById('file-body');
-      const emptyMsg = document.getElementById('empty-msg');
-      tbody.innerHTML = '';
-
-      if (!items.length) {
-        emptyMsg.style.display = 'block';
-        return;
-      }
-      emptyMsg.style.display = 'none';
+    function renderRows(items) {
+      const tbody = document.getElementById('file-tbody');
 
       items.forEach(item => {
         const tr = document.createElement('tr');
         tr.className = 'file-row';
         
-        const icon = item.isDir ? '📁' : getFileIcon(item.name);
+        const icon = item.isDir ? '' : getFileIcon(item.name);
         const sizeStr = item.isDir ? '--' : formatSize(item.size);
         const dateStr = item.modified ? new Date(item.modified).toLocaleDateString() + ' ' + new Date(item.modified).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
 
@@ -136,8 +177,6 @@
         `;
 
         tr.addEventListener('dblclick', () => onItemClick(item));
-        tr.addEventListener('click', () => onItemClick(item));
-
         tbody.appendChild(tr);
       });
     }
@@ -146,7 +185,6 @@
       if (item.isDir) {
         loadDirectory(item.path);
       } else {
-        // Open file in edit presenter!
         try {
           if (window.parent && window.parent.postMessage) {
             window.parent.postMessage({ type: 'shell-open', id: 'edit', params: { file: item.path } }, '*');
@@ -159,13 +197,13 @@
 
     function getFileIcon(name) {
       const ext = name.split('.').pop().toLowerCase();
-      if (['cs', 'js', 'ts', 'ps1', 'py', 'json', 'xml', 'html', 'css'].includes(ext)) return '📝';
-      if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '🖼️';
-      if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return '🎵';
-      if (['mp4', 'mkv', 'webm', 'avi'].includes(ext)) return '🎬';
-      if (['zip', '7z', 'tar', 'gz'].includes(ext)) return '📦';
-      if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return '📄';
-      return '📄';
+      if (['cs', 'js', 'ts', 'ps1', 'py', 'json', 'xml', 'html', 'css'].includes(ext)) return '󰏫';
+      if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '󰋩';
+      if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return '󰕾';
+      if (['mp4', 'mkv', 'webm', 'avi'].includes(ext)) return '󰿎';
+      if (['zip', '7z', 'tar', 'gz'].includes(ext)) return '󰀼';
+      if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return '󰈙';
+      return '󰈙';
     }
 
     function formatSize(bytes) {

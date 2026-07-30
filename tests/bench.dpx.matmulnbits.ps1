@@ -22,7 +22,7 @@ $nodeT   = $asm.GetType('Onnx.NodeProto')
 $attrT   = $asm.GetType('Onnx.AttributeProto')
 $mmnb    = $dpType.GetMethod('MatMulNBits', [System.Reflection.BindingFlags]'NonPublic,Static')
 $forceScalar = $dpType.GetField('ForceScalarMatMulNBits')
-Assert ($null -ne $mmnb) 'Dp.MatMulNBits reachable in-proc'
+Assert ($null -ne $mmnb) 'Dpx.MatMulNBits reachable in-proc'
 Assert ($null -ne $forceScalar) 'ForceScalarMatMulNBits knob reachable in-proc'
 $has512 = [System.Runtime.Intrinsics.Vector512]::IsHardwareAccelerated
 Write-Host "  Vector512.IsHardwareAccelerated = $has512 (512-lane rung $(if($has512){'live'}else{'absent - 512 rows skipped'}))"

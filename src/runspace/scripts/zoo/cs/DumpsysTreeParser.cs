@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
-namespace Subsystem;
+namespace Subsystem.Pwsh.Cmdlets.Zoo;
 
 public static class DumpsysTreeParser
 {

@@ -1,3 +1,4 @@
+#nullable disable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,7 +9,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Onnx;
 using Subsystem;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
@@ -19,24 +19,24 @@ namespace Subsystem.Dpx
     // over it: an ITurnSource, never a Runtime (a Runtime is a mounted GUEST engine; DPX is neither).
     public sealed class DpxDecoder : ITurnSource
     {
-        private readonly string? _modelPath;
-        private readonly string? _embedModelPath;
-        private readonly string? _spmPath;
+        private readonly string _modelPath;
+        private readonly string _embedModelPath;
+        private readonly string _spmPath;
         private readonly string _unitId;
         private int _maxTokens;
         private readonly bool _split;
         private readonly bool _consolidated;
 
-        private ModelProto? _model;
-        private ModelProto? _embedModel;
-        private SentencePieceTokenizer? _tokenizer;
-        private Dp? _interp;
-        private Dp? _embedInterp;
+        private ModelProto _model;
+        private ModelProto _embedModel;
+        private SentencePieceTokenizer _tokenizer;
+        private Dpx _interp;
+        private Dpx _embedInterp;
 
         private readonly object _gate = new();
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private volatile bool _ready;
-        private RbFault? _initFault;
+        private RbFault _initFault;
         private string _backendName = "DPX (uninitialized)";
         public bool? WorkerIsThreadPoolThread { get; private set; }
         public bool Verbose { get; set; }
@@ -71,7 +71,7 @@ namespace Subsystem.Dpx
             _unitId = unitId;
             _maxTokens = maxTokens > 0 ? maxTokens : 4096;
             _backendName = "DPX";
-            _interp = new Dp(_model);
+            _interp = new Dpx(_model);
             _ready = true;
         }
 
@@ -172,9 +172,9 @@ namespace Subsystem.Dpx
                     }
                     }
 
-                    _interp = new Dp(_model) { Verbose = this.Verbose };
-                    if (_split) _embedInterp = new Dp(_embedModel!) { Verbose = this.Verbose };
-                    Dp.ActiveModelDbPath = _modelPath;
+                    _interp = new Dpx(_model) { Verbose = this.Verbose };
+                    if (_split) _embedInterp = new Dpx(_embedModel!) { Verbose = this.Verbose };
+                    Dpx.ActiveModelDbPath = _modelPath;
                     _backendName = "DPX";
                     _ready = true;
                     return null;
@@ -187,7 +187,7 @@ namespace Subsystem.Dpx
             }
         }
 
-        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default)
+        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[] audioBytes, CancellationToken ct = default)
             => StreamTurnAsync(prompt, audioBytes, null, ct);
 
         // Strips literal turn markers from the VISIBLE token stream. The model sometimes emits
@@ -237,7 +237,7 @@ namespace Subsystem.Dpx
             }
         }
 
-        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, byte[]? imageBytes, CancellationToken ct = default)
+        public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[] audioBytes, byte[] imageBytes, CancellationToken ct = default)
         {
             var fault = BringUp();
             if (fault != null)
@@ -319,16 +319,16 @@ namespace Subsystem.Dpx
                 return;
             }
 
-            var graphInputs = _model!.Graph.Input.Where(i => !_model.Graph.Initializer.Any(init => init.Name == i.Name)).ToList();
-            string? mainInputName = graphInputs.FirstOrDefault(i => !i.Name.Contains("past"))?.Name;
+            var graphInputs = _model.Graph.Input.Where(i => !_model.Graph.Initializer.Any(init => init.Name == i.Name)).ToList();
+            string mainInputName = graphInputs.FirstOrDefault(i => !i.Name.Contains("past"))?.Name;
             if (string.IsNullOrEmpty(mainInputName))
             {
                 mainInputName = graphInputs.FirstOrDefault()?.Name ?? "input_ids";
             }
 
-            string? mainOutputName = _model.Graph.Output.FirstOrDefault(o => !o.Name.Contains("present"))?.Name ?? "logits";
+            string mainOutputName = _model.Graph.Output.FirstOrDefault(o => !o.Name.Contains("present"))?.Name ?? "logits";
 
-            var kvCacheHandles = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
+            var kvCacheHandles = new Dictionary<string, DpxTensor>(StringComparer.OrdinalIgnoreCase);
             var pastKvInputs = graphInputs.Where(i => i.Name.Contains("past") || i.Name.Contains("key_values")).ToList();
             // present-output -> past-input name mapping: derive the real prefix ("past_key_values" for the
             // gemma q4 export, not "past") from the graph's own declared input names instead of assuming it.
@@ -344,7 +344,7 @@ namespace Subsystem.Dpx
             var ringLive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvInput in pastKvInputs)
             {
-                kvCacheHandles[kvInput.Name] = DpTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
+                kvCacheHandles[kvInput.Name] = DpxTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
                 ringLive.Add(kvInput.Name);
             }
 
@@ -462,7 +462,7 @@ namespace Subsystem.Dpx
                         // Demoted / non-ring cache: legacy copy-forward - single copy straight into a
                         // fresh persisted VOM region (source -> VOM), close the previous one.
                         ringLive.Remove(pastName);
-                        var kv = DpTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
+                        var kv = DpxTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
                         tensor.AsF().CopyTo(kv.ReadF32());
                         if (kvCacheHandles.TryGetValue(pastName, out var old))
                         {
@@ -500,7 +500,7 @@ namespace Subsystem.Dpx
             var pastKvInputs = decInputs.Where(i => i.Name.Contains("past") || i.Name.Contains("key_values")).ToList();
             string pastPrefix = pastKvInputs.Count > 0 && pastKvInputs[0].Name.StartsWith("past_key_values") ? "past_key_values" : "past";
 
-            var kvCacheHandles = new Dictionary<string, DpTensor>(StringComparer.OrdinalIgnoreCase);
+            var kvCacheHandles = new Dictionary<string, DpxTensor>(StringComparer.OrdinalIgnoreCase);
             var seq = new List<int>(fullTokenIds);
             int pastLen = 0;
             int step = 0;
@@ -516,7 +516,7 @@ namespace Subsystem.Dpx
             var ringLive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvInput in pastKvInputs)
             {
-                kvCacheHandles[kvInput.Name] = DpTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
+                kvCacheHandles[kvInput.Name] = DpxTensor.Alloc(owner, GetKvInputShape(kvInput, kvRingCap), VomFormat.Float32, subdir: "Objects", name: kvInput.Name);
                 ringLive.Add(kvInput.Name);
             }
 
@@ -626,7 +626,7 @@ namespace Subsystem.Dpx
 
                     // Demoted / non-ring cache: legacy copy-forward (alloc fresh, copy present, close old).
                     ringLive.Remove(pastName);
-                    var kv = DpTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
+                    var kv = DpxTensor.Alloc(owner, tensor.Shape, VomFormat.Float32, subdir: "Objects", name: pastName);
                     tensor.AsF().CopyTo(kv.ReadF32());
                     if (kvCacheHandles.TryGetValue(pastName, out var old))
                     {
@@ -685,7 +685,7 @@ namespace Subsystem.Dpx
         {
             // Weight storage is VOM-native (CRQ164): the Dp instance lazily owns a Weights owner (its
             // packed q4 tensors), scoped to its OWN lifetime, not any single turn's owner - a turn's
-            // owner gets Terminated on cancellation, but weights persist across turns (Dp.Run's _winit
+            // owner gets Terminated on cancellation, but weights persist across turns (Dpx.Run's _winit
             // cache is decoded once and reused), so this cannot be wired to the per-turn Terminate above.
             if (_interp?.WeightsOwner is Owner weightsOwner)
             {

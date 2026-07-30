@@ -20,14 +20,14 @@ namespace Subsystem.Pp;
 // when the unified config surface lands (domains: Profiles · Schemes · Themes · Keybindings · Actions · Capabilities).
 public static class Pp
 {
-    private static readonly Dictionary<string, IProvisioningSeam> _handlers =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static System.Collections.Immutable.ImmutableDictionary<string, IProvisioningSeam> _handlers =
+        System.Collections.Immutable.ImmutableDictionary.Create<string, IProvisioningSeam>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Register a domain handler. Idempotent by Name (matches the template's handlers[] enum).</summary>
     public static void RegisterHandler(IProvisioningSeam h)
     {
         if (h == null || string.IsNullOrEmpty(h.Name)) return;
-        _handlers[h.Name] = h;
+        System.Collections.Immutable.ImmutableInterlocked.Update(ref _handlers, dict => dict.SetItem(h.Name, h));
         Dg.Log("pp", $"handler registered: {h.Name}");
     }
 
@@ -103,7 +103,7 @@ public static class Pp
         }
         finally
         {
-            if (saved != null) _handlers[probe.Name] = saved; else _handlers.Remove(probe.Name);
+            if (saved != null) System.Collections.Immutable.ImmutableInterlocked.Update(ref _handlers, dict => dict.SetItem(probe.Name, saved)); else System.Collections.Immutable.ImmutableInterlocked.TryRemove(ref _handlers, probe.Name, out _);
         }
     }
 

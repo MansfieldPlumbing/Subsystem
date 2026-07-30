@@ -22,8 +22,8 @@ public class PairAdbReceiver : BroadcastReceiver
                 
                 if (port > 0)
                 {
-                    // Run on a background thread to prevent NetworkOnMainThreadException
-                    _ = Task.Run(async () => {
+                    var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\Adb");
+                    Subsystem.Vom.Vom.Spawn(owner, "PairAdb", async _ => {
                         string resultMessage = await SubsystemApi.PairAdbLoopback(port, codeStr);
                         
                         var notifManager = (NotificationManager)context!.GetSystemService(Context.NotificationService)!;

@@ -21,16 +21,17 @@ public static class Registrar
     // this file UTF-8 and don't let tooling that assumes ASCII rewrite it.
     private static readonly IReadOnlyDictionary<string, string> IconById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["agent"]       = "",  // comment
-        ["terminal"]    = "",  // terminal
-        ["files"]       = "",  // folder
-        ["taskmgr"]     = "",  // bar-chart
-        ["edit"]        = "",  // pencil
-        ["graph"]       = "",  // share
-        ["screen"]      = "",  // desktop
-        ["minesweeper"] = "",  // bomb
-        ["settings"]    = "",  // gear
-        ["morse"]       = "",  // lightbulb (optical link)
+        ["agent"]       = "󰚩",  // agent
+        ["terminal"]    = "",  // terminal
+        ["files"]       = "",  // folder
+        ["taskmgr"]     = "󰄪",  // bar-chart
+        ["edit"]        = "󰏫",  // pencil
+        ["graph"]       = "󰄪",  // share/graph
+        ["screen"]      = "󰍹",  // desktop/screen
+        ["minesweeper"] = "󰀼",  // bomb/game
+        ["settings"]    = "",  // gear
+        ["morse"]       = "󰤨",  // signal/radio
+        ["dptest"]      = "",  // directport interop
     };
 
     // First-class (pinned) surfaces. console removed — agent is the chat we grow.
@@ -666,9 +667,9 @@ public static class Registrar
             }
         }
         catch (Exception ex) { Subsystem.Dg.Log("registrar", "models.json seed failed: " + ex.Message); }
-        // TTS is now the native ORT-free dp-onnx `ss tts` verb (CRQ121). The WebView ort-web Kokoro lane
+        // TTS is now the native ORT-free dpx `ss tts` verb (CRQ121). The WebView ort-web Kokoro lane
         // (\Capability\Speech\Kokoro + lib/speech.js + vendor/kokoro) was removed 2026-06-24, and vendor/ort
-        // (onnxruntime-web, 31MB) followed once orphaned — ONNX inferencing is dp-onnx, home-rolled; no foreign runtime.
+        // (onnxruntime-web, 31MB) followed once orphaned — ONNX inferencing is dpx, home-rolled; no foreign runtime.
 
         // --- Quick-assist config (the power-button / assist-gesture panel). Stored as a Cm object so its
         //     actions are registry-driven, not hardcoded. Native hookup (assist intent) lands when the

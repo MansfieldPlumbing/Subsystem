@@ -1,16 +1,16 @@
-#requires -Version 7
-# test.dpx.gang.ps1 - DpGang (CRQ195): the brutally-synchronous worker-gang primitive. Three receipts:
+﻿#requires -Version 7
+# test.dpx.gang.ps1 - DpxGang (CRQ195): the brutally-synchronous worker-gang primitive. Three receipts:
 #   (a) lanes execute in LOCKSTEP gated by Fence.WaitAll/WaitN, not ad hoc Parallel.For - a slow lane
 #       holds up the barrier and every lane's marker is visible only AFTER WaitAll returns; WaitN(2)
 #       returns once a quorum clears without waiting for the slower laggard lanes.
 #   (b) a lane-role reassignment (DpGangHnic.Bind) is REFUSED while the prior buffer's registry
 #       refcount is nonzero above the floor - a real negative test (Vom.Open holds it open, Bind must
 #       throw DpGangHazardException), then Close drops it back to the floor and the SAME Bind succeeds.
-#   (c) the retrofitted call site (Dp.MatMulNBits's scalar per-N fan-out, now DpGang-driven) still
+#   (c) the retrofitted call site (Dpx.MatMulNBits's scalar per-N fan-out, now DpxGang-driven) still
 #       matches a hand-computed dot-product oracle bit-for-bit-modulo-fp-tolerance.
 # Lane bodies run on VOM-Spawn'd plain CLR threads (no pwsh Runspace bound), so they cannot be
 # PowerShell scriptblocks - the harness is real compiled C# (Roslyn, same pattern as
-# test.dpx.decode-loop.ps1 / test.dpx.qnn-project.ps1), calling straight into the shipped DpGang/Vom/Dp
+# test.dpx.decode-loop.ps1 / test.dpx.qnn-project.ps1), calling straight into the shipped DpxGang/Vom/Dp
 # types. Authority = the binary. This comment is not authority; the receipt the run prints is.
 #   Dogfood:  ss -File tests/test.dpx.gang.ps1
 $ErrorActionPreference = 'Stop'
@@ -19,8 +19,8 @@ function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundC
 
 $VOM = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Subsystem.Vom.Vom') } | Where-Object {$_} | Select-Object -First 1
 if (-not $VOM) { Write-Host "SKIP - Subsystem.Vom type not loaded (run in-proc: ss -File tests/test.dpx.gang.ps1)." -ForegroundColor Yellow; return }
-$gangT = $VOM.Assembly.GetType('Subsystem.Dpx.DpGang')
-if (-not $gangT) { Write-Host "SKIP - Subsystem.Dpx.DpGang not loaded." -ForegroundColor Yellow; return }
+$gangT = $VOM.Assembly.GetType('Subsystem.Dpx.DpxGang')
+if (-not $gangT) { Write-Host "SKIP - Subsystem.Dpx.DpxGang not loaded." -ForegroundColor Yellow; return }
 
 $exe = [Environment]::ProcessPath
 $selfBundleType = $VOM.Assembly.GetType('Subsystem.Windows.SelfBundle')
@@ -31,7 +31,7 @@ $bundleAssemblies = $selfBundleType.GetMethod('ManagedAssemblies').Invoke($null,
 $references = [System.Collections.Generic.List[Microsoft.CodeAnalysis.MetadataReference]]::new()
 foreach ($tup in $bundleAssemblies) { try { $references.Add([Microsoft.CodeAnalysis.MetadataReference]::CreateFromImage($tup.Item2)) } catch { } }
 
-Write-Host "Compiling GangHarness via Roslyn (DpGang lockstep + hazard + oracle-parity, all real compiled C#)..."
+Write-Host "Compiling GangHarness via Roslyn (DpxGang lockstep + hazard + oracle-parity, all real compiled C#)..."
 $harnessCode = @'
 using System;
 using System.Threading;
@@ -40,7 +40,7 @@ using Subsystem.Dpx;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
 
-// Real compiled C# (not a PowerShell scriptblock - DpGang lane bodies run on VOM-Spawn'd plain CLR
+// Real compiled C# (not a PowerShell scriptblock - DpxGang lane bodies run on VOM-Spawn'd plain CLR
 // threads with no pwsh Runspace bound, so a scriptblock delegate faults there). Three independent
 // static entry points, one per receipt; each returns a `key:value` line-oriented block the PowerShell
 // side parses, same convention as test.dpx.qnn-project.ps1's harness.
@@ -56,7 +56,7 @@ public static class GangHarness
     public static string Lockstep()
     {
         int laneCount = 4;
-        var gang = new DpGang(Sep + "Sessions" + Sep + "__gangtest_lockstep_" + Guid.NewGuid().ToString("N"), laneCount);
+        var gang = new DpxGang(Sep + "Sessions" + Sep + "__gangtest_lockstep_" + Guid.NewGuid().ToString("N"), laneCount);
         try
         {
             var stamps = new long[laneCount];
@@ -146,7 +146,7 @@ public static class GangHarness
         finally { VomClass.Terminate(owner); }
     }
 
-    // (c) Numerics: Dp.MatMulNBits (now DpGang-driven for its scalar per-N fan-out) vs a hand-rolled
+    // (c) Numerics: Dpx.MatMulNBits (now DpxGang-driven for its scalar per-N fan-out) vs a hand-rolled
     // fp64 dot-product oracle over the SAME packed q4 bytes / scales / activations. K=64 (2 blocks),
     // N=6 (more rows than most boxes' default lane count, so at least one lane covers >1 row), M=3,
     // zp absent -> default 8. Deterministic PRNG fixture (seeded), not flaky on re-run.
@@ -161,7 +161,7 @@ public static class GangHarness
         var act = new float[M * Kd];
         for (int i = 0; i < act.Length; i++) act[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
 
-        var dpT = typeof(Dp);
+        var dpT = typeof(Dpx);
         var mmnb = dpT.GetMethod("MatMulNBits", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         var arenaT = typeof(TensorArena);
         bool wasActive = (bool)arenaT.GetProperty("Active").GetValue(null);
@@ -266,11 +266,11 @@ $c = ParseKv ($harness.GetMethod('Oracle').Invoke($null, @()))
 $maxAbsDiff = [double]$c['maxAbsDiff']; $maxRef = [double]$c['maxRef']
 $tol = 1e-4 * [Math]::Max(1.0, $maxRef)
 Write-Host "  measured: max|diff| = $('{0:E3}' -f $maxAbsDiff) vs max|ref| = $('{0:F4}' -f $maxRef) over M=3 x N=6 (K=64, nBlk=2)"
-Assert ($maxAbsDiff -le $tol) "DpGang-retrofitted MatMulNBits matches the scalar dot-product oracle (max|diff| = $('{0:E3}' -f $maxAbsDiff), tol = $('{0:E3}' -f $tol))"
+Assert ($maxAbsDiff -le $tol) "DpxGang-retrofitted MatMulNBits matches the scalar dot-product oracle (max|diff| = $('{0:E3}' -f $maxAbsDiff), tol = $('{0:E3}' -f $tol))"
 
 $pass = $fails.Count -eq 0
 Write-Host ""
-Write-Host ($(if($pass){"PASS - DpGang lanes lockstep under Fence.WaitAll/WaitN (not ad hoc Parallel.For), a role reassignment is refused while the prior buffer's refcount is above the floor and succeeds once drained, and the DpGang-retrofitted Dp.MatMulNBits still matches the scalar dot-product oracle."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
+Write-Host ($(if($pass){"PASS - DpxGang lanes lockstep under Fence.WaitAll/WaitN (not ad hoc Parallel.For), a role reassignment is refused while the prior buffer's refcount is above the floor and succeeds once drained, and the DpxGang-retrofitted Dpx.MatMulNBits still matches the scalar dot-product oracle."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
 [pscustomobject]@{
     test        = 'test.dpx.gang'
     pass        = $pass

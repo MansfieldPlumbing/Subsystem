@@ -1,3 +1,4 @@
+#nullable disable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -5,7 +6,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
-using Onnx;
 
 namespace Subsystem.Dpx
 {
@@ -415,7 +415,7 @@ void main(uint3 tid : SV_DispatchThreadID)
         // ResolveQ4 picks the q4 GEMM kernel by MEASUREMENT on the real adapter: it compiles every q4 kernel
         // variant found in the source tree (gemm_q4.hlsl = the naive one-thread-per-element rung,
         // gemm_q4_gemv.hlsl = the M==1 decode GEMV, gemm_q4_tiled.hlsl = the M>1 16x16 tile), diffs each
-        // against the scalar MatMulNBits oracle (Dp.ForceScalarMatMulNBits — the law), times the survivors
+        // against the scalar MatMulNBits oracle (Dpx.ForceScalarMatMulNBits — the law), times the survivors
         // over decode/prefill bench shapes, and places the winners' DXIL beside the exe where Dp's variant
         // rungs load them:
         //   gemm_q4.dxil       — always rewritten from the naive kernel (the fallback rung)
@@ -499,7 +499,7 @@ void main(uint3 tid : SV_DispatchThreadID)
                 : $"q4 prefill (M>1) winner: naive {naivePrefill:F3} ms total{(tiled == null ? " (no tiled candidate)" : tiledAlive ? $" (tiled {tiledPrefill:F3} ms lost)" : " (tiled disqualified)")} — variant file absent");
 
             // Dp memoizes the loaded dxil per variant; the files just changed underneath it.
-            typeof(Dp).GetField("_gemmQ4Dxil", BindingFlags.NonPublic | BindingFlags.Static)?.SetValue(null, null);
+            typeof(Dpx).GetField("_gemmQ4Dxil", BindingFlags.NonPublic | BindingFlags.Static)?.SetValue(null, null);
             return 0;
         }
 
@@ -541,7 +541,7 @@ void main(uint3 tid : SV_DispatchThreadID)
         }
 
         // The oracle: Dp's scalar MatMulNBits (ForceScalarMatMulNBits pins the exact path every faster
-        // variant is diffed against), reflected because the kernel is deliberately private to Dp.
+        // variant is diffed against), reflected because the kernel is deliberately private to Dpx.
         static float[] OracleQ4(float[] A, byte[] Bq, float[] Scales, int M, int N, int K)
         {
             var tA = new Tensor { Fp = A, Shape = new[] { M, K } };
@@ -550,11 +550,11 @@ void main(uint3 tid : SV_DispatchThreadID)
             var node = new NodeProto { OpType = "MatMulNBits" };
             foreach (var (nm, v) in new[] { ("K", (long)K), ("N", (long)N), ("bits", 4L), ("block_size", 32L) })
                 node.Attribute.Add(new AttributeProto { Name = nm, I = v });
-            var mm = typeof(Dp).GetMethod("MatMulNBits", BindingFlags.NonPublic | BindingFlags.Static);
-            bool prevScalar = Dp.ForceScalarMatMulNBits; bool prevGpu = Dp.UseGpuMatMulNBits;
-            Dp.ForceScalarMatMulNBits = true; Dp.UseGpuMatMulNBits = false;
+            var mm = typeof(Dpx).GetMethod("MatMulNBits", BindingFlags.NonPublic | BindingFlags.Static);
+            bool prevScalar = Dpx.ForceScalarMatMulNBits; bool prevGpu = Dpx.UseGpuMatMulNBits;
+            Dpx.ForceScalarMatMulNBits = true; Dpx.UseGpuMatMulNBits = false;
             try { return ((Tensor)mm.Invoke(null, new object[] { new[] { tA, tB, tS }, node })).AsF().ToArray(); }
-            finally { Dp.ForceScalarMatMulNBits = prevScalar; Dp.UseGpuMatMulNBits = prevGpu; }
+            finally { Dpx.ForceScalarMatMulNBits = prevScalar; Dpx.UseGpuMatMulNBits = prevGpu; }
         }
 
         // One warmup call carries the PSO compile and the parity sample; the timed reps ride the resident

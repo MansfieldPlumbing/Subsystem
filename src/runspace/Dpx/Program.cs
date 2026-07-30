@@ -1,19 +1,18 @@
-// dp-onnx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
+// dpx — a native .NET ONNX interpreter over Onnx.dll (protobuf), NO onnxruntime.
 //
 // "ONNX is protobuf": Onnx.dll already decomposes a .onnx into walkable objects.
 // This walks graph.Node in topological order over a Dictionary<string,Tensor>,
 // dispatching each OpType to a hand-rolled kernel (math decomposed from ggml).
 //
-//   dp-onnx selftest                 build a tiny graph in-proc, run, verify
-//   dp-onnx probe   <model.onnx>     run with zero inputs until an unimplemented op; report op coverage
-//   dp-onnx run     <model.onnx> [--inputs <dir>] [--out <wav>]
+//   dpx selftest                 build a tiny graph in-proc, run, verify
+//   dpx probe   <model.onnx>     run with zero inputs until an unimplemented op; report op coverage
+//   dpx run     <model.onnx> [--inputs <dir>] [--out <wav>]
 //                                    --inputs: load real tensors (<name>.bin) + run to completion;
 //                                    diff against oracle.bin if present. No --inputs = legacy zero-feed.
 //
 using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Data.Sqlite;
-using Onnx;
 using Subsystem.Dpx;
 
 // DPX_BUDGET_MB caps the engine's self-imposed RAM budget (simulate an 8GB phone on a big box; the Android
@@ -273,7 +272,7 @@ static int GenOnnx(string[] args)
     int maxNew = args.Length > 5 && int.TryParse(args[5], out var mn) ? mn : 64;
 
     Console.Error.WriteLine("loading embed + decoder graphs from .db (q4, dequant deferred to the kernel)…");
-    Dp.ActiveModelDbPath = decDb;
+    Dpx.ActiveModelDbPath = decDb;
     TensorArena.Active = true;   // activations on the native off-GC arena (the proto-Sub-VOM); real Vom.Alloc-region + Spawn-SubGraph ownership port follows the correctness proof
     var embed = new Dp(LoadGraphFromDb(0, embDb));
     var dec   = new Dp(LoadGraphFromDb(0, decDb));
@@ -381,7 +380,7 @@ static int Usage() { Console.WriteLine("usage: dpx selftest | probe <model.onnx|
 
 // compile front-half (#69 / shared with the #92 D3D12 frame-graph): walk the ONNX graph and emit a
 // straight-line C# Tier-1 forward pass. Design (fixes the 5 blockers in the H1 draft):
-//  - calls Dp.Dispatch per node  -> covers all 53 ops for free (no partial per-op switch);
+//  - calls Dpx.Dispatch per node  -> covers all 53 ops for free (no partial per-op switch);
 //  - binds ALL node outputs          -> multi-output ops (LSTM x3, Split xN) work;
 //  - bakes each node by base64'ing its NodeProto -> robust attrs incl. tensor attrs (Constant), no per-type code;
 //  - weights come from an Init(weights) dict, NOT inlined C# literals -> no multi-GB .cs (82M params).
@@ -394,7 +393,7 @@ static int Emit(string[] args)
     var inits = new HashSet<string>(g.Initializer.Select(i => i.Name));
     var nodes = g.Node;
     var sb = new System.Text.StringBuilder();
-    sb.AppendLine("// AUTO-EMITTED by `dpx emit` — Tier-1 straight-line forward pass (calls Dp.Dispatch).");
+    sb.AppendLine("// AUTO-EMITTED by `dpx emit` — Tier-1 straight-line forward pass (calls Dpx.Dispatch).");
     sb.AppendLine("using System;");
     sb.AppendLine("using System.Collections.Generic;");
     sb.AppendLine("using Onnx;");
@@ -413,7 +412,7 @@ static int Emit(string[] args)
     {
         var nd = nodes[i];
         string ins = string.Join(", ", nd.Input.Select(x => string.IsNullOrEmpty(x) ? "null" : $"G(e,{Q(x)})"));
-        sb.AppendLine($"      {{ var o = Dp.Dispatch(n{i}, new Tensor[]{{ {ins} }});");
+        sb.AppendLine($"      {{ var o = Dpx.Dispatch(n{i}, new Tensor[]{{ {ins} }});");
         for (int k = 0; k < nd.Output.Count; k++) if (!string.IsNullOrEmpty(nd.Output[k])) sb.AppendLine($"        e[{Q(nd.Output[k])}] = o[{k}];");
         sb.AppendLine("      }");
     }
@@ -442,14 +441,14 @@ static int GpuTest(string[] args)
     byte[] dxil = File.Exists(dxilPath) ? File.ReadAllBytes(dxilPath) : Array.Empty<byte>();
     int rc = Gpu.dpgpu_gemm(A, B, C, (uint)M, (uint)N, (uint)K, dxil, (uint)dxil.Length);
     if (rc != 0) { Console.WriteLine($"dpgpu_gemm failed rc={rc}"); return 1; }
-    var cpu = Dp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, M, K), Tensor.F(B, K, N) })[0].Fp;
+    var cpu = Dpx.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, M, K), Tensor.F(B, K, N) })[0].Fp;
     double maxd = 0; for (int i = 0; i < C.Length; i++) maxd = Math.Max(maxd, Math.Abs(C[i] - cpu[i]));
-    Console.WriteLine($"dpx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Dp.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dpx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
+    Console.WriteLine($"dpx -> GPU dpgpu_gemm [{M}x{K}]@[{K}x{N}]  vs CPU Dpx.MatMul:  max|diff|={maxd:E3}  =>  {(maxd < 1e-3 ? "MATCH — dpx dispatched a MatMul to the D3D12 GPU; the mount works" : "MISMATCH")}");
     return maxd < 1e-3 ? 0 : 2;
 }
 
 // gpu-test-q4 [dxil]: dispatch MatMulNBits's q4 contraction to the GPU (GemmQ4) and diff vs the CPU oracle
-// (Dp.MatMulNBits, reflected — the SAME kernel test.dpx.q4-packing-order.ps1 pins). Fixture mirrors that test:
+// (Dpx.MatMulNBits, reflected — the SAME kernel test.dpx.q4-packing-order.ps1 pins). Fixture mirrors that test:
 // SEQUENTIAL nibble layout (byte k>>1, low nibble = even k), K=64 (2 blocks of 32), N=2 rows, zp defaulted to 8.
 static int GpuTestQ4(string[] args)
 {
@@ -468,7 +467,7 @@ static int GpuTestQ4(string[] args)
     int rc = Gpu.dpgpu_gemm_q4(ident, packed, scales, Array.Empty<byte>(), c, (uint)Kd, (uint)Nd, (uint)Kd, (uint)bs, false, dxil);
     if (rc != 0) { Console.WriteLine($"dpgpu_gemm_q4 failed rc={rc}"); return 1; }
 
-    // CPU oracle: same fixture through Dp.MatMulNBits (defZp=8, per-block scale sc[n*nBlk+b])
+    // CPU oracle: same fixture through Dpx.MatMulNBits (defZp=8, per-block scale sc[n*nBlk+b])
     int DecodeSeq(byte[] b, int k) => (b[k >> 1] >> ((k & 1) * 4)) & 0xF;
     var rows = new[] { row0, row1 };
     double maxd = 0;
@@ -501,7 +500,7 @@ static int GpuBench(string[] args)
     Console.WriteLine($"  device: {Gpu.DeviceName()}");
     double gpu = 1e9;
     for (int r = 0; r < 5; r++) { sw.Restart(); Gpu.dpgpu_gemm(A, B, C, (uint)S, (uint)S, (uint)S, dxil, (uint)dxil.Length); sw.Stop(); gpu = Math.Min(gpu, sw.Elapsed.TotalSeconds); }
-    sw.Restart(); var cpu = Dp.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, S, S), Tensor.F(B, S, S) })[0].Fp; sw.Stop(); double cpus = sw.Elapsed.TotalSeconds;
+    sw.Restart(); var cpu = Dpx.Dispatch(new NodeProto { OpType = "MatMul" }, new[] { Tensor.F(A, S, S), Tensor.F(B, S, S) })[0].Fp; sw.Stop(); double cpus = sw.Elapsed.TotalSeconds;
     double maxd = 0; for (int i = 0; i < C.Length; i++) maxd = Math.Max(maxd, Math.Abs(C[i] - cpu[i]));
     Console.WriteLine($"GEMM {S}x{S}x{S}  ({gflop:F2} GFLOP)   max|diff|={maxd:E2}");
     Console.WriteLine($"  one-time device init (first call) : {init * 1000,8:F1} ms");
@@ -521,7 +520,7 @@ int RunCompiled(string[] args)
     for (int i = 3; i < args.Length; i++) switch (args[i]) { case "--inputs": inputsDir = args[++i]; break; case "--out": outPath = args[++i]; break; }
     var g = ModelProto.Parser.ParseFrom(File.ReadAllBytes(onnx)).Graph;
     var W = new Dictionary<string, Tensor>();
-    foreach (var init in g.Initializer) W[init.Name] = Dp.FromProto(init);
+    foreach (var init in g.Initializer) W[init.Name] = Dpx.FromProto(init);
     var feed = new Dictionary<string, Tensor>();
     foreach (var vi in g.Input) { if (g.Initializer.Any(i => i.Name == vi.Name)) continue; feed[vi.Name] = LoadBin(Path.Combine(inputsDir, vi.Name + ".bin")); }
 
@@ -582,7 +581,7 @@ static int SelfTest()
 }
 
 // LITERTLM container probe: list the sections, then for each TFLiteModel section enumerate the tflite
-// operator set and map it onto dp-onnx kernels (the coverage receipt the .onnx `probe` prints for ONNX).
+// operator set and map it onto dpx kernels (the coverage receipt the .onnx `probe` prints for ONNX).
 static int ProbeLiteRtLm(string path)
 {
     var secs = LiteRtLm.ReadSections(path);
@@ -605,7 +604,7 @@ static int ProbeLiteRtLm(string path)
 }
 
 // Translate ONE .litertlm TFLiteModel section into Onnx.ModelProto and RUN it through Dp, off a synthesized
-// feed (the probe->executable proof: the sovereign tflite reader produces a graph the dp-onnx engine executes).
+// feed (the probe->executable proof: the sovereign tflite reader produces a graph the dpx engine executes).
 static int RunSection(string path, int sectionIx)
 {
     var secs = LiteRtLm.ReadSections(path);
@@ -655,12 +654,12 @@ static void ProbeTfliteBytes(byte[] tfl, string label)
 {
     var (hist, subgraphs, tensors, ops) = Tflite.OpHistogram(tfl);
     int distinct = hist.Count;
-    int impl = hist.Keys.Count(k => { var o = Tflite.MapToOnnx(k); return o != null && Dp.Implemented.Contains(o); });
+    int impl = hist.Keys.Count(k => { var o = Tflite.MapToOnnx(k); return o != null && Dpx.Implemented.Contains(o); });
     Console.WriteLine($"  {label}  {tfl.Length / 1e6:F1} MB  subgraphs={subgraphs} tensors={tensors} ops={ops} distinct={distinct}  mapped-types={impl}/{distinct}");
     foreach (var kv in hist.OrderByDescending(k => k.Value))
     {
         var o = Tflite.MapToOnnx(kv.Key);
-        bool ok = o != null && Dp.Implemented.Contains(o);
+        bool ok = o != null && Dpx.Implemented.Contains(o);
         Console.WriteLine($"    {kv.Value,5}  {kv.Key,-24} {(o == null ? "—" : "-> " + o),-18} {(ok ? "" : "MISSING")}");
     }
 }
@@ -675,7 +674,7 @@ static int Probe(string path, bool stopOnMissing = true)
     // op histogram
     var hist = new Dictionary<string, int>();
     foreach (var n in g.Node) hist[n.OpType] = hist.GetValueOrDefault(n.OpType) + 1;
-    var impl = Dp.Implemented;
+    var impl = Dpx.Implemented;
     int haveTypes = hist.Keys.Count(k => impl.Contains(k));
     Console.WriteLine($"{path}");
     Console.WriteLine($"nodes={g.Node.Count}  distinct ops={hist.Count}  implemented op-types={haveTypes}/{hist.Count}");
@@ -726,15 +725,15 @@ int Run(string[] args)
             case "--inject": injectNode = args[++i]; break;   // replace matching nodes' output w/ oracle (needs --compare <dir>)
             case "--gpu-matmul":   // offload every MatMul to the GPU seam (D3D12); `auto` = per-shape router; CPU fallback on mount failure
                 if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
-                else Dp.UseGpuMatMul = true;
+                else Dpx.UseGpuMatMul = true;
                 break;
             case "--gpu-matmulnbits":   // offload the q4 MatMulNBits contraction to the GPU (GemmQ4); `auto` = per-shape router; CPU fallback on mount failure
                 if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;
-                else Dp.UseGpuMatMulNBits = true;
+                else Dpx.UseGpuMatMulNBits = true;
                 break;
-            case "--prof": Dp.Profile = true; break;   // per-op-type wall-time breakdown
-            case "--drop": Dp.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
-            case "--drop-scope": Dp.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")
+            case "--prof": Dpx.Profile = true; break;   // per-op-type wall-time breakdown
+            case "--drop": Dpx.DropP = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;   // stale-read drop prob on residual merges
+            case "--drop-scope": Dpx.DropScope = args[++i]; break;   // gate drops to node names containing this (e.g. "generator")
             default: if (path == null) path = args[i]; break;
         }
     if (path == null) return Usage();
@@ -776,7 +775,7 @@ int Run(string[] args)
             string f = Path.Combine(compareDir, "ort_" + Sani(nd.Output[0]) + ".bin");
             if (File.Exists(f))
             {
-                var or = LoadBin(f).Fp; var dp = t0.Fp; int n = Math.Min(or.Length, dp.Length);
+                var or = LoadBin(f).Fp; var dp = t0.Fp; int n = Math.Min(or.Length, Dpx.Length);
                 double sdo = 0, na = 0, nb = 0, ss = 0, wss = 0, wsum = 0;
                 for (int i = 0; i < n; i++) { double a = dp[i], b = or[i]; sdo += a * b; na += a * a; nb += b * b; double d = a - b; ss += d * d; double w = Math.Abs(b); wss += w * d * d; wsum += w; }
                 double corr = (na > 0 && nb > 0) ? sdo / Math.Sqrt(na * nb) : 1.0;
@@ -804,11 +803,11 @@ int Run(string[] args)
 
     if (stoppedAt != null) { Console.WriteLine($"ran {ran}/{g.Node.Count} nodes, stopped at: {stoppedAt}"); return 1; }
     Console.WriteLine($"RAN ALL {ran} nodes ✓  ({sw.Elapsed.TotalSeconds:F2}s)");
-    if (Dp.Profile)
+    if (Dpx.Profile)
     {
-        double tot = 0; foreach (var kv in Dp.Prof) tot += kv.Value.ms;
+        double tot = 0; foreach (var kv in Dpx.Prof) tot += kv.Value.ms;
         Console.WriteLine($"\nPER-OP PROFILE (wall, {tot:F0} ms total dispatch):");
-        foreach (var kv in Dp.Prof.OrderByDescending(k => k.Value.ms))
+        foreach (var kv in Dpx.Prof.OrderByDescending(k => k.Value.ms))
             Console.WriteLine($"  {kv.Value.ms,9:F1} ms  {100 * kv.Value.ms / tot,5:F1}%  {kv.Value.n,5}x  {kv.Key}");
     }
     if (injectNode != null) Console.WriteLine($"INJECTED {injected} oracle tensors (matching: {injectNode})");
@@ -828,7 +827,7 @@ int Run(string[] args)
     var y = outs.Values.First(); var wav = y.AsF();
     Console.WriteLine($"output [{string.Join(",", y.Shape)}]  samples={wav.Length}  ({wav.Length / 24000.0:F2}s)  rms={Rms(wav):F5}  peak={Peak(wav):F5}");
     { long nan = 0; foreach (var f in wav) if (float.IsNaN(f) || float.IsInfinity(f)) nan++;
-      if (Dp.DropP > 0 || nan > 0) Console.WriteLine($"  STALE-READ TEST: dropped {Dp.Dropped} residual merges (--drop {Dp.DropP});  NaN/Inf samples: {nan}/{wav.Length}"); }
+      if (Dpx.DropP > 0 || nan > 0) Console.WriteLine($"  STALE-READ TEST: dropped {Dpx.Dropped} residual merges (--drop {Dpx.DropP});  NaN/Inf samples: {nan}/{wav.Length}"); }
     if (outPath != null) { WriteWav(outPath, wav, 24000); Console.WriteLine($"wrote {outPath}"); }
 
     string oracle = Path.Combine(inputsDir, "oracle.bin");
@@ -848,7 +847,7 @@ int Run(string[] args)
 // Splits the IPA phoneme string into ~breath-group chunks, synthesizes each independently through ONE parsed
 // graph, and overlap-add stitches. Proves the two load-bearing claims: streaming latency (first audio after
 // chunk 0, not the whole utterance) and click-free seams. Grounded sizes: ~13 kokoro tokens ~= 1.6s, so a
-// 2.5-3.5s breath group ~= 25-40 tokens (dp-onnx-receipts + breath-group prosody).
+// 2.5-3.5s breath group ~= 25-40 tokens (dpx-receipts + breath-group prosody).
 int Stream(string[] args)
 {
     string drive = Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\";
@@ -929,7 +928,7 @@ int Stream(string[] args)
 // fold: evaluate the graph at static inputs and FREEZE matching nodes' outputs to Constant initializers —
 // the python-free static-ifier / "fix-shape" gap. Kills the dynamic /encoder/Range (shape-derived limit) that
 // blocks qairt-converter (`Dynamic value for ... is not supported`), without onnxsim/python.
-//   dp-onnx fold <in.onnx> <out.onnx> [--inputs <dir>] --nodes <substr>[,<substr>...]
+//   dpx fold <in.onnx> <out.onnx> [--inputs <dir>] --nodes <substr>[,<substr>...]
 // Inputs default to zero-fill at the model's declared (static) shapes — correct for shape-derived nodes.
 static int Fold(string[] args)
 {
@@ -1084,7 +1083,7 @@ static double Peak(ReadOnlySpan<float> s) { double p = 0; foreach (var f in s) p
 //   (multi-resolution STFT loss — exactly how these vocoders are trained), gain-aligned so a pure
 //   loudness offset isn't counted. This is the HONEST oracle for "does it sound like ORT": waveform
 //   rmse over-weights the meaningless low-magnitude phase, magnitude-spectra do not.
-//     dp-onnx specdiff <wavA> <wavB>
+//     dpx specdiff <wavA> <wavB>
 static int SpecDiff(string[] args)
 {
     if (args.Length < 3) { Console.Error.WriteLine("usage: dpx specdiff <wavA> <wavB>"); return 1; }

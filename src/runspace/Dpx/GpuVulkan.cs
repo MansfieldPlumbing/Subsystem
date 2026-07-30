@@ -1,4 +1,5 @@
-// GpuVulkan.cs — pure-C# Vulkan GEMM dispatch for dp-onnx. NO C++, NO MSVC. vulkan-1.dll (Windows) / libvulkan.so
+#nullable disable
+// GpuVulkan.cs — pure-C# Vulkan GEMM dispatch for dpx. NO C++, NO MSVC. vulkan-1.dll (Windows) / libvulkan.so
 // (Android) via flat-C P/Invoke + precompiled SPIR-V. Same naive fp32 GEMM as the D3D12 path, so bit-parity holds.
 // Cross-platform spine: this exact code + gemm.spv run on the Adreno/Mali. Persistent instance/device/queue/
 // descriptor-layout/pipeline-layout/pipeline; per-call buffers/descriptors/command-buffer/fence destroyed.

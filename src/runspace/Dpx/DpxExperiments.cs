@@ -3,13 +3,11 @@
 // MatMulNBits correction is simply SKIPPED — its output is replaced by a zero tensor of the correct
 // shape, so the residual stream carries forward WITHOUT that layer's update (the merge adds zero).
 //
-// Same static-knob pattern class as Dp.UseGpuMatMulNBits / Dp.ForceScalarMatMulNBits (SS015-baselined):
+// Same static-knob pattern class as Dpx.UseGpuMatMulNBits / Dpx.ForceScalarMatMulNBits (SS015-baselined):
 // statics COMPUTE, they never remember/authorize/rendezvous across owners. The receipt sets these in-proc
 // between decode runs and reads the capture back in the SAME process; nothing here crosses a turn owner or
 // persists past the run — ResetRun() clears the per-run state.
 using System.Collections.Generic;
-using Onnx;
-
 namespace Subsystem.Dpx;
 
 public static class DpxExperiments
@@ -44,7 +42,7 @@ public static class DpxExperiments
         CapturedLogits.Clear();
     }
 
-    // Drop decision for the hook at the top of Dp.MatMulNBits. Increments the target counter on every target-
+    // Drop decision for the hook at the top of Dpx.MatMulNBits. Increments the target counter on every target-
     // node execution and returns true when this execution lands on the drop cadence (counter % DropEveryN == 0).
     public static bool ShouldDrop(NodeProto n)
     {

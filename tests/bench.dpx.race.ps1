@@ -3,7 +3,7 @@
 # standing MatMulNBits shape, two VOM-owned worker threads race per iteration - CPU lane = MatMulNBitsSimd,
 # GPU lane = GpuMatMulNBits (the packed-q4 seam, per-call array copies included) - conducted over CpuFences:
 # Signal both work fences, Fence.WaitAny names the winner, Fence.WaitAll closes the barrier, outputs are
-# parity-checked lane-vs-lane and (once per shape) against the scalar oracle (Dp.ForceScalarMatMulNBits path).
+# parity-checked lane-vs-lane and (once per shape) against the scalar oracle (Dpx.ForceScalarMatMulNBits path).
 # Each lane times its own compute; the table below reports median per-lane ms, win rate, and max rel diff.
 # Ties at WaitAny's recheck resolve to cpu (index 0) - the win rate is by WaitAny, not by the stopwatches.
 # Lane times INCLUDE cross-lane contention (a race is concurrent by construction: the GPU lane's per-call
@@ -17,7 +17,7 @@ function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundC
 
 $dxil = Join-Path (Split-Path ([Environment]::ProcessPath) -Parent) 'gemm_q4.dxil'
 if (-not (Test-Path $dxil)) {
-    Write-Host "SKIP - no gemm_q4.dxil next to the exe (dxc -T cs_6_2 -E main src/native/dp-onnx/gpu/gemm_q4.hlsl -Fo gemm_q4.dxil)." -ForegroundColor Yellow
+    Write-Host "SKIP - no gemm_q4.dxil next to the exe (dxc -T cs_6_2 -E main src/native/dpx/gpu/gemm_q4.hlsl -Fo gemm_q4.dxil)." -ForegroundColor Yellow
     return
 }
 

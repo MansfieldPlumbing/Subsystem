@@ -1,6 +1,6 @@
 using Android.Content;
 
-namespace Subsystem;
+namespace Subsystem.Diagnostics;
 
 // Persisted agent settings (Android SharedPreferences). Controls how much context she gets —
 // the "settings page" toggles bind to these.

@@ -5,8 +5,8 @@ namespace Subsystem.Device;
 
 // McpRelay — fragments an MCP JSON-RPC line (newline-delimited JSON, the same wire `ss mcp` speaks over
 // stdio — see windows/Mcp.cs) over a small-MTU notify/write characteristic (BLE GATT: ~20-512B depending
-// on negotiated MTU). Shared by both heads: Android's DpBleAdvert.cs (GATT server) and Windows'
-// DpBleScan.cs (GATT client) fragment/reassemble through this ONE seam — one concept, N couriers
+// on negotiated MTU). Shared by both heads: Android's DpxBleAdvert.cs (GATT server) and Windows'
+// DpxBleScan.cs (GATT client) fragment/reassemble through this ONE seam — one concept, N couriers
 // (invariant 9). Pure System.* — no platform API — so it compiles into both heads unmodified.
 //
 // Framing per chunk: [seq:1][total:1][payload...]. seq/total cap a message at 255 fragments; at a

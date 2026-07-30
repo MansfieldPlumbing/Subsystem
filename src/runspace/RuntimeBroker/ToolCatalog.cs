@@ -123,7 +123,11 @@ namespace Subsystem
                 // parses them on-device. The injection class dies at this boundary (the Rs.cs discipline).
                 var argsB64 = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(argsJson ?? "{}"));
                 var script = "$ToolArgs = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + argsB64 + "')) | ConvertFrom-Json; " + tool.Command;
+#if ANDROID || __ANDROID__
                 return Subsystem.SubsystemApi.ExecuteCommandAsJson(script).GetAwaiter().GetResult();
+#else
+                return JsonSerializer.Serialize(new { error = "SubsystemApi unavailable on Windows" });
+#endif
             }
             catch (Exception ex)
             {

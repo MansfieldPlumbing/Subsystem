@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -9,7 +9,7 @@ using Subsystem;
 namespace Subsystem.Windows
 {
     // ss dpx-generate "<prompt>" — the resident proof-of-life for CRQ166/CRQ144/CRQ157: interrogate a
-    // gemma4-e2b q4 ONNX export IN-PROC, no dp-onnx.exe child process, no RuntimeBroker (Dpx is
+    // gemma4-e2b q4 ONNX export IN-PROC, no dpx.exe child process, no RuntimeBroker (Dpx is
     // native-native, no boundary — this mirrors Chat.cs's shape only for the CLI dispatch/discovery
     // convention, not for Rb). Same discovery doctrine as Chat.cs: env override, else drive-derived dir,
     // never a hardcoded path — models are found, not baked in.
@@ -35,7 +35,7 @@ namespace Subsystem.Windows
                 if (a == "--gpu-matmul")
                 {
                     if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
-                    else Dp.UseGpuMatMulNBits = true;
+                    else Subsystem.Dpx.Dpx.UseGpuMatMulNBits = true;
                     continue;
                 }
                 clean.Add(a);
@@ -78,7 +78,7 @@ namespace Subsystem.Windows
                 });
 
             Dg.ConsoleVerbose = verbose;
-            if (profile) { Dp.Profile = true; Dp.Prof.Clear(); }
+            if (profile) { Subsystem.Dpx.Dpx.Profile = true; Subsystem.Dpx.Dpx.Prof.Clear(); }
 
             DpxDecoder decoder;
             if (consolidated != null)
@@ -128,7 +128,7 @@ namespace Subsystem.Windows
             return 0;
         }
 
-        // The named-hot-op receipt (CRQ190 step 1): Dp.Prof accumulates (total ms, call count) per ONNX
+        // The named-hot-op receipt (CRQ190 step 1): Subsystem.Dpx.Dpx.Prof accumulates (total ms, call count) per ONNX
         // OpType across every Dispatch call in the run — prefill AND decode. Sorted by total ms so the
         // hottest op class is the first line, not a guess.
         private static void PrintProfile()
@@ -136,8 +136,8 @@ namespace Subsystem.Windows
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("[DPX Op Profile]  (op | total ms | calls | ms/call)");
-            double grandTotal = Dp.Prof.Values.Sum(e => e.ms);
-            foreach (var kv in Dp.Prof.OrderByDescending(e => e.Value.ms))
+            double grandTotal = Subsystem.Dpx.Dpx.Prof.Values.Sum(e => e.ms);
+            foreach (var kv in Subsystem.Dpx.Dpx.Prof.OrderByDescending(e => e.Value.ms))
             {
                 double pct = grandTotal > 0 ? kv.Value.ms / grandTotal * 100.0 : 0;
                 Console.WriteLine($"  {kv.Key,-24} {kv.Value.ms,10:F1} ms  {kv.Value.n,6} calls  {kv.Value.ms / kv.Value.n,8:F3} ms/call  ({pct:F1}%)");

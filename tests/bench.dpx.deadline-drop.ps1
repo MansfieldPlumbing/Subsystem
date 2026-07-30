@@ -5,7 +5,7 @@
 # fixed cadence, and measure the cost.
 #
 # Mechanism (all in the LOADED ss.exe assembly — this receipt only sets the knobs, it doesn't recompile):
-#   - Dp.MatMulNBits top hook: if DpxExperiments.ShouldDrop(node) -> return a zero tensor of the output
+#   - Dpx.MatMulNBits top hook: if DpxExperiments.ShouldDrop(node) -> return a zero tensor of the output
 #     shape (AllocZeros). The target is matched by substring against the node's FIRST output name.
 #   - Per-target call counter: the target runs once per graph execution (prefill + each decode step), so
 #     counter % DropEveryN == 0 IS the cadence. DropEveryN=0 = never drop. No external token counter.

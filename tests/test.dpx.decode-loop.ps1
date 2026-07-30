@@ -1,7 +1,7 @@
 #requires -Version 7
 # test.dpx.decode-loop.ps1 — Proves the DPX decode loop and KV-cache off-GC management.
 # Authority = the binary. This comment is not authority; the receipt the run prints is.
-#   Dogfood:  ss -File tests/test.rb.dponnx-decode-loop.ps1
+#   Dogfood:  ss -File tests/test.rb.dpx-decode-loop.ps1
 
 $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
@@ -34,9 +34,9 @@ Write-Host "Compiling DpxDecoder and SyntheticModelBuilder via Roslyn..."
 
 $syntaxTrees = [System.Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 
-# 1. Parse DpOnnxRuntime.cs
-$dpOnnxText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\DpxDecoder.cs"))
-$syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($dpOnnxText))
+# 1. Parse dpxRuntime.cs
+$dpxText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\DpxDecoder.cs"))
+$syntaxTrees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($dpxText))
 
 # 1b. Parse ModelDb.cs
 $modelDbText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\src\runspace\Dpx\ModelDb.cs"))

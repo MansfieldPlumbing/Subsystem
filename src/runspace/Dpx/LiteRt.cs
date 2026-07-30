@@ -1,10 +1,11 @@
+#nullable disable
 // LiteRt.cs — home-rolled FlatBuffers reader for `.tflite` graphs and the `.litertlm` container,
 // the FlatBuffers sibling of OnnxProto.cs (which does the same for ONNX protobuf).
 //
 // Why: the only Gemma weights on the box are gemma-4-E2B-it.litertlm (a LITERTLM container of
 // .tflite FlatBuffers). Rather than a second engine, we TRANSLATE a .tflite subgraph into the SAME
 // Onnx.ModelProto IR so Dp + probe run unchanged. Coverage = the BuiltinOperator -> OpType map
-// (what `dp-onnx probe <file>.litertlm` prints). No FlatBuffers lib, no LiteRT lib.
+// (what `dpx probe <file>.litertlm` prints). No FlatBuffers lib, no LiteRT lib.
 
 using System;
 using System.Collections.Generic;
@@ -12,7 +13,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace Onnx;
+namespace Subsystem.Dpx;
 
 // Minimal FlatBuffers wire reader: random access over a buffer, vtable-aware. FlatBuffers layout —
 // a uoffset (u32, points FORWARD from its own location) at buffer[0] locates the root table; a table
@@ -190,7 +191,7 @@ public static class Tflite
         [158] = "SIGN", [206] = "STABLEHLO_COMPOSITE",
     };
 
-    // tflite op name -> dp-onnx (ONNX) OpType when an existing kernel covers it; null = no mapping yet
+    // tflite op name -> dpx (ONNX) OpType when an existing kernel covers it; null = no mapping yet
     // (shows MISSING in the probe — the work the probe is meant to surface).
     static readonly IReadOnlyDictionary<string, string> ToOnnx = new Dictionary<string, string>
     {
@@ -297,7 +298,7 @@ public static class Tflite
     //   QuantizationParameters{ min[0], max[1], scale[2]:[float], zero_point[3]:[long], details[4], quantized_dimension[5]:int }
     //   Operator (union): opcode_index[0], inputs[1]:[int], outputs[2]:[int], builtin_options_type[3]:byte, builtin_options[4]:table
     //   ReshapeOptions{ new_shape[0]:[int] }   GatherOptions{ axis[0]:int, batch_dims[1]:int }
-    // Weights are inlined into TensorProto (Dp.FromProto has no external-data path). Dp.FromProto can't load
+    // Weights are inlined into TensorProto (Dpx.FromProto has no external-data path). Dpx.FromProto can't load
     // int8/uint8/int16 initializers, so those are widened to INT32 here; quantized weights then flow through a
     // synthesized DequantizeLinear (per the verified Dp contract: scale@input1, zero_point@input2, per-tensor
     // when scale is scalar). One op convention differs from ONNX and is fixed here: tflite EMBEDDING_LOOKUP is
@@ -749,7 +750,7 @@ public static class Tflite
     static string ShapeStr(ValueInfoProto v) =>
         "[" + string.Join(",", v.Type.TensorType.Shape.Dim.Select(d => d.DimValue)) + "]";
 
-    // ONNX ops whose dp-onnx kernels need no attributes for a faithful translation (broadcast/elementwise/select/cast).
+    // ONNX ops whose dpx kernels need no attributes for a faithful translation (broadcast/elementwise/select/cast).
     static readonly HashSet<string> AttrFreeSafe = new()
     {
         "ADD","SUB","MUL","DIV","TANH","LOGISTIC","SIN","COS","SIGN","RSQRT","SOFTMAX",

@@ -1,6 +1,6 @@
 using System;
 
-namespace Subsystem;
+namespace Subsystem.Diagnostics;
 
 // De-risk probe: does Microsoft.Data.Sqlite's native engine (e_sqlite3) actually load + round-trip
 // under .NET-on-Android? If yes, it's the registry's durable plane (WAL/transactions/query). If it

@@ -22,7 +22,7 @@ public static class ObpHost
 {
     private static readonly object _initLock = new();
     private static IReadOnlyDictionary<string, string>? _index;            // virtual path -> manifest resource name
-    private static readonly ConcurrentDictionary<string, byte[]> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private static System.Collections.Immutable.ImmutableDictionary<string, byte[]> _cache = System.Collections.Immutable.ImmutableDictionary.Create<string, byte[]>(StringComparer.OrdinalIgnoreCase);
 
     // Platform seam: Android wires this to AssetManager.Open in MainActivity;
     // Windows leaves it null and the embedded-resource path is the only lane.
@@ -93,7 +93,7 @@ public static class ObpHost
             if (s == null) return false;
             using var ms = new MemoryStream();
             s.CopyTo(ms);
-            bytes = _cache.GetOrAdd(key, ms.ToArray());
+            bytes = System.Collections.Immutable.ImmutableInterlocked.GetOrAdd(ref _cache, key, _ => ms.ToArray());
             return true;
         }
         catch (Exception ex) { Dg.Log("obp", $"read {key} failed: {ex.Message}"); return false; }

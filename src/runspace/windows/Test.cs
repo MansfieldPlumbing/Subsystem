@@ -121,7 +121,7 @@ internal static class Test
             }
 
             // No receipt object: a clean SKIP (the test returned early) vs a real fault. Native commands
-            // (dp-onnx, dotnet, git) chatter on stderr while succeeding — PowerShell surfaces that as
+            // (dpx, dotnet, git) chatter on stderr while succeeding — PowerShell surfaces that as
             // NativeCommandError records that are NOT a failure (the Shim F9 rule); ignore them. A genuine
             // PowerShell error, or a non-zero `exit`, is a fault.
             if (host.ExitCode is int ec && ec != 0)

@@ -6,16 +6,16 @@ using System.Runtime.InteropServices;
 
 namespace Subsystem.Windows;
 
-// `ss tts` — speak with the kokoro voice on the home-rolled, ORT-free dp-onnx engine (CRQ121).
+// `ss tts` — speak with the kokoro voice on the home-rolled, ORT-free dpx engine (CRQ121).
 //
-// Rung 1 of the speech ladder (invariant 9, "one concept / N implementations"): drive the dp-onnx LEAF —
+// Rung 1 of the speech ladder (invariant 9, "one concept / N implementations"): drive the dpx LEAF —
 // an emancipated .NET sibling with a clean CLI/file contract — feed it IPA phonemes, play the WAV. Text->IPA
-// G2P is rung 2 (an ONNX grapheme->phoneme model on the SAME dp-onnx engine — no foreign C lib, no GPL), so
+// G2P is rung 2 (an ONNX grapheme->phoneme model on the SAME dpx engine — no foreign C lib, no GPL), so
 // rung 1 takes phonemes directly. Rung 3 absorbs the engine intraprocess (the Borg; shared with the Gemma
 // LLM rung). ADDITIVE: the WebView ORT-web kokoro lane and the LiteRT-LM agent runtime are untouched.
 //
 // Engine + model paths follow the Build.cs convention (env override -> drive-derived discovery), never a
-// hardcoded machine path (SS021). dp-onnx owns the kokoro vocab/voices internally.
+// hardcoded machine path (SS021). dpx owns the kokoro vocab/voices internally.
 internal static class Tts
 {
     public static int Run(string[] args)

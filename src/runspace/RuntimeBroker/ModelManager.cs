@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -190,7 +191,7 @@ public static class ModelCatalog
     // The format scope. Other runtime families (gguf, onnx, …) get their own extension entry and
     // Format value when a runtime for them exists — discovery is data-driven, not special-cased.
     private static readonly IReadOnlyDictionary<string, string> FormatByExtension =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [".litertlm"] = "litertlm" };
+        System.Collections.Immutable.ImmutableDictionary.Create<string, string>(StringComparer.OrdinalIgnoreCase).Add(".litertlm", "litertlm");
 
     private static void DiscoverSideloaded(Context context)
     {
@@ -433,7 +434,7 @@ public static class ModelCatalog
         {
             if (cts != null)
             {
-                lock (_gatesLock) { _active.Remove(spec.Id); }
+                lock (_gatesLock) { _active.TryRemove(spec.Id, out _); }
                 cts.Dispose();
             }
             gate.Release();
@@ -458,8 +459,8 @@ public static class ModelCatalog
     // may download concurrently. _active holds the cancel lever for each in-flight download —
     // transient process sync mechanics like the gates, never a truth store (model STATE stays in
     // the registry; presence stays on disk).
-    private static readonly Dictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, CancellationTokenSource> _active = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _gatesLock = new();
     private static SemaphoreSlim GateFor(ModelSpec spec)
     {

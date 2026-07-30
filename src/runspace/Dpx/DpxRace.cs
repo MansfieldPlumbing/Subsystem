@@ -1,3 +1,4 @@
+#nullable disable
 // DpxRace.cs - MVP-1: the per-op race, the flow-scheduler seed. One MatMulNBits input set, TWO lanes
 // racing per iteration: CPU = MatMulNBitsSimd (the Vector128 kernel), GPU = GpuMatMulNBits (the packed-q4
 // D3D12/Vulkan seam). Both are called DIRECTLY through their internal seams with the same prep MatMulNBits
@@ -7,12 +8,11 @@
 // per iteration. The conductor Signals both work fences, Fence.WaitAny names the iteration's winner (a tie
 // at the recheck resolves to index 0 = cpu; WaitAny scans in order), Fence.WaitAll closes the barrier, then
 // the two outputs are parity-checked against each other and - once, on iteration 1 - against the scalar
-// oracle (Dp.ForceScalarMatMulNBits path). Each lane times ITS OWN compute: Stopwatch around the kernel
+// oracle (Dpx.ForceScalarMatMulNBits path). Each lane times ITS OWN compute: Stopwatch around the kernel
 // call, recorded by the worker. Account for all memory within our runspace - fences only, no Task, no pool, no async.
 using System;
 using System.Diagnostics;
 using System.Runtime.Intrinsics;
-using Onnx;
 using Subsystem.Vom;
 using VomClass = Subsystem.Vom.Vom;
 
@@ -86,11 +86,11 @@ public static class DpxRace
                 {
                     // scalar-oracle spot check, ONCE per shape. The workers are parked at the NEXT phase and
                     // never read the knobs, so the save/flip/restore here cannot race a lane.
-                    bool pf = Dp.ForceScalarMatMulNBits, pg = Dp.UseGpuMatMulNBits;
-                    Dp.ForceScalarMatMulNBits = true; Dp.UseGpuMatMulNBits = false;
+                    bool pf = Dpx.ForceScalarMatMulNBits, pg = Dpx.UseGpuMatMulNBits;
+                    Dpx.ForceScalarMatMulNBits = true; Dpx.UseGpuMatMulNBits = false;
                     Tensor oracle;
-                    try { oracle = Dp.Dispatch(n, x)[0]; }
-                    finally { Dp.ForceScalarMatMulNBits = pf; Dp.UseGpuMatMulNBits = pg; }
+                    try { oracle = Dpx.Dispatch(n, x)[0]; }
+                    finally { Dpx.ForceScalarMatMulNBits = pf; Dpx.UseGpuMatMulNBits = pg; }
                     oracleCpu = MaxRelDiff(oracle.AsF(), cpuSlot[0].AsF());
                     oracleGpu = MaxRelDiff(oracle.AsF(), gpuSlot[0].AsF());
                 }
@@ -144,7 +144,7 @@ public static class DpxRace
         var a = x[0].AsF(); var scsp = x[2].AsF(); int scLen = scsp.Length;
         var bSpan = x[1].ReadRawb();
         bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        return Dp.MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
+        return Dpx.MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
     }
 
     // GPU lane = GpuMatMulNBits, exactly as MatMulNBits' GPU branch calls it - INCLUDING the per-call
@@ -156,7 +156,7 @@ public static class DpxRace
         var a = x[0].AsF(); var scsp = x[2].AsF();
         var bSpan = x[1].ReadRawb();
         bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        return Dp.GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp,
+        return Dpx.GpuMatMulNBits(x, n, K, N, bs, nBlk, rowBytes, zpRowBytes, hasZp,
                                  a.ToArray(), scsp.ToArray(), bSpan.ToArray(),
                                  hasZp ? zpSpan.ToArray() : Array.Empty<byte>(), M);
     }

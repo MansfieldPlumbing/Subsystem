@@ -24,7 +24,7 @@ namespace Subsystem.Analyzers
         public const string DiagnosticId = "SS027";
         private const int Floor = 36;                       // Android 16 — the AppFunction floor
         private const string ExceptionFlag = "SsLegacyApi"; // the one sanctioned seam for a sub-floor build
-        private const string CsprojName = "Subsystem.csproj";
+        private const string CsprojName = "subsystem.master.csproj";
 
         // <SupportedOSPlatformVersion [Condition="..."]>NN[.N]</SupportedOSPlatformVersion>
         private static readonly Regex FloorDecl = new Regex(

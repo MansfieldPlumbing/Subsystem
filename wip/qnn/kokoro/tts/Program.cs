@@ -100,7 +100,7 @@ if (probeOut != null)
     return 0;
 }
 
-// --dump-all: write EVERY float graph output to <dir>/ort_<sani>.bin (pair with addoutput-all -> dp-onnx run --compare)
+// --dump-all: write EVERY float graph output to <dir>/ort_<sani>.bin (pair with addoutput-all -> dpx run --compare)
 if (dumpAllDir != null)
 {
     Directory.CreateDirectory(dumpAllDir);
@@ -230,7 +230,7 @@ static void WriteWav(string path, float[] s, int sr)
 static double Rms(float[] s) { double a = 0; foreach (var f in s) a += (double)f * f; return s.Length > 0 ? Math.Sqrt(a / s.Length) : 0; }
 static double Peak(float[] s) { double p = 0; foreach (var f in s) p = Math.Max(p, Math.Abs(f)); return p; }
 
-// tensor dump format (shared with dp-onnx run --inputs): int32 dtype(1=f32,7=i64), int32 rank, int64[rank] dims, raw payload
+// tensor dump format (shared with dpx run --inputs): int32 dtype(1=f32,7=i64), int32 rank, int64[rank] dims, raw payload
 static void WriteTensorI(string path, long[] data, params long[] dims)
 { using var bw = new BinaryWriter(File.Create(path)); bw.Write(7); bw.Write(dims.Length); foreach (var d in dims) bw.Write(d); foreach (var v in data) bw.Write(v); }
 static void WriteTensorF(string path, float[] data, params long[] dims)

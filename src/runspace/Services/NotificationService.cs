@@ -11,12 +11,12 @@ namespace Subsystem;
 [IntentFilter(new[] { "android.service.notification.NotificationListenerService" })]
 public class NotificationService : NotificationListenerService
 {
-    public static ConcurrentDictionary<string, StatusBarNotification> Notifications { get; } = new();
+    public static System.Collections.Immutable.ImmutableDictionary<string, StatusBarNotification> Notifications { get; private set; } = System.Collections.Immutable.ImmutableDictionary<string, StatusBarNotification>.Empty;
 
     public override void OnNotificationPosted(StatusBarNotification? sbn)
     {
         if (sbn != null) {
-            Notifications[sbn.Key] = sbn;
+            Notifications = Notifications.SetItem(sbn.Key, sbn);
         }
     }
 

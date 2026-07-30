@@ -99,7 +99,7 @@ internal static class Contextualize
     private static IEnumerable<string> ProjectCmdletNames()
     {
         Type[] types;
-        try { types = typeof(Subsystem.Tools.CodeContext.Cmdlets.GetCodeContextCmdlet).Assembly.GetTypes(); }
+        try { types = typeof(Contextualize).Assembly.GetTypes(); }
         catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray()!; }
         catch { yield break; }
         foreach (var t in types)

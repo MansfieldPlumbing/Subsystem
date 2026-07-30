@@ -3,7 +3,7 @@
 # Runs compile.ps1 (self-contained: Add-Type + embedded HLSL + runtime D3DCompile via d3dcompiler_47.dll -- NO MSVC,
 # NO home-built DLL), which assembles a native Win64 PE on the GPU with the VOM brokering every D3D12 resource as a
 # cascade-reclaimed handle. Asserts a structurally-valid PE32+ is produced. This is the same pure-C# D3D12 spine now
-# productionized in src/native/dp-onnx/onnx-interp/GpuD3D12.cs (the GPU inference harness the design predicted).
+# productionized in src/native/dpx/onnx-interp/GpuD3D12.cs (the GPU inference harness the design predicted).
 #   Dogfood:  ss run tests/test.vom.gpu-pe-factory.ps1
 $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
@@ -32,4 +32,4 @@ if (Test-Path $target) {
 $pass = $fails.Count -eq 0
 Write-Host ""
 Write-Host ($(if($pass){"PASS - the GPU PE-factory (pure-C# D3D12, VOM-brokered) assembles a valid PE32+ on the GPU."}else{"FAIL ($($fails.Count)): $($fails -join '; ')"})) -ForegroundColor $(if($pass){'Green'}else{'Red'})
-[pscustomobject]@{ test='test.vom.gpu-pe-factory'; pass=$pass; verdict=$(if($pass){'GPU-assembled PE32+ green - VOM=DirectPort spine, productionized in dp-onnx GpuD3D12'}else{'see failures'}) }
+[pscustomobject]@{ test='test.vom.gpu-pe-factory'; pass=$pass; verdict=$(if($pass){'GPU-assembled PE32+ green - VOM=DirectPort spine, productionized in dpx GpuD3D12'}else{'see failures'}) }

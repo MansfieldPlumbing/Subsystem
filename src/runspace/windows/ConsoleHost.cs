@@ -79,16 +79,16 @@ internal sealed class ConsoleHostRawUserInterface : PSHostRawUserInterface
     public override Coordinates CursorPosition { get; set; }
     public override Coordinates WindowPosition { get; set; }
     public override int CursorSize { get; set; } = 1;
-    public override Size BufferSize { get => new(_w, 9999); set { } }
-    public override Size WindowSize { get => new(_w, 50); set { } }
-    public override Size MaxWindowSize => new(_w, 50);
-    public override Size MaxPhysicalWindowSize => new(_w, 50);
+    public override System.Management.Automation.Host.Size BufferSize { get => new(_w, 9999); set { } }
+    public override System.Management.Automation.Host.Size WindowSize { get => new(_w, 50); set { } }
+    public override System.Management.Automation.Host.Size MaxWindowSize => new(_w, 50);
+    public override System.Management.Automation.Host.Size MaxPhysicalWindowSize => new(_w, 50);
     public override string WindowTitle { get; set; } = "ss";
     public override bool KeyAvailable => false;
     public override KeyInfo ReadKey(ReadKeyOptions options) => default;
     public override void FlushInputBuffer() { }
     public override void SetBufferContents(Coordinates origin, BufferCell[,] contents) { }
-    public override void SetBufferContents(Rectangle rectangle, BufferCell fill) { }
-    public override BufferCell[,] GetBufferContents(Rectangle rectangle) => new BufferCell[0, 0];
-    public override void ScrollBufferContents(Rectangle source, Coordinates destination, Rectangle clip, BufferCell fill) { }
+    public override void SetBufferContents(System.Management.Automation.Host.Rectangle rectangle, BufferCell fill) { }
+    public override BufferCell[,] GetBufferContents(System.Management.Automation.Host.Rectangle rectangle) => new BufferCell[0, 0];
+    public override void ScrollBufferContents(System.Management.Automation.Host.Rectangle source, Coordinates destination, System.Management.Automation.Host.Rectangle clip, BufferCell fill) { }
 }

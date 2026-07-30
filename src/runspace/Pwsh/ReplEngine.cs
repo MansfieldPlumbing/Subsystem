@@ -90,7 +90,8 @@ public class ReplEngine
                             if (int.TryParse(portStr, out int port))
                             {
                                 _session.FeedTerminal(Encoding.UTF8.GetBytes($"\x1b[32m[System] Detected pairing intent! Attempting to pair on port {port} with code {codeStr}...\x1b[0m\r\n"));
-                                _ = Task.Run(async () => {
+                                var owner = Subsystem.Vom.Vom.CreateOwner(@"\System\Repl");
+                                Subsystem.Vom.Vom.Spawn(owner, "PairAdb", async _ => {
                                     string result = await SubsystemApi.PairAdbLoopback(port, codeStr);
                                     _session.FeedTerminal(Encoding.UTF8.GetBytes($"\x1b[33m[Pairing Result] {result}\x1b[0m\r\n"));
                                 });

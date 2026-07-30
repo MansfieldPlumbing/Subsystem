@@ -24,7 +24,6 @@ internal static class Help
     {
         var assemblies = new[]
         {
-            typeof(Subsystem.Tools.CodeContext.Cmdlets.GetCodeContextCmdlet).Assembly,
             typeof(Help).Assembly,
         }.Distinct();
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);

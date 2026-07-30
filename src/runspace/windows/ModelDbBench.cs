@@ -9,7 +9,7 @@ namespace Subsystem.Windows;
 // 256-aligned VOM native regions are the data plane in flight. Streams each tensor BLOB from the db into a
 // native VOM region (Vom.Alloc + Marshal.Copy), measures gather throughput, shows the resident model
 // weights live off the GC, then Terminate reclaims the whole working set deterministically (free-on-zero,
-// no sweep). The matmul never touches SQLite. Drives tests/bench.dp-onnx.model-db-gather.ps1.
+// no sweep). The matmul never touches SQLite. Drives tests/bench.dpx.model-db-gather.ps1.
 public static class ModelDbBench
 {
     public static string Gather(string dbPath)

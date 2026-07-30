@@ -2,7 +2,7 @@
 # test.dpx.q4-packing-order.ps1 - Pins the q4 nibble byte-packing order the block-q4 kernels actually decode
 # (CRQ190 first receipt: the dequant formula (q - zp)*scale is shared with ggml q4_0, but the same formula over a
 # transposed nibble layout is silent garbage - so the layout itself needs a fixture, not an assumption).
-# Drives the REAL kernels in-proc (Dp.MatMulNBits / Dp.GatherBlockQuantized via reflection) with A = I, so the
+# Drives the REAL kernels in-proc (Dpx.MatMulNBits / Dpx.GatherBlockQuantized via reflection) with A = I, so the
 # output reads back the kernel's dequant of every packed element. Two decodes of the SAME bytes are diffed:
 #   sequential (ORT MatMulNBits: byte k>>1, low nibble = even k)  - the kernel must match this EXACTLY
 #   ggml q4_0 split (byte j of a 16-byte block = elements j and j+16) - must DIFFER (the port may take ggml's
@@ -27,8 +27,8 @@ $attrT    = $asm.GetType('Onnx.AttributeProto')
 $bf       = [System.Reflection.BindingFlags]'NonPublic,Static'
 $mmnb     = $dpType.GetMethod('MatMulNBits', $bf)
 $gbq      = $dpType.GetMethod('GatherBlockQuantized', $bf)
-Assert ($null -ne $mmnb) 'Dp.MatMulNBits reachable in-proc'
-Assert ($null -ne $gbq)  'Dp.GatherBlockQuantized reachable in-proc'
+Assert ($null -ne $mmnb) 'Dpx.MatMulNBits reachable in-proc'
+Assert ($null -ne $gbq)  'Dpx.GatherBlockQuantized reachable in-proc'
 
 # fixture geometry: K=64 (nBlk=2, bs=32), N=2 output rows. 32 packed bytes per row, known and asymmetric.
 $Kd = 64; $Nd = 2; $bs = 32; $nBlk = 2
