@@ -108,6 +108,9 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows'">
+    <EmbeddedResource Include="src\native\dpx\gpu\*.dxil">
+      <LogicalName>%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="S:\bin\nuget\packages\microsoft.web.webview2\1.0.2903.40\runtimes\win-x64\native\WebView2Loader.dll">
       <LogicalName>WebView2Loader.dll</LogicalName>
     </EmbeddedResource>

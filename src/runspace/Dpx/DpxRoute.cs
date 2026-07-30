@@ -10,14 +10,14 @@ namespace Subsystem.Dpx;
 
 public sealed class DpxRoute
 {
-    readonly Dictionary<(int M, int N, int K, int bs), (bool gpu, double cpuMs, double gpuMs)> _winners = new();
+    static readonly Dictionary<(int M, int N, int K, int bs), (bool gpu, double cpuMs, double gpuMs)> s_winners = new();
 
     // The routed decision for a shape. Returns false when the shape has not raced yet.
     public bool Query(int M, int N, int K, int bs, out bool gpuWins)
     {
-        lock (_winners)
+        lock (s_winners)
         {
-            if (_winners.TryGetValue((M, N, K, bs), out var w)) { gpuWins = w.gpu; return true; }
+            if (s_winners.TryGetValue((M, N, K, bs), out var w)) { gpuWins = w.gpu; return true; }
             gpuWins = false;
             return false;
         }
@@ -26,17 +26,17 @@ public sealed class DpxRoute
     // Record a raced winner with its measured lane times (min over the timed reps, ms).
     public void Register(int M, int N, int K, int bs, bool gpuWins, double cpuMs, double gpuMs)
     {
-        lock (_winners) _winners[(M, N, K, bs)] = (gpuWins, cpuMs, gpuMs);
+        lock (s_winners) s_winners[(M, N, K, bs)] = (gpuWins, cpuMs, gpuMs);
     }
 
     // Receipt lines, one per raced shape: "M=1 N=2048 K=2048 bs=32 -> gpu (cpu 12.678 ms, gpu 5.621 ms)".
     public string[] EnumerateRoutes()
     {
-        lock (_winners)
+        lock (s_winners)
         {
-            var lines = new string[_winners.Count];
+            var lines = new string[s_winners.Count];
             int i = 0;
-            foreach (var kv in _winners)
+            foreach (var kv in s_winners)
                 lines[i++] = $"M={kv.Key.M} N={kv.Key.N} K={kv.Key.K} bs={kv.Key.bs} -> {(kv.Value.gpu ? "gpu" : "cpu")} (cpu {kv.Value.cpuMs:F3} ms, gpu {kv.Value.gpuMs:F3} ms)";
             return lines;
         }

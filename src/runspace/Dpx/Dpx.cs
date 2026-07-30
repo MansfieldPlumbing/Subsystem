@@ -684,13 +684,32 @@ public class Dpx
     public static bool UseGpuMatMul = false;
     public static string ActiveModelDbPath;
     static byte[] _gemmDxil; static bool _gpuDead = false;
+    static byte[] ReadDxilResource(string name)
+    {
+        string near = Path.Combine(AppContext.BaseDirectory, name);
+        if (File.Exists(near)) return File.ReadAllBytes(near);
+        if (Environment.ProcessPath != null)
+        {
+            string procDir = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+            string procPath = Path.Combine(procDir, name);
+            if (File.Exists(procPath)) return File.ReadAllBytes(procPath);
+        }
+        string driveRoot = Path.GetPathRoot(Environment.ProcessPath ?? AppContext.BaseDirectory) ?? "S:\\";
+        string rootPath = Path.Combine(driveRoot, "subsystem", name);
+        if (File.Exists(rootPath)) return File.ReadAllBytes(rootPath);
+        using var stream = typeof(Dpx).Assembly.GetManifestResourceStream(name);
+        if (stream != null)
+        {
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            return ms.ToArray();
+        }
+        return Array.Empty<byte>();
+    }
     static byte[] GemmDxil()
     {
         if (_gemmDxil != null) return _gemmDxil;
-        string near = Path.Combine(AppContext.BaseDirectory, "gemm.dxil");
-        string fallback = Path.Combine(Path.GetPathRoot(AppContext.BaseDirectory) ?? "S:\\", "qnn-project", "workspace", "onnx-interp", "_gpu", "gemm.dxil");
-        string p = File.Exists(near) ? near : fallback;
-        return _gemmDxil = File.ReadAllBytes(p);
+        return _gemmDxil = ReadDxilResource("gemm.dxil");
     }
     static Tensor GpuMatMul(Tensor A, Tensor B)
     {   // mirrors MatMul's 4D broadcast, but dispatches each batch's GEMM to the GPU; ANY GPU fault degrades to the
@@ -907,7 +926,8 @@ public class Dpx
     // before the first Dp touch). Hoisted to a static readonly so the router costs ONE env probe per
     // process, none per dispatch. Default (unset/other values) leaves behavior exactly the standing knobs.
     public static readonly bool AutoRouteMatMulNBits =
-        string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "auto", StringComparison.OrdinalIgnoreCase);
+        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DPGPU_BACKEND")) ||
+        !string.Equals(Environment.GetEnvironmentVariable("DPGPU_BACKEND"), "cpu", StringComparison.OrdinalIgnoreCase);
     // Resident-weight cache key: stable per weight Tensor object for the lifetime of the process (weights are
     // loaded once at model-load time and reused every decode step). RuntimeHelpers.GetHashCode is the object's
     // IDENTITY hash (never overridden, ignores Tensor's own Equals/GetHashCode), so it stays fixed across calls
@@ -964,8 +984,7 @@ public class Dpx
         _gemmQ4Dxil ??= new byte[3][];
         if (_gemmQ4Dxil[variant] != null) return _gemmQ4Dxil[variant];
         string name = variant == 1 ? "gemm_q4_gemv.dxil" : variant == 2 ? "gemm_q4_tiled.dxil" : "gemm_q4.dxil";
-        string near = Path.Combine(AppContext.BaseDirectory, name);
-        return _gemmQ4Dxil[variant] = File.Exists(near) ? File.ReadAllBytes(near) : Array.Empty<byte>();
+        return _gemmQ4Dxil[variant] = ReadDxilResource(name);
     }
     internal static byte[] GemmDxilQ4() => Q4Dxil(0);
 
