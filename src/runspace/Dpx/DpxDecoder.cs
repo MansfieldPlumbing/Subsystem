@@ -177,6 +177,22 @@ namespace Subsystem.Dpx
                     Dpx.ActiveModelDbPath = _modelPath;
                     _backendName = "DPX";
                     _ready = true;
+
+                    if (OperatingSystem.IsWindows() && Dpx.UseGpuMatMulNBits)
+                    {
+                        ulong workloadBytes = CalculateWorkloadBytes();
+                        var (bestIdx, bestName, needsMulti) = GpuD3D12.EvaluateWorkload(workloadBytes);
+                        double wMb = workloadBytes / (1024.0 * 1024.0);
+                        if (!needsMulti)
+                        {
+                            Console.WriteLine($"[DPX Workload Sizer] Dynamic Footprint: {wMb:F1} MB | Target GPU [{bestIdx}]: {bestName} | Strategy: 100% Single-GPU VRAM Resident (0 PCIe Ping-Ponging)");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[DPX Workload Sizer] Dynamic Footprint: {wMb:F1} MB exceeds GPU [{bestIdx}] VRAM | Strategy: Multi-GPU Multi-Die Pipeline Split");
+                        }
+                    }
+
                     return null;
                 }
                 catch (Exception ex)
@@ -185,6 +201,24 @@ namespace Subsystem.Dpx
                     return _initFault;
                 }
             }
+        }
+
+        public ulong CalculateWorkloadBytes()
+        {
+            ulong weightsBytes = 0;
+            if (_model?.Graph?.Initializer != null)
+            {
+                foreach (var init in _model.Graph.Initializer)
+                    weightsBytes += (ulong)(init.RawData.Span.Length);
+            }
+            if (_embedModel?.Graph?.Initializer != null)
+            {
+                foreach (var init in _embedModel.Graph.Initializer)
+                    weightsBytes += (ulong)(init.RawData.Span.Length);
+            }
+            ulong scratchBytes = 16UL * 1024UL * 1024UL; // 16 MB activation scratch
+            ulong kvBytes = (ulong)(_maxTokens * 2 * 16 * 2048 * 2); // KV cache estimate
+            return weightsBytes + scratchBytes + kvBytes;
         }
 
         public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default)
