@@ -102,6 +102,22 @@ unsafe static class GpuD3D12
     static IntPtr[] s_q4RbBuf = new IntPtr[2]; static ulong[] s_q4RbCap = new ulong[2];
     static int s_q4Slot = 0;
 
+    public static (ulong totalWeightVram, ulong totalStagingVram, int residentWeightCount) GetResidentVramSummary()
+    {
+        ulong weights = 0;
+        foreach (var kv in s_q4Cache)
+        {
+            weights += kv.Value.BqB + kv.Value.ScB + kv.Value.ZpB;
+        }
+        ulong staging = 0;
+        for (int i = 0; i < 2; i++)
+        {
+            staging += s_q4ACap[i] + s_q4RbCap[i];
+        }
+        staging += s_q4CCap;
+        return (weights, staging, s_q4Cache.Count);
+    }
+
     static IntPtr MakeDevice()
     {
         IntPtr best = IntPtr.Zero; ulong bestVram = 0;

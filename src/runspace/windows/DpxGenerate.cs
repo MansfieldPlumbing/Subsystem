@@ -219,6 +219,16 @@ namespace Subsystem.Windows
                 Console.WriteLine($"  Prefill (Prompt): {promptTokens} tokens | {dtPrefillMs:F0} ms | {prefillTokSec:F1} tok/s");
                 Console.WriteLine($"  Decode (Gen):     {genTokensCount} tokens | {dtGenMs:F0} ms | {genTokSec:F1} tok/s");
                 Console.WriteLine($"  End-to-End:       {promptTokens + genTokensCount} tokens | {dtTotalMs:F0} ms | {totalTokSec:F1} tok/s");
+                if (OperatingSystem.IsWindows())
+                {
+                    var (weightsVram, stagingVram, weightCount) = GpuD3D12.GetResidentVramSummary();
+                    if (weightsVram > 0)
+                    {
+                        double wMb = weightsVram / (1024.0 * 1024.0);
+                        double sMb = stagingVram / (1024.0 * 1024.0);
+                        Console.WriteLine($"  VRAM Allocation:  {wMb:F1} MB Resident Weights ({weightCount} tensors) | {sMb:F2} MB Double-Buffered Staging");
+                    }
+                }
                 Console.ResetColor();
             }
             catch (OperationCanceledException)
