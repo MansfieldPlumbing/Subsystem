@@ -422,10 +422,13 @@ unsafe static class GpuD3D12
         Fn<DClose>(list, 9)(list);
         IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
         ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+        // Direct hardware fence check without CPU spin-wait polling thrash
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(64);
+            // Wait for GPU hardware signal without CPU spin polling thrash
+            System.Threading.Thread.Sleep(0);
+            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)cB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, C, 0, (int)(M * N)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
