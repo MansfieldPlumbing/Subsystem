@@ -131,6 +131,44 @@ unsafe static class GpuD3D12
         IntPtr dev2; D3D12CreateDevice(IntPtr.Zero, 0xc000, G(IID_DEV), out dev2); s_name = "(default)"; return dev2;
     }
 
+    public struct GpuAdapterInfo
+    {
+        public int Index;
+        public string Name;
+        public ulong VramBytes;
+    }
+
+    public static List<GpuAdapterInfo> ListAdapters()
+    {
+        var list = new List<GpuAdapterInfo>();
+        IntPtr fac;
+        if (CreateDXGIFactory1(G(IID_FAC), out fac) == 0 && fac != IntPtr.Zero)
+        {
+            var en = Fn<DEnum>(fac, 12); uint i = 0; IntPtr ad;
+            while (en(fac, i, out ad) == 0 && ad != IntPtr.Zero)
+            {
+                ADESC d; Fn<DDesc>(ad, 10)(ad, out d);
+                if ((d.Flags & 2) == 0)
+                {
+                    IntPtr dv;
+                    if (D3D12CreateDevice(ad, 0xc000, G(IID_DEV), out dv) == 0 && dv != IntPtr.Zero)
+                    {
+                        list.Add(new GpuAdapterInfo
+                        {
+                            Index = (int)i,
+                            Name = d.Description,
+                            VramBytes = (ulong)d.DedVid.ToInt64()
+                        });
+                        Marshal.Release(dv);
+                    }
+                }
+                Marshal.Release(ad); i++;
+            }
+            Marshal.Release(fac);
+        }
+        return list;
+    }
+
     public static void EnsureInit()
     {
         if (s_dev != IntPtr.Zero) return;

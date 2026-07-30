@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -41,6 +41,23 @@ namespace Subsystem.Windows
                 clean.Add(a);
             }
             var cleanArgs = clean.ToArray();
+
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var adapters = GpuD3D12.ListAdapters();
+                    if (adapters.Count > 0)
+                    {
+                        Console.WriteLine($"[DPX GPU] Discovered {adapters.Count} hardware GPU adapter(s):");
+                        foreach (var a in adapters)
+                        {
+                            Console.WriteLine($"  - Adapter [{a.Index}]: {a.Name} ({a.VramBytes / (1024 * 1024)} MB VRAM)");
+                        }
+                    }
+                }
+                catch { }
+            }
 
             if (cleanArgs.Length == 0)
             {
