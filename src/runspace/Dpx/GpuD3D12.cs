@@ -97,7 +97,10 @@ unsafe static class GpuD3D12
     public static bool QueryResidentQ4(long weightKey) => weightKey > 0 && s_q4Cache.ContainsKey(weightKey);
 
     static IntPtr s_q4Alloc, s_q4List;
-    static IntPtr s_q4ABuf, s_q4CBuf, s_q4RbBuf; static ulong s_q4ACap, s_q4CCap, s_q4RbCap;
+    static IntPtr[] s_q4ABuf = new IntPtr[2]; static ulong[] s_q4ACap = new ulong[2];
+    static IntPtr s_q4CBuf; static ulong s_q4CCap;
+    static IntPtr[] s_q4RbBuf = new IntPtr[2]; static ulong[] s_q4RbCap = new ulong[2];
+    static int s_q4Slot = 0;
 
     static IntPtr MakeDevice()
     {
@@ -327,13 +330,13 @@ unsafe static class GpuD3D12
             bqVA = Fn<DGpuVA>(bqBuf, 11)(bqBuf); scVA = Fn<DGpuVA>(scBuf, 11)(scBuf); zpVA = Fn<DGpuVA>(zpBuf, 11)(zpBuf);
         }
 
-        // A-upload/C-default/C-readback: persistent, grow-only, reused across every call regardless of caching -
-        // these are per-token-shaped (tiny relative to the weight) so residency here is about avoiding create/destroy
-        // churn per call, not avoiding a big transfer.
-        EnsureCap(resIID, ref s_q4ABuf, ref s_q4ACap, aB, 2, 2755, 0);            // UPLOAD, GENERIC_READ
+        // A-upload/C-default/C-readback: persistent double-buffered (k=2) ping-pong staging heaps.
+        int slot = s_q4Slot;
+        s_q4Slot = (s_q4Slot + 1) & 1;
+        EnsureCap(resIID, ref s_q4ABuf[slot], ref s_q4ACap[slot], aB, 2, 2755, 0);            // UPLOAD, GENERIC_READ
         EnsureCap(resIID, ref s_q4CBuf, ref s_q4CCap, cB, 1, 8, 4);               // DEFAULT, UNORDERED_ACCESS, ALLOW_UAV (state 8 == UAV)
-        EnsureCap(resIID, ref s_q4RbBuf, ref s_q4RbCap, cB, 3, 1024, 0);          // READBACK, COPY_DEST
-        IntPtr aBuf = s_q4ABuf, cBuf = s_q4CBuf, rbBuf = s_q4RbBuf;
+        EnsureCap(resIID, ref s_q4RbBuf[slot], ref s_q4RbCap[slot], cB, 3, 1024, 0);          // READBACK, COPY_DEST
+        IntPtr aBuf = s_q4ABuf[slot], cBuf = s_q4CBuf, rbBuf = s_q4RbBuf[slot];
         RANGE z = new RANGE(); void* p;
         Fn<DMap>(aBuf, 8)(aBuf, 0, ref z, out p); Marshal.Copy(A, 0, (IntPtr)p, A.Length); Fn<DUnmap>(aBuf, 9)(aBuf, 0, IntPtr.Zero);
         long aVA = Fn<DGpuVA>(aBuf, 11)(aBuf), cVA = Fn<DGpuVA>(cBuf, 11)(cBuf);
@@ -356,7 +359,12 @@ unsafe static class GpuD3D12
         Fn<DClose>(list, 9)(list);
         IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
         ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
-        var gcv = Fn<DGetCompl>(s_fence, 8); while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(64);
+        var gcv = Fn<DGetCompl>(s_fence, 8);
+        if (gcv(s_fence) < target)
+        {
+            System.Threading.Thread.Yield();
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(16);
+        }
         RANGE rr = new RANGE { End = (IntPtr)(long)cB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, C, 0, (int)(M * N)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
         if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
