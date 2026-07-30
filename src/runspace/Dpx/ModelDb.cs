@@ -30,7 +30,7 @@ namespace Subsystem.Dpx
             bool hasBlob = HasTable("tensor_blob");
             string W = ms ? " WHERE sig=$s" : "";
             (string, object)[] S = ms ? new (string, object)[] { ("$s", sig) } : System.Array.Empty<(string, object)>();
-            byte[] Blob(long id)
+            byte[]? Blob(long id)
             { if (!hasBlob) return null; using var r = Q("SELECT data FROM tensor_blob WHERE tensor_id=$id ORDER BY ord", ("$id", id)).ExecuteReader();
               using var buf = new System.IO.MemoryStream(); while (r.Read()) if (!r.IsDBNull(0)) { var b = (byte[])r.GetValue(0); buf.Write(b, 0, b.Length); } return buf.Length > 0 ? buf.ToArray() : null; }
 
@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS gpu_tactic_plan (
         }
 
         // Read the .spm tokenizer bytes back out (null name => the first/only row). Null if the db carries none.
-        public static byte[] ExtractTokenizerBlob(string dbPath, string name = null)
+        public static byte[]? ExtractTokenizerBlob(string dbPath, string name = null)
         {
             using var c = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
             c.Open();
@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS gpu_tactic_plan (
             return o == null || o is DBNull ? null : (byte[])o;
         }
 
-        public static byte[] GetTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, out int threadM, out int threadN)
+        public static byte[]? GetTunedShader(string dbPath, string adapterName, string opType, int m, int n, int k, out int threadM, out int threadN)
         {
             threadM = 16;
             threadN = 16;
