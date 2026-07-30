@@ -435,7 +435,18 @@ public class Dpx
     {
         switch (n.OpType)
         {
-            case "Add": return One(BcastV(x[0], x[1], BinOp.Add));
+            case "Add":
+                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && x[0].Count == x[1].Count)
+                {
+                    var addDxil = ReadDxilResource("add.dxil");
+                    if (addDxil.Length > 0)
+                    {
+                        var yGpu = new float[x[0].Count];
+                        int rc = GpuD3D12.DispatchAdd(x[0].AsF().ToArray(), x[1].AsF().ToArray(), yGpu, (uint)x[0].Count, addDxil);
+                        if (rc == 0) return One(Tensor.F(yGpu, x[0].Shape));
+                    }
+                }
+                return One(BcastV(x[0], x[1], BinOp.Add));
             case "Sub": return One(BcastV(x[0], x[1], BinOp.Sub));
             case "Mul": return One(BcastV(x[0], x[1], BinOp.Mul));
             case "Div": return One(BcastV(x[0], x[1], BinOp.Div));
@@ -1357,6 +1368,19 @@ public class Dpx
         int B, Nh, S, Hd;
         if (rank == 4) { B = inp.Shape[0]; Nh = inp.Shape[1]; S = inp.Shape[2]; Hd = inp.Shape[3]; }
         else { B = inp.Shape[0]; S = inp.Shape[1]; int heads = (int)L(n, "num_heads", 0); Hd = rotDim; Nh = heads > 0 ? heads : inp.Shape[2] / Hd; }
+        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits)
+        {
+            var ropeDxil = ReadDxilResource("rope.dxil");
+            if (ropeDxil.Length > 0)
+            {
+                var oGpu = new float[inp.Count];
+                var csCombined = new float[rotDim];
+                Array.Copy(cos.ToArray(), 0, csCombined, 0, half);
+                Array.Copy(sin.ToArray(), 0, csCombined, half, half);
+                int rc = GpuD3D12.DispatchRoPE(inp.AsF().ToArray(), csCombined, oGpu, (uint)(B * S), (uint)Nh, (uint)Hd, (uint)(pos.Length > 0 ? pos[0] : 0), ropeDxil);
+                if (rc == 0) return Tensor.F(oGpu, inp.Shape);
+            }
+        }
         var src = inp.AsF(); var o = TensorArena.AllocSpan(src.Length); src.CopyTo(o);
         int posCols = x[1].Shape[x[1].Shape.Length - 1];
         for (int b = 0; b < B; b++)
