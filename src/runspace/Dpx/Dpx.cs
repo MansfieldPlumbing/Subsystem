@@ -448,7 +448,18 @@ public class Dpx
                 }
                 return One(BcastV(x[0], x[1], BinOp.Add));
             case "Sub": return One(BcastV(x[0], x[1], BinOp.Sub));
-            case "Mul": return One(BcastV(x[0], x[1], BinOp.Mul));
+            case "Mul":
+                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && x[0].Count == x[1].Count)
+                {
+                    var swigluDxil = ReadDxilResource("swiglu.dxil");
+                    if (swigluDxil.Length > 0)
+                    {
+                        var yGpu = new float[x[0].Count];
+                        int rc = GpuD3D12.DispatchSwiGLU(x[0].AsF().ToArray(), x[1].AsF().ToArray(), yGpu, (uint)x[0].Count, swigluDxil);
+                        if (rc == 0) return One(Tensor.F(yGpu, x[0].Shape));
+                    }
+                }
+                return One(BcastV(x[0], x[1], BinOp.Mul));
             case "Div": return One(BcastV(x[0], x[1], BinOp.Div));
             case "Pow": return One(Bcast(x[0], x[1], (a, b) => MathF.Pow(a, b)));
             case "Relu": return One(Un(x[0], a => MathF.Max(0, a)));
