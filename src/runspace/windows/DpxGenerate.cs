@@ -183,13 +183,13 @@ namespace Subsystem.Windows
                 {
                     while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
                     {
+                        if (tFirstToken == 0)
+                        {
+                            tFirstToken = sw.ElapsedTicks;
+                        }
                         var delta = enumerator.Current;
                         if (delta.Kind == AgentDeltaKind.Token && !string.IsNullOrEmpty(delta.Text))
                         {
-                            if (tFirstToken == 0)
-                            {
-                                tFirstToken = sw.ElapsedTicks;
-                            }
                             Console.Write(delta.Text);
                             genTokensCount++;
                         }
@@ -210,12 +210,13 @@ namespace Subsystem.Windows
                 double freq = System.Diagnostics.Stopwatch.Frequency;
 
                 int promptTokens = decoder.PromptTokensCount;
-                double dtPrefillMs = (tFirstToken > 0 ? (tFirstToken - tStart) : 0) * 1000.0 / freq;
-                double dtGenMs = (tFirstToken > 0 ? (tEnd - tFirstToken) : 0) * 1000.0 / freq;
+                var bench = decoder.GetBenchmark();
+                double dtPrefillMs = bench != null && bench.TimeToFirstTokenSeconds > 0 ? bench.TimeToFirstTokenSeconds * 1000.0 : (tFirstToken > 0 ? (tFirstToken - tStart) * 1000.0 / freq : 0);
+                double dtGenMs = (tFirstToken > 0 ? (tEnd - tFirstToken) * 1000.0 / freq : 0);
                 double dtTotalMs = (tEnd - tStart) * 1000.0 / freq;
 
-                double prefillTokSec = dtPrefillMs > 0 ? (promptTokens / (dtPrefillMs / 1000.0)) : 0;
-                double genTokSec = dtGenMs > 0 ? (genTokensCount / (dtGenMs / 1000.0)) : 0;
+                double prefillTokSec = bench != null && bench.PrefillTokensPerSecond > 0 ? bench.PrefillTokensPerSecond : (dtPrefillMs > 0 ? (promptTokens / (dtPrefillMs / 1000.0)) : 0);
+                double genTokSec = bench != null && bench.DecodeTokensPerSecond > 0 ? bench.DecodeTokensPerSecond : (dtGenMs > 0 ? (genTokensCount / (dtGenMs / 1000.0)) : 0);
                 double totalTokSec = dtTotalMs > 0 ? ((promptTokens + genTokensCount) / (dtTotalMs / 1000.0)) : 0;
 
                 Console.WriteLine();

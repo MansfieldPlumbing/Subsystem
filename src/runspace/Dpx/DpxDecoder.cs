@@ -407,6 +407,10 @@ namespace Subsystem.Dpx
                 ringLive.Add(kvInput.Name);
             }
 
+            PromptTokensCount = fullTokenIds.Count;
+            _lastPrefillMs = 0; _lastDecodeMs = 0; _lastDecodeTokens = 0;
+            var turnSw = System.Diagnostics.Stopwatch.StartNew();
+
             while (step < _maxTokens)
             {
                 ct.ThrowIfCancellationRequested();
@@ -495,6 +499,10 @@ namespace Subsystem.Dpx
                 }
 
                 currentTokens.Add(nextTokenId);
+                if (step == 0) { _lastPrefillMs = turnSw.Elapsed.TotalMilliseconds; turnSw.Restart(); }
+                else { _lastDecodeMs = turnSw.Elapsed.TotalMilliseconds; }
+                _lastDecodeTokens = step + 1;
+                step++;
 
                 if (nextTokenId == eosId || (endOfTurnId >= 0 && nextTokenId == endOfTurnId))
                 {
@@ -579,6 +587,7 @@ namespace Subsystem.Dpx
                 ringLive.Add(kvInput.Name);
             }
 
+            PromptTokensCount = fullTokenIds.Count;
             _lastPrefillMs = 0; _lastDecodeMs = 0; _lastDecodeTokens = 0;
             var turnSw = System.Diagnostics.Stopwatch.StartNew();
 
