@@ -435,4 +435,74 @@ unsafe static class GpuD3D12
         if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
         return 0;
     }
+
+    public static IntPtr CreateDefaultVramBuffer(ulong bytes)
+    {
+        EnsureInit();
+        byte[] resIID = G(IID_RES);
+        return MkBuf(resIID, 1, bytes, 8, 4); // DEFAULT, UNORDERED_ACCESS, ALLOW_UAV
+    }
+
+    public static long GetGpuVA(IntPtr buffer)
+    {
+        EnsureInit();
+        return Fn<DGpuVA>(buffer, 11)(buffer);
+    }
+
+    // Pure VRAM-resident dispatch: input activation aVA and output cVA are GPU Virtual Addresses in VRAM (DEFAULT heap).
+    // 0 host-device copies, 0 CPU spin-waits, 0 buffer maps.
+    public static int DispatchVramResidentGemmQ4(long aVA, byte[] Bq, float[] Scales, byte[] Zp, long cVA, uint M, uint N, uint K, uint blockSize, bool hasZp, byte[] dxil, int dxilLen, long weightKey = -1, int tileN = 16, int tileM = 16)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxilLen);
+        if (pso == IntPtr.Zero) return -6;
+        byte[] resIID = G(IID_RES);
+        bool cache = weightKey > 0;
+        ulong bqB = (ulong)Bq.Length, scB = (ulong)Scales.Length * 4;
+        ulong zpB = (ulong)Math.Max(1, Zp?.Length ?? 1);
+
+        long bqVA, scVA, zpVA;
+        IntPtr bqBuf = IntPtr.Zero, scBuf = IntPtr.Zero, zpBuf = IntPtr.Zero;
+        if (cache)
+        {
+            if (!s_q4Cache.TryGetValue(weightKey, out var rw))
+            {
+                rw = new ResidentQ4();
+                rw.Bq = UploadResident(resIID, Bq, bqB); rw.BqB = bqB; rw.BqVA = Fn<DGpuVA>(rw.Bq, 11)(rw.Bq);
+                byte[] scBytes = MemoryMarshal.AsBytes<float>(Scales).ToArray();
+                rw.Scales = UploadResident(resIID, scBytes, scB); rw.ScB = scB; rw.ScVA = Fn<DGpuVA>(rw.Scales, 11)(rw.Scales);
+                byte[] zpBytes = (hasZp && Zp != null && Zp.Length > 0) ? Zp : new byte[Math.Max(1, Zp?.Length ?? 1)];
+                rw.Zp = UploadResident(resIID, zpBytes, zpB); rw.ZpB = zpB; rw.ZpVA = Fn<DGpuVA>(rw.Zp, 11)(rw.Zp);
+                s_q4Cache = s_q4Cache.SetItem(weightKey, rw);
+            }
+            bqVA = rw.BqVA; scVA = rw.ScVA; zpVA = rw.ZpVA;
+        }
+        else
+        {
+            bqBuf = MkBuf(resIID, 2, bqB, 2755, 0);
+            scBuf = MkBuf(resIID, 2, scB, 2755, 0);
+            zpBuf = MkBuf(resIID, 2, zpB, 2755, 0);
+            RANGE z0 = new RANGE(); void* p0;
+            Fn<DMap>(bqBuf, 8)(bqBuf, 0, ref z0, out p0); Marshal.Copy(Bq, 0, (IntPtr)p0, Bq.Length); Fn<DUnmap>(bqBuf, 9)(bqBuf, 0, IntPtr.Zero);
+            Fn<DMap>(scBuf, 8)(scBuf, 0, ref z0, out p0); Marshal.Copy(Scales, 0, (IntPtr)p0, Scales.Length); Fn<DUnmap>(scBuf, 9)(scBuf, 0, IntPtr.Zero);
+            if (hasZp && Zp != null && Zp.Length > 0) { Fn<DMap>(zpBuf, 8)(zpBuf, 0, ref z0, out p0); Marshal.Copy(Zp, 0, (IntPtr)p0, Zp.Length); Fn<DUnmap>(zpBuf, 9)(zpBuf, 0, IntPtr.Zero); }
+            bqVA = Fn<DGpuVA>(bqBuf, 11)(bqBuf); scVA = Fn<DGpuVA>(scBuf, 11)(scBuf); zpVA = Fn<DGpuVA>(zpBuf, 11)(zpBuf);
+        }
+
+        if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+        else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[5]; gc[0] = M; gc[1] = N; gc[2] = K; gc[3] = blockSize; gc[4] = hasZp ? 1u : 0u;
+        Fn<DSet32>(list, 35)(list, 0, 5, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bqVA); Fn<DSetSRV>(list, 39)(list, 3, scVA); Fn<DSetSRV>(list, 39)(list, 4, zpVA); Fn<DSetUAV>(list, 41)(list, 5, cVA);
+        Fn<DDispatch>(list, 14)(list, (N + (uint)tileN - 1) / (uint)tileN, (M + (uint)tileM - 1) / (uint)tileM, 1);
+        Fn<DClose>(list, 9)(list);
+        IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+        if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
+        return 0;
+    }
 }

@@ -186,10 +186,12 @@ namespace Subsystem.Dpx
                         if (!needsMulti)
                         {
                             Console.WriteLine($"[DPX Workload Sizer] Dynamic Footprint: {wMb:F1} MB | Target GPU [{bestIdx}]: {bestName} | Strategy: 100% Single-GPU VRAM Resident (0 PCIe Ping-Ponging)");
+                            InitializeLayerNodes();
                         }
                         else
                         {
                             Console.WriteLine($"[DPX Workload Sizer] Dynamic Footprint: {wMb:F1} MB exceeds GPU [{bestIdx}] VRAM | Strategy: Multi-GPU Multi-Die Pipeline Split");
+                            InitializeLayerNodes();
                         }
                     }
 
@@ -219,6 +221,29 @@ namespace Subsystem.Dpx
             ulong scratchBytes = 16UL * 1024UL * 1024UL; // 16 MB activation scratch
             ulong kvBytes = (ulong)(_maxTokens * 2 * 16 * 2048 * 2); // KV cache estimate
             return weightsBytes + scratchBytes + kvBytes;
+        }
+
+        private DpxLayerNode[]? _layerNodes;
+
+        private void InitializeLayerNodes()
+        {
+            _layerNodes = new DpxLayerNode[28];
+            for (int i = 0; i < 28; i++)
+            {
+                _layerNodes[i] = new DpxLayerNode(i, 2048 * 4); // 2048 hidden dim float32
+                if (OperatingSystem.IsWindows())
+                {
+                    _layerNodes[i].ScratchBuffer = GpuD3D12.CreateDefaultVramBuffer(_layerNodes[i].ScratchBytes);
+                    _layerNodes[i].BlitBuffer = GpuD3D12.CreateDefaultVramBuffer(_layerNodes[i].BlitBytes);
+                    _layerNodes[i].ScratchVA = GpuD3D12.GetGpuVA(_layerNodes[i].ScratchBuffer);
+                    _layerNodes[i].BlitVA = GpuD3D12.GetGpuVA(_layerNodes[i].BlitBuffer);
+                }
+                if (i > 0)
+                {
+                    _layerNodes[i].BindUpstreamContract(_layerNodes[i - 1]);
+                }
+            }
+            Console.WriteLine($"[DPX Contracts] Initialized 28 DpxLayerNode capability contracts (256-byte aligned VRAM pitch: {_layerNodes[0].AlignedScratchPitch} bytes)");
         }
 
         public IAsyncEnumerable<AgentDelta> StreamTurnAsync(string prompt, byte[]? audioBytes, CancellationToken ct = default)

@@ -19,6 +19,9 @@ public sealed class DpxLayerNode
 
     public IntPtr ScratchBuffer { get; internal set; }
     public IntPtr BlitBuffer { get; internal set; }
+    public long ScratchVA { get; internal set; }
+    public long BlitVA { get; internal set; }
+
     public IntPtr HardwareFence { get; internal set; }
     public ulong FenceValue { get; internal set; }
 
@@ -27,12 +30,14 @@ public sealed class DpxLayerNode
     public sealed class CapabilityContract
     {
         public IntPtr ProducerBlitBuffer { get; }
+        public long ProducerBlitVA { get; }
         public IntPtr ProducerFence { get; }
         public int RowPitch { get; }
 
-        public CapabilityContract(IntPtr blitBuf, IntPtr fence, int pitch)
+        public CapabilityContract(IntPtr blitBuf, long blitVA, IntPtr fence, int pitch)
         {
             ProducerBlitBuffer = blitBuf;
+            ProducerBlitVA = blitVA;
             ProducerFence = fence;
             RowPitch = pitch;
         }
@@ -55,6 +60,6 @@ public sealed class DpxLayerNode
 
     public void BindUpstreamContract(DpxLayerNode prevNode)
     {
-        UpstreamContract = new CapabilityContract(prevNode.BlitBuffer, prevNode.HardwareFence, prevNode.AlignedBlitPitch);
+        UpstreamContract = new CapabilityContract(prevNode.BlitBuffer, prevNode.BlitVA, prevNode.HardwareFence, prevNode.AlignedBlitPitch);
     }
 }
