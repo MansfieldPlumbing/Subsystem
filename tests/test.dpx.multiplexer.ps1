@@ -1,18 +1,12 @@
-﻿#requires -Version 7
-# test.dpx.gang.ps1 - DpxGang (CRQ195): the brutally-synchronous worker-gang primitive. Three receipts:
-#   (a) lanes execute in LOCKSTEP gated by Fence.WaitAll/WaitN, not ad hoc Parallel.For - a slow lane
-#       holds up the barrier and every lane's marker is visible only AFTER WaitAll returns; WaitN(2)
-#       returns once a quorum clears without waiting for the slower laggard lanes.
-#   (b) a lane-role reassignment (DpGangHnic.Bind) is REFUSED while the prior buffer's registry
-#       refcount is nonzero above the floor - a real negative test (Vom.Open holds it open, Bind must
-#       throw DpGangHazardException), then Close drops it back to the floor and the SAME Bind succeeds.
-#   (c) the retrofitted call site (Dpx.MatMulNBits's scalar per-N fan-out, now DpxGang-driven) still
-#       matches a hand-computed dot-product oracle bit-for-bit-modulo-fp-tolerance.
-# Lane bodies run on VOM-Spawn'd plain CLR threads (no pwsh Runspace bound), so they cannot be
-# PowerShell scriptblocks - the harness is real compiled C# (Roslyn, same pattern as
-# test.dpx.decode-loop.ps1 / test.dpx.qnn-project.ps1), calling straight into the shipped DpxGang/Vom/Dp
-# types. Authority = the binary. This comment is not authority; the receipt the run prints is.
-#   Dogfood:  ss -File tests/test.dpx.gang.ps1
+#requires -Version 7
+# test.dpx.multiplexer.ps1 - DpxMultiplexer (CRQ195): Node-Local Synchrony & Decoupled Execution Pipeline.
+# At the Node Level: Compute to Scratch -> Blit to Blit Buffer.
+# Across the Pipeline: Nodes run autonomously and decoupled ("latest wins"). Three receipts:
+#   (a) lanes execute in LOCKSTEP gated by Fence.WaitAll/WaitN.
+#   (b) a lane-role reassignment (DpxBufferMultiplexer.Bind) is REFUSED while the prior buffer's registry
+#       refcount is nonzero above the floor (throws DpxMultiplexerHazardException).
+#   (c) the retrofitted call site (Dpx.MatMulNBits's scalar per-N fan-out) matches a hand-computed oracle.
+#   Dogfood:  ss -File tests/test.dpx.multiplexer.ps1
 $ErrorActionPreference = 'Stop'
 $fails = [System.Collections.Generic.List[string]]::new()
 function Assert([bool]$c,[string]$m){ if($c){Write-Host "  ok   $m" -ForegroundColor Green}else{Write-Host "  FAIL $m" -ForegroundColor Red;$script:fails.Add($m)} }

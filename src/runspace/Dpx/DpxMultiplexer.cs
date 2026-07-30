@@ -1,24 +1,19 @@
-// DpxMultiplexer.cs - the brutally-synchronous worker-multiplexer primitive (CRQ195, Scott's design). "we do not
-// async... brutal synchrony... call it DpxMultiplexer". N lanes move in LOCKSTEP through phases gated by
-// Fence.WaitAll (every lane before advancing) / Fence.WaitN (quorum, CRQ190's already-banked
-// quorum-drop shape: WaitN(n, phase=t) IS the deadline, no timer). ZERO async/await, Task.Run,
-// ThreadPool, .ContinueWith (CRQ181, hard law) — the multiplexer STRUCTURE (lane lifecycle, phase
-// advancement, role assignment) is Owner/Fence-based throughout, same vocabulary DpxRace.cs's
-// two-lane race already proved (Vom.Spawn worker + CpuFence work/done pair), generalized to N
-// lanes. Parallel.For remains acceptable only at LEAF level, inside a single lane's own phase body
-// (e.g. a lane fanning out its own row range) — never for the multiplexer's own lifecycle/advancement.
+// DpxMultiplexer.cs - Node-Local Synchrony & Decoupled Execution Pipeline.
 //
-// Buffers: each lane owns a resident, 256-byte-aligned VOM region (Vom.Alignment — the SAME
-// alignment every VOM handle already gets via Vom.Alloc; DpxMultiplexer invents no new alignment).
+// At the Node Level (Local Loop):
+// Each node is internally synchronous: Compute to Scratch -> Blit to Blit Buffer, over and over in a continuous loop.
+// It completes its local compute pass on its scratch buffer, blits the result, and repeats.
 //
-// The Buffer Multiplexer (coordinating handle table): between phases, decides which LOGICAL lane-role maps to which PHYSICAL
-// resident buffer by REBINDING THE HANDLE the role's slot points at — never copying bytes. This
-// extends Slot.cs's A/B code-swap pattern (refcount discipline, free-on-zero) to DATA buffers: a
-// role's current buffer is Open'd (refcount+1) while lanes may read through it and Close'd (refcount-1)
-// when a lane is done with it for the phase; a rebind is refused (THROWS, not a comment) unless the
-// prior holder's registry refcount is already at the floor the multiplexer requires — see TryBind/Bind
-// below. This is the exact hazard the kv-ring reviewer flagged this session in TensorArena.Free
-// (unconditional free, no VOM-refcount branch): here the check is real and enforced.
+// Across the Pipeline (Node-to-Node):
+// The system is NOT globally synchronous. There are no forced global barriers or CPU-blocking pipeline stalls across nodes.
+// Nodes run autonomously and decoupled. Node B blits from Node A's Blit Buffer into its own Scratch Buffer whenever Node B is ready to execute its next cycle.
+// If Node A has looped 3 times while Node B looped 2 times, Node B simply ingests Node A's latest blitted frame ("latest wins").
+//
+// Scope                   Execution Mode           Behavior
+// Inside a Single Node    Node-Synchronous         Scratch (Workload) -> Blit Buffer loop
+// Between Multiple Nodes  Decoupled / Free-Running Consumer Ingress blits latest frame from previous node's Blit Buffer without global locking
+//
+// This makes the node pipeline fully decoupled, continuous, and free-running!
 using System;
 using System.Threading;
 using Subsystem.Vom;
