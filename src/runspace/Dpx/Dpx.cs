@@ -952,25 +952,38 @@ public class Dpx
         // tiled kernel. Both are BlockSize==32-only; an absent file or ineligible shape falls back to the naive
         // gemm_q4.dxil rung (and any GPU fault still latches _gpuQ4Dead down to the CPU oracle).
         byte[] dxil = GemmDxilQ4(); int tileN = 16, tileM = 16;
+        int mRun = M;
+        float[] aRun = a;
         if (bs == 32)
         {
-            // Both variant kernels drop the naive kernel's per-thread bounds check in exchange for uniform,
-            // branch-free control flow (CRQ190) - safe ONLY when the dispatch is exactly tile-aligned, since an
-            // out-of-range Load on these root-descriptor SRVs is undefined, not guaranteed-zero. An unaligned
-            // shape falls back to the naive rung (which still bounds-checks every thread) until the tournament
-            // ships an aligned/peeled or padded variant (tracked, not yet built).
             if (M == 1 && N % 8 == 0 && (long)N <= 8L * 65535)   // D3D12 dispatch cap: 65535 groups of 8 rows
             {
                 var v = Q4Dxil(1);
                 if (v.Length > 0) { dxil = v; tileN = 8; tileM = 1; }
             }
-            else if (M > 1 && M % 16 == 0)
+            else if (M > 1)
             {
                 var v = Q4Dxil(2);
-                if (v.Length > 0) dxil = v;
+                if (v.Length > 0)
+                {
+                    dxil = v;
+                    if (M % 16 != 0)
+                    {
+                        mRun = (M + 15) & ~15;
+                        aRun = new float[(long)mRun * K];
+                        Array.Copy(a, 0, aRun, 0, a.Length);
+                        c = new float[(long)mRun * N];
+                    }
+                }
             }
         }
-        int rc = Gpu.dpgpu_gemm_q4(a, bArr, scsp, zpArr, c, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp, dxil, key, tileN, tileM, x[1]);
+        int rc = Gpu.dpgpu_gemm_q4(aRun, bArr, scsp, zpArr, c, (uint)mRun, (uint)N, (uint)K, (uint)bs, hasZp, dxil, key, tileN, tileM, x[1]);
+        if (mRun != M)
+        {
+            var cTrim = new float[(long)M * N];
+            Array.Copy(c, 0, cTrim, 0, cTrim.Length);
+            c = cTrim;
+        }
         _ = n; _ = nBlk; _ = rowBytes; _ = zpRowBytes;   // geometry re-derived inside the GPU kernel from M/N/K/bs
         if (rc != 0) throw new InvalidOperationException($"dpgpu_gemm_q4 rc={rc}");
         var outShape0 = (int[])x[0].Shape.Clone(); outShape0[outShape0.Length - 1] = N;
