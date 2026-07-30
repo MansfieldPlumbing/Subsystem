@@ -1386,7 +1386,18 @@ public class Dpx
         int r = X.Shape.Length, axis = (int)L(n, "axis", -1); if (axis < 0) axis += r;
         float eps = F(n, "epsilon", 1e-5f);
         long inner = 1; for (int k = axis; k < r; k++) inner *= X.Shape[k];
-        long outer = X.Count / inner; var o = TensorArena.AllocSpan(X.Count);
+        long outer = X.Count / inner;
+        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits)
+        {
+            var rmsDxil = ReadDxilResource("rmsnorm.dxil");
+            if (rmsDxil.Length > 0)
+            {
+                var oGpu = new float[X.Count];
+                int rc = GpuD3D12.DispatchRMSNorm(xf.ToArray(), w.ToArray(), oGpu, (uint)outer, (uint)inner, eps, rmsDxil);
+                if (rc == 0) return Tensor.F(oGpu, X.Shape);
+            }
+        }
+        var o = TensorArena.AllocSpan(X.Count);
         for (long ob = 0; ob < outer; ob++)
         {
             long bI = ob * inner; double ss = 0;
