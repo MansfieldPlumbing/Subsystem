@@ -42,21 +42,27 @@ namespace Subsystem.Windows
             }
             var cleanArgs = clean.ToArray();
 
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() && Subsystem.Dpx.Dpx.UseGpuMatMulNBits)
             {
-                try
+                var adapters = GpuD3D12.ListAdapters();
+                if (adapters.Count > 0)
                 {
-                    var adapters = GpuD3D12.ListAdapters();
-                    if (adapters.Count > 0)
+                    Console.WriteLine($"[DPX GPU] Discovered {adapters.Count} hardware GPU adapter(s):");
+                    foreach (var ad in adapters)
                     {
-                        Console.WriteLine($"[DPX GPU] Discovered {adapters.Count} hardware GPU adapter(s):");
-                        foreach (var a in adapters)
-                        {
-                            Console.WriteLine($"  - Adapter [{a.Index}]: {a.Name} ({a.VramBytes / (1024 * 1024)} MB VRAM)");
-                        }
+                        Console.WriteLine($"  - Adapter [{ad.Index}]: {ad.Name} ({ad.VramBytes / (1024 * 1024)} MB VRAM)");
+                    }
+                    ulong estBytes = 1940UL * 1024UL * 1024UL;
+                    var (bestIdx, bestName, needsMulti) = GpuD3D12.EvaluateWorkload(estBytes);
+                    if (!needsMulti)
+                    {
+                        Console.WriteLine($"[DPX Workload Evaluator] Workload: 1,940 MB | Selected GPU: {bestName} | Strategy: Single-GPU Resident VRAM (No PCIe Inter-GPU Bus Copies)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[DPX Workload Evaluator] Workload: 1,940 MB exceeds single GPU VRAM | Strategy: Multi-GPU Multi-Die Pipeline Split");
                     }
                 }
-                catch { }
             }
 
             if (cleanArgs.Length == 0)

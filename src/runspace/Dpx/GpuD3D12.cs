@@ -118,6 +118,15 @@ unsafe static class GpuD3D12
         return (weights, staging, s_q4Cache.Count);
     }
 
+    public static (int adapterIndex, string adapterName, bool requiresMultiGpu) EvaluateWorkload(ulong estimatedWorkloadBytes)
+    {
+        var adapters = ListAdapters();
+        if (adapters.Count == 0) return (-1, "(none)", false);
+        var best = adapters.OrderByDescending(a => a.VramBytes).First();
+        bool fitsSingleGpu = estimatedWorkloadBytes < best.VramBytes;
+        return (best.Index, best.Name, !fitsSingleGpu);
+    }
+
     static IntPtr MakeDevice()
     {
         IntPtr best = IntPtr.Zero; ulong bestVram = 0;
