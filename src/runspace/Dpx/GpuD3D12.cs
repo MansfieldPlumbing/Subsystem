@@ -425,8 +425,7 @@ unsafe static class GpuD3D12
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            System.Threading.Thread.Yield();
-            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(16);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(64);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)cB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, C, 0, (int)(M * N)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
