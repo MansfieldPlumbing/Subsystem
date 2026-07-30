@@ -1125,8 +1125,8 @@ public class Dpx
         {
             float* py = p_y; float* pa = p_a; float* psc = p_sc; int yl = y.Length, al = a.Length;
             byte* pB = p_b; byte* pZp = p_zp;
-            // Scalar per-N fan-out over DpxMultiplexer lanes (CRQ195), gated by Fence.WaitAll - brutal
-            // synchrony, no Task/ThreadPool. The pinned pointers above stay valid for the whole call
+            // Scalar per-N fan-out over DpxMultiplexer lanes (CRQ195), gated by Fence.WaitAll - node-local
+            // synchrony (scratch -> blit loop), no Task/ThreadPool. The pinned pointers above stay valid for the whole call
             // because WaitAll blocks the `fixed` block's exit until every lane's phase-1 LaneWork has
             // returned. Each lane owns a static, disjoint [lo,hi) row range; the per-row math below is
             // unchanged from the sequential form.

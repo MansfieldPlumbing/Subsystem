@@ -1085,7 +1085,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID, uint3 groupThreadId : 
 
                 GetCompletedValueDelegate getCompletedValue = (GetCompletedValueDelegate)Marshal.GetDelegateForFunctionPointer(GetVTableSlot(pFence, 8), typeof(GetCompletedValueDelegate));
 
-                // Brutal Synchrony
+                // Node-Local Hardware Fence Wait
                 while (getCompletedValue(pFence) < 1)
                 {
                     System.Threading.Thread.Sleep(1);
