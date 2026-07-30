@@ -1125,12 +1125,12 @@ public class Dpx
         {
             float* py = p_y; float* pa = p_a; float* psc = p_sc; int yl = y.Length, al = a.Length;
             byte* pB = p_b; byte* pZp = p_zp;
-            // Scalar per-N fan-out over DpxGang lanes (CRQ195), gated by Fence.WaitAll - brutal
+            // Scalar per-N fan-out over DpxMultiplexer lanes (CRQ195), gated by Fence.WaitAll - brutal
             // synchrony, no Task/ThreadPool. The pinned pointers above stay valid for the whole call
             // because WaitAll blocks the `fixed` block's exit until every lane's phase-1 LaneWork has
             // returned. Each lane owns a static, disjoint [lo,hi) row range; the per-row math below is
             // unchanged from the sequential form.
-            DpGangForEachN(N, nn =>
+            DpMultiplexerForEachN(N, nn =>
             {
                 var sy = new Span<float>(py, yl); var sa = new Span<float>(pa, al); var sc = new Span<float>(psc, scLen);
                 int rb = nn * rowBytes, zb = nn * zpRowBytes;
@@ -1153,27 +1153,27 @@ public class Dpx
         return Tensor.F(y, outShape);
     }
 
-    // The scalar MatMulNBits fallback's DpxGang fan-out (CRQ195 first caller, mirroring how
+    // The scalar MatMulNBits fallback's DpxMultiplexer fan-out (CRQ195 first caller, mirroring how
     // DpxQnn.Project got test.dpx.qnn-project.ps1): partitions [0,N) into LaneCount disjoint,
     // contiguous ranges (static split - every lane gets a fixed range up front, no work-stealing;
-    // that would need a shared cursor, which is exactly the ad hoc synchronization DpxGang replaces)
-    // and drives ONE gang through ONE phase via DpxGang.WaitAll - the barrier, per invariant 8. One
-    // gang per call (stand up, run one phase, tear down) since MatMulNBits is a one-shot kernel
+    // that would need a shared cursor, which is exactly the ad hoc synchronization DpxMultiplexer replaces)
+    // and drives ONE multiplexer through ONE phase via DpxMultiplexer.WaitAll - the barrier, per invariant 8. One
+    // multiplexer per call (stand up, run one phase, tear down) since MatMulNBits is a one-shot kernel
     // dispatch, not a long-lived loop; DpxDecoder's per-token decode loop is the future caller that
-    // would reuse a gang across phases instead.
-    static void DpGangForEachN(int N, Action<int> perN)
+    // would reuse a multiplexer across phases instead.
+    static void DpMultiplexerForEachN(int N, Action<int> perN)
     {
         int lanes = Math.Max(1, Math.Min(N, Environment.ProcessorCount));
-        using var gang = new DpxGang($"\\Agent\\Dpx\\Gang\\MatMulNBits\\{Guid.NewGuid():N}", lanes);
+        using var mux = new DpxMultiplexer($"\\Agent\\Dpx\\Multiplexer\\MatMulNBits\\{Guid.NewGuid():N}", lanes);
         int baseCount = N / lanes, rem = N % lanes;
-        gang.LaneWork = (lane, _) =>
+        mux.LaneWork = (lane, _) =>
         {
             // lanes [0,rem) take one extra row so the whole [0,N) range is covered exactly once.
             int lo = lane * baseCount + Math.Min(lane, rem);
             int hi = lo + baseCount + (lane < rem ? 1 : 0);
             for (int nn = lo; nn < hi; nn++) perN(nn);
         };
-        gang.WaitAll();   // the barrier: every lane's row range must finish before the caller reads y
+        mux.WaitAll();   // the barrier: every lane's row range must finish before the caller reads y
     }
 
     // Force the scalar MatMulNBits path - the numerical oracle every faster variant is diffed against.
