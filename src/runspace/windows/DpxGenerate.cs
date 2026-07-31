@@ -27,11 +27,12 @@ namespace Subsystem.Windows
 
             bool verbose = args.Contains("--verbose") || args.Contains("-v") || args.Contains("-verbose");
             bool profile = args.Contains("--profile");
+            bool validateGpu = args.Contains("--validate-gpu");
             var clean = new System.Collections.Generic.List<string>();
             for (int i = 0; i < args.Length; i++)
             {
                 var a = args[i];
-                if (a == "--verbose" || a == "-v" || a == "-verbose" || a == "--profile") continue;
+                if (a == "--verbose" || a == "-v" || a == "-verbose" || a == "--profile" || a == "--validate-gpu") continue;
                 if (a == "--gpu-matmul")
                 {
                     if (i + 1 < args.Length && string.Equals(args[i + 1], "auto", StringComparison.OrdinalIgnoreCase)) i++;   // env already set above
@@ -40,6 +41,7 @@ namespace Subsystem.Windows
                 }
                 clean.Add(a);
             }
+            if (validateGpu) { Subsystem.Dpx.Dpx.UseGpuMatMulNBits = true; Subsystem.Dpx.Dpx.ValidateGpu = true; }
             var cleanArgs = clean.ToArray();
 
             if (OperatingSystem.IsWindows() && Subsystem.Dpx.Dpx.UseGpuMatMulNBits)

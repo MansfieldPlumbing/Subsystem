@@ -58,7 +58,7 @@ unsafe static class GpuD3D12
     [StructLayout(LayoutKind.Sequential)] struct BC    { public IntPtr p; public IntPtr len; }
     [StructLayout(LayoutKind.Sequential)] struct CACHE { public IntPtr p; public IntPtr len; }
     [StructLayout(LayoutKind.Sequential)] struct CPSO  { public IntPtr RS; public BC CS; public uint NodeMask; public CACHE Cached; public int Flags; }
-    [StructLayout(LayoutKind.Sequential)] struct BAR   { public int Type; public int Flags; public IntPtr Res; public uint Sub; public int Before; public int After; }
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] struct BAR { public int Type; public int Flags; public IntPtr Res; public uint Sub; public int Before; public int After; }
     [StructLayout(LayoutKind.Sequential)] struct LUID  { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct ADESC { [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Description; public uint VendorId; public uint DeviceId; public uint SubSysId; public uint Revision; public IntPtr DedVid; public IntPtr DedSys; public IntPtr SharedSys; public LUID Luid; public uint Flags; }
 
@@ -427,8 +427,8 @@ unsafe static class GpuD3D12
         if (gcv(s_fence) < target)
         {
             // Wait for GPU hardware signal without CPU spin polling thrash
-            System.Threading.Thread.Sleep(0);
-            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
+            System.Threading.Thread.SpinWait(10);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)cB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, C, 0, (int)(M * N)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
@@ -447,6 +447,103 @@ unsafe static class GpuD3D12
     {
         EnsureInit();
         return Fn<DGpuVA>(buffer, 11)(buffer);
+    }
+
+    static IntPtr s_upAlloc, s_upList;
+    static IntPtr s_downAlloc, s_downList;
+
+    public static unsafe void UploadToVram(IntPtr defaultBuf, ulong dstOffset, float[] data)
+    {
+        EnsureInit();
+        if (defaultBuf == IntPtr.Zero || data == null || data.Length == 0) return;
+        byte[] resIID = G(IID_RES);
+        ulong bytes = (ulong)data.Length * 4;
+        IntPtr upBuf = MkBuf(resIID, 2, bytes, 2755, 0);
+        RANGE z0 = new RANGE(); void* p0;
+        Fn<DMap>(upBuf, 8)(upBuf, 0, ref z0, out p0); Marshal.Copy(data, 0, (IntPtr)p0, data.Length); Fn<DUnmap>(upBuf, 9)(upBuf, 0, IntPtr.Zero);
+
+        if (s_upAlloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_upAlloc);
+        else Fn<DResetAlloc>(s_upAlloc, 8)(s_upAlloc);
+        if (s_upList == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_upAlloc, IntPtr.Zero, G(IID_LIST), out s_upList);
+        else Fn<DResetList>(s_upList, 10)(s_upList, s_upAlloc, IntPtr.Zero);
+        IntPtr list = s_upList;
+
+        BAR bar1 = new BAR { Type = 0, Res = defaultBuf, Before = 8, After = 1024 }; Fn<DBarrier>(list, 26)(list, 1, ref bar1);
+        Fn<DCopy>(list, 15)(list, defaultBuf, dstOffset, upBuf, 0, bytes);
+        BAR bar2 = new BAR { Type = 0, Res = defaultBuf, Before = 1024, After = 8 }; Fn<DBarrier>(list, 26)(list, 1, ref bar2);
+        Fn<DClose>(list, 9)(list);
+
+        IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+        ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+        var gcv = Fn<DGetCompl>(s_fence, 8);
+        while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        Marshal.Release(upBuf);
+    }
+    public static unsafe void UploadToVram(IntPtr defaultBuf, float[] data) => UploadToVram(defaultBuf, 0UL, data);
+
+    public static unsafe float[] DownloadFromVram(IntPtr defaultBuf, ulong srcOffset, ulong bytes)
+    {
+        FlushBatch();
+        EnsureInit();
+        if (defaultBuf == IntPtr.Zero || bytes == 0) return Array.Empty<float>();
+        byte[] resIID = G(IID_RES);
+        IntPtr rbBuf = MkBuf(resIID, 3, bytes, 1024, 0);
+
+        if (s_downAlloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_downAlloc);
+        else Fn<DResetAlloc>(s_downAlloc, 8)(s_downAlloc);
+        if (s_downList == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_downAlloc, IntPtr.Zero, G(IID_LIST), out s_downList);
+        else Fn<DResetList>(s_downList, 10)(s_downList, s_downAlloc, IntPtr.Zero);
+        IntPtr list = s_downList;
+
+        BAR bar1 = new BAR { Type = 0, Res = defaultBuf, Before = 8, After = 2048 }; Fn<DBarrier>(list, 26)(list, 1, ref bar1);
+        Fn<DCopy>(list, 15)(list, rbBuf, 0, defaultBuf, srcOffset, bytes);
+        BAR bar2 = new BAR { Type = 0, Res = defaultBuf, Before = 2048, After = 8 }; Fn<DBarrier>(list, 26)(list, 1, ref bar2);
+        Fn<DClose>(list, 9)(list);
+
+        IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+        ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+        var gcv = Fn<DGetCompl>(s_fence, 8);
+        while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+
+        float[] res = new float[bytes / 4];
+        RANGE rr = new RANGE { End = (IntPtr)(long)bytes }; void* rp;
+        Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, res, 0, res.Length); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
+        Marshal.Release(rbBuf);
+        return res;
+    }
+    public static unsafe float[] DownloadFromVram(IntPtr defaultBuf, ulong bytes) => DownloadFromVram(defaultBuf, 0UL, bytes);
+
+    private static bool s_batchRecording = false;
+    private static readonly System.Collections.Generic.List<IntPtr> s_batchGarbage = new();
+
+    public static unsafe void BeginBatch()
+    {
+        EnsureInit();
+        if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+        else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+
+        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, IntPtr.Zero, G(IID_LIST), out s_q4List);
+        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, IntPtr.Zero);
+
+        s_batchRecording = true;
+    }
+
+    public static unsafe void FlushBatch()
+    {
+        if (!s_batchRecording) return;
+        if (s_q4List != IntPtr.Zero)
+        {
+            Fn<DClose>(s_q4List, 9)(s_q4List);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = s_q4List;
+            Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv;
+            Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        }
+        foreach (var ptr in s_batchGarbage) Marshal.Release(ptr);
+        s_batchGarbage.Clear();
+        s_batchRecording = false;
     }
 
     // Pure VRAM-resident dispatch: input activation aVA and output cVA are GPU Virtual Addresses in VRAM (DEFAULT heap).
@@ -489,10 +586,13 @@ unsafe static class GpuD3D12
             bqVA = Fn<DGpuVA>(bqBuf, 11)(bqBuf); scVA = Fn<DGpuVA>(scBuf, 11)(scBuf); zpVA = Fn<DGpuVA>(zpBuf, 11)(zpBuf);
         }
 
-        if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
-        else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
-        if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
-        else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
         IntPtr list = s_q4List;
 
         Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
@@ -500,9 +600,24 @@ unsafe static class GpuD3D12
         Fn<DSet32>(list, 35)(list, 0, 5, gc, 0);
         Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bqVA); Fn<DSetSRV>(list, 39)(list, 3, scVA); Fn<DSetSRV>(list, 39)(list, 4, zpVA); Fn<DSetUAV>(list, 41)(list, 5, cVA);
         Fn<DDispatch>(list, 14)(list, (N + (uint)tileN - 1) / (uint)tileN, (M + (uint)tileM - 1) / (uint)tileM, 1);
-        Fn<DClose>(list, 9)(list);
-        IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
-        if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+            if (!cache) { Marshal.Release(bqBuf); Marshal.Release(scBuf); Marshal.Release(zpBuf); }
+        }
+        else if (!cache)
+        {
+            if (bqBuf != IntPtr.Zero) s_batchGarbage.Add(bqBuf);
+            if (scBuf != IntPtr.Zero) s_batchGarbage.Add(scBuf);
+            if (zpBuf != IntPtr.Zero) s_batchGarbage.Add(zpBuf);
+        }
         return 0;
     }
 
@@ -546,8 +661,8 @@ unsafe static class GpuD3D12
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            System.Threading.Thread.Sleep(0);
-            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
+            System.Threading.Thread.SpinWait(10);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)yB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, Y, 0, (int)(M * D)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
@@ -595,8 +710,8 @@ unsafe static class GpuD3D12
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            System.Threading.Thread.Sleep(0);
-            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
+            System.Threading.Thread.SpinWait(10);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)bytes }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, Y, 0, (int)count); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
@@ -645,8 +760,8 @@ unsafe static class GpuD3D12
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            System.Threading.Thread.Sleep(0);
-            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
+            System.Threading.Thread.SpinWait(10);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)xB }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, Y, 0, (int)(M * heads * dim)); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
@@ -694,13 +809,270 @@ unsafe static class GpuD3D12
         var gcv = Fn<DGetCompl>(s_fence, 8);
         if (gcv(s_fence) < target)
         {
-            System.Threading.Thread.Sleep(0);
-            while (gcv(s_fence) < target) System.Threading.Thread.Sleep(0);
+            System.Threading.Thread.SpinWait(10);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
         }
         RANGE rr = new RANGE { End = (IntPtr)(long)bytes }; void* rp;
         Fn<DMap>(rbBuf, 8)(rbBuf, 0, ref rr, out rp); Marshal.Copy((IntPtr)rp, Y, 0, (int)count); Fn<DUnmap>(rbBuf, 9)(rbBuf, 0, IntPtr.Zero);
 
         Marshal.Release(gBuf); Marshal.Release(uBuf); Marshal.Release(yBuf); Marshal.Release(rbBuf);
+        return 0;
+    }
+
+    public static unsafe int DispatchSwiGLUVram(long gVA, long uVA, long yVA, uint count, byte[] dxil)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[4]; gc[0] = count; gc[1] = 0; gc[2] = 0; gc[3] = 0;
+        Fn<DSet32>(list, 35)(list, 0, 4, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, gVA); Fn<DSetSRV>(list, 39)(list, 2, uVA); Fn<DSetUAV>(list, 41)(list, 5, yVA);
+        Fn<DDispatch>(list, 14)(list, (count + 255) / 256, 1, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        }
+        return 0;
+    }
+
+    public static unsafe int DispatchRoPEVram(long xVA, float[] CS, long yVA, uint M, uint heads, uint dim, uint pos, byte[] dxil)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+        byte[] resIID = G(IID_RES);
+        ulong csB = (ulong)CS.Length * 4;
+
+        IntPtr csBuf = MkBuf(resIID, 2, csB, 2755, 0);
+        RANGE z0 = new RANGE(); void* p0;
+        Fn<DMap>(csBuf, 8)(csBuf, 0, ref z0, out p0); Marshal.Copy(CS, 0, (IntPtr)p0, CS.Length); Fn<DUnmap>(csBuf, 9)(csBuf, 0, IntPtr.Zero);
+        long csVA = Fn<DGpuVA>(csBuf, 11)(csBuf);
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[4]; gc[0] = M; gc[1] = heads; gc[2] = dim; gc[3] = pos;
+        Fn<DSet32>(list, 35)(list, 0, 4, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, xVA); Fn<DSetSRV>(list, 39)(list, 2, csVA); Fn<DSetUAV>(list, 41)(list, 5, yVA);
+        uint totalPairs = M * heads * (dim / 2);
+        Fn<DDispatch>(list, 14)(list, (totalPairs + 63) / 64, 1, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+            Marshal.Release(csBuf);
+        }
+        else
+        {
+            if (csBuf != IntPtr.Zero) s_batchGarbage.Add(csBuf);
+        }
+        return 0;
+    }
+
+    public static unsafe int DispatchRMSNormVram(long xVA, float[] Gamma, long yVA, uint M, uint D, float epsilon, byte[] dxil)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+        byte[] resIID = G(IID_RES);
+        ulong gB = (ulong)D * 4;
+
+        IntPtr gBuf = MkBuf(resIID, 2, gB, 2755, 0);
+        RANGE z0 = new RANGE(); void* p0;
+        Fn<DMap>(gBuf, 8)(gBuf, 0, ref z0, out p0); Marshal.Copy(Gamma, 0, (IntPtr)p0, Gamma.Length); Fn<DUnmap>(gBuf, 9)(gBuf, 0, IntPtr.Zero);
+        long gVA = Fn<DGpuVA>(gBuf, 11)(gBuf);
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[4]; gc[0] = M; gc[1] = D;
+        gc[2] = (uint)BitConverter.SingleToInt32Bits(epsilon); gc[3] = 0;
+        Fn<DSet32>(list, 35)(list, 0, 4, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, xVA); Fn<DSetSRV>(list, 39)(list, 2, gVA); Fn<DSetUAV>(list, 41)(list, 5, yVA);
+        Fn<DDispatch>(list, 14)(list, (M + 63) / 64, 1, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+            Marshal.Release(gBuf);
+        }
+        else
+        {
+            if (gBuf != IntPtr.Zero) s_batchGarbage.Add(gBuf);
+        }
+        return 0;
+    }
+
+    public static unsafe int DispatchAddVram(long aVA, long bVA, long yVA, uint count, byte[] dxil)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[4]; gc[0] = count; gc[1] = 0; gc[2] = 0; gc[3] = 0;
+        Fn<DSet32>(list, 35)(list, 0, 4, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, aVA); Fn<DSetSRV>(list, 39)(list, 2, bVA); Fn<DSetUAV>(list, 41)(list, 5, yVA);
+        Fn<DDispatch>(list, 14)(list, (count + 255) / 256, 1, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        }
+        return 0;
+    }
+
+    public static unsafe int DispatchAttentionVram(long qVA, long kVA, long vVA, long yVA, uint M, uint heads, uint dim, uint seqLen, byte[] dxil)
+    {
+        EnsureInit();
+        IntPtr pso = PsoQ4(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso); Fn<DSetRS>(list, 29)(list, s_rootQ4);
+        uint* gc = stackalloc uint[4]; gc[0] = M; gc[1] = heads; gc[2] = dim; gc[3] = seqLen;
+        Fn<DSet32>(list, 35)(list, 0, 4, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, qVA); Fn<DSetSRV>(list, 39)(list, 2, kVA); Fn<DSetSRV>(list, 39)(list, 3, vVA); Fn<DSetUAV>(list, 41)(list, 5, yVA);
+        Fn<DDispatch>(list, 14)(list, (heads + 15) / 16, (M + 15) / 16, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        }
+        return 0;
+    }
+
+    static IntPtr[] s_psoStd; static int[] s_psoStdLen; static ulong[] s_psoStdHash;
+    static IntPtr PsoStandard(byte[] dxil, int dxilLen)
+    {
+        if (s_psoStd == null) { s_psoStd = new IntPtr[Q4PsoSlots]; s_psoStdLen = new int[Q4PsoSlots]; s_psoStdHash = new ulong[Q4PsoSlots]; }
+        ulong dHash = Fnv1a(dxil);
+        int slot = 0;
+        for (int i = 0; i < Q4PsoSlots; i++)
+        {
+            if (s_psoStd[i] != IntPtr.Zero && s_psoStdLen[i] == dxilLen && s_psoStdHash[i] == dHash) return s_psoStd[i];
+            if (s_psoStd[i] != IntPtr.Zero) slot = i + 1;
+        }
+        if (slot == Q4PsoSlots) { slot = Q4PsoSlots - 1; Marshal.Release(s_psoStd[slot]); s_psoStd[slot] = IntPtr.Zero; }
+        IntPtr dp = Marshal.AllocHGlobal(dxilLen); Marshal.Copy(dxil, 0, dp, dxilLen);
+        CPSO pd = new CPSO { RS = s_root, CS = new BC { p = dp, len = (IntPtr)dxilLen } };
+        int rc = Fn<DCreatePSO>(s_dev, 11)(s_dev, ref pd, G(IID_PSO), out IntPtr pso);
+        Marshal.FreeHGlobal(dp);
+        if (rc != 0) return IntPtr.Zero;
+        s_psoStd[slot] = pso; s_psoStdLen[slot] = dxilLen; s_psoStdHash[slot] = dHash;
+        return pso;
+    }
+
+    public static unsafe int DispatchMatMulVram(long aVA, long bVA, long cVA, uint M, uint N, uint K, byte[] dxil, int threadM = 16, int threadN = 16)
+    {
+        EnsureInit();
+        IntPtr pso = PsoStandard(dxil, dxil.Length);
+        if (pso == IntPtr.Zero) return -6;
+
+        if (!s_batchRecording)
+        {
+            if (s_q4Alloc == IntPtr.Zero) Fn<DCreateAlloc>(s_dev, 9)(s_dev, 2, G(IID_ALLOC), out s_q4Alloc);
+            else Fn<DResetAlloc>(s_q4Alloc, 8)(s_q4Alloc);
+            if (s_q4List == IntPtr.Zero) Fn<DCreateList>(s_dev, 12)(s_dev, 0, 2, s_q4Alloc, pso, G(IID_LIST), out s_q4List);
+            else Fn<DResetList>(s_q4List, 10)(s_q4List, s_q4Alloc, pso);
+        }
+        IntPtr list = s_q4List;
+
+        Fn<DSetPSO>(list, 25)(list, pso);
+        Fn<DSetRS>(list, 29)(list, s_root);
+
+        uint* gc = stackalloc uint[3]; gc[0] = M; gc[1] = N; gc[2] = K;
+        Fn<DSet32>(list, 35)(list, 0, 3, gc, 0);
+        Fn<DSetSRV>(list, 39)(list, 1, aVA);
+        Fn<DSetSRV>(list, 39)(list, 2, bVA);
+        Fn<DSetUAV>(list, 41)(list, 3, cVA);
+
+        Fn<DDispatch>(list, 14)(list, (N + (uint)threadN - 1) / (uint)threadN, (M + (uint)threadM - 1) / (uint)threadM, 1);
+        BAR uavBar = new BAR { Type = 2, Flags = 0, Res = IntPtr.Zero };
+        Fn<DBarrier>(list, 26)(list, 1, ref uavBar);
+
+        if (!s_batchRecording)
+        {
+            Fn<DClose>(list, 9)(list);
+            IntPtr* lp = stackalloc IntPtr[1]; lp[0] = list; Fn<DExec>(s_q, 10)(s_q, 1, lp);
+            ulong target = ++s_fv; Fn<DSignal>(s_q, 14)(s_q, s_fence, target);
+            var gcv = Fn<DGetCompl>(s_fence, 8);
+            while (gcv(s_fence) < target) System.Threading.Thread.SpinWait(10);
+        }
+
         return 0;
     }
 }

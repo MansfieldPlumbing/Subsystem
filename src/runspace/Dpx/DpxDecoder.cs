@@ -557,7 +557,20 @@ namespace Subsystem.Dpx
             }
         }
 
-        // Split-graph decode: embed(input_ids) -> inputs_embeds + per_layer_inputs, THEN
+        private static int ParseLayerIndex(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return -1;
+        int idx = name.IndexOf("layers.");
+        if (idx < 0) return -1;
+        int start = idx + 7;
+        int end = start;
+        while (end < name.Length && char.IsDigit(name[end])) end++;
+        if (end > start && int.TryParse(name.Substring(start, end - start), out int layer))
+            return layer;
+        return -1;
+    }
+
+    // Split-graph decode: embed(input_ids) -> inputs_embeds + per_layer_inputs, THEN
         // decoder(inputs_embeds, per_layer_inputs, position_ids, attention_mask, num_logits_to_keep, past_kv)
         // -> logits + present_kv. This is the real gemma4-e2b q4 export shape (two graphs, DYNAMIC KV — no
         // baked slot cap, unlike the fused litert path above). Same VOM-native KV carry-forward as DecodeLoop.
@@ -638,12 +651,22 @@ namespace Subsystem.Dpx
                     }
                 }
 
+                if (OperatingSystem.IsWindows() && Subsystem.Dpx.Dpx.UseGpuMatMulNBits && step > 0)
+                {
+                    GpuD3D12.BeginBatch();
+                }
+
                 var outputs = _interp!.Run(feed, onNode: (node, outs, env) =>
                 {
                     foreach (var o in outs)
                         if (o != null && o.Shape.Contains(0))
                         { Dg.Log("rb", $"ZERO-SHAPE '{node.Name}' (op={node.OpType}) -> [{string.Join(",", o.Shape)}]"); break; }
-                });
+                }, layerNodes: _layerNodes);
+
+                if (OperatingSystem.IsWindows() && Subsystem.Dpx.Dpx.UseGpuMatMulNBits && step > 0)
+                {
+                    GpuD3D12.FlushBatch();
+                }
                 pastLen = totalSeq;
 
                 if (!outputs.TryGetValue("logits", out var logitsTensor))
@@ -791,6 +814,7 @@ namespace Subsystem.Dpx
     }
 
     // Strictly synchronous blocking wrapper that implements IAsyncEnumerable/IAsyncEnumerator to satisfy
+
     // the external IRuntime contract. It uses an in-memory BlockingCollection and zero-cost ValueTask
     // completions, avoiding ThreadPool hops and keeping execution on the calling thread.
     public class BlockingTurnStream<T> : IAsyncEnumerable<T>, IAsyncEnumerator<T>

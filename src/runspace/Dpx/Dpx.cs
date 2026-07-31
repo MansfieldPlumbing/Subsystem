@@ -179,6 +179,11 @@ public class Tensor
     public bool IsQuant => Qb != null;
     public bool IsInt => Ip != null;
     public long Count { get { long n = 1; foreach (var d in Shape) n *= d; return n; } }
+    public long GpuVA;
+    public IntPtr GpuBuf;
+    public ulong VramOffset;
+    public static Tensor Vram(long va, IntPtr buf, ulong offset, params int[] s) => new() { GpuVA = va, GpuBuf = buf, VramOffset = offset, Shape = s };
+    public static Tensor Vram(long va, IntPtr buf, params int[] s) => new() { GpuVA = va, GpuBuf = buf, VramOffset = 0UL, Shape = s };
     public static Tensor F(float[] d, params int[] s) => new() { Fp = d, Shape = s };
     public static unsafe Tensor F(float* ptr, params int[] s) => new() { NativePtr = ptr, Shape = s };
     public static unsafe Tensor F(Span<float> span, params int[] s)
@@ -193,10 +198,19 @@ public class Tensor
         return new Tensor { Fp = span.ToArray(), Shape = s };
     }
     public static Tensor I(long[] d, params int[] s) => new() { Ip = d, Shape = s };
-    // AsF on a quant tensor materializes the full fp32 — the FALLBACK for any op that isn't quant-aware. The hot
-    // consumers (Gemm, Gather) read Qb directly and never hit this; if some other op touches a weight it gets a
-    // transient fp32 (freed by the caller), so correctness is never wrong, only that one op pays.
-    public unsafe Span<float> AsF() => IsQuant ? Dequant() : (NativePtr != null ? new Span<float>(NativePtr, (int)Count) : (Fp ?? Array.ConvertAll(Ip, x => (float)x)));
+    public unsafe Span<float> AsF()
+    {
+        if (IsQuant) return Dequant();
+        if (NativePtr != null) return new Span<float>(NativePtr, (int)Count);
+        if (Fp != null) return Fp;
+        if (GpuBuf != IntPtr.Zero && OperatingSystem.IsWindows())
+        {
+            Fp = GpuD3D12.DownloadFromVram(GpuBuf, VramOffset, (ulong)Count * 4);
+            return Fp;
+        }
+        if (Ip != null) return Array.ConvertAll(Ip, x => (float)x);
+        return Array.Empty<float>();
+    }
     public unsafe long[] AsI()
     {
         if (Ip != null) return Ip;
@@ -239,7 +253,10 @@ public class Tensor
             Qbits = Qbits,
             Qscale = Qscale,
             Qzero = Qzero,
-            Qaxis = Qaxis
+            Qaxis = Qaxis,
+            GpuVA = GpuVA,
+            GpuBuf = GpuBuf,
+            VramOffset = VramOffset
         };
         t.NativePtr = _nativePtr; // calls AddRef!
         return t;
@@ -314,7 +331,7 @@ public class Dpx
     // Per-model MatMulNBits route table (CRQ190 R0): non-null only under DPGPU_BACKEND=auto; passed into
     // Dispatch so bare static callers (benches, DpxRace's oracle) never route.
     readonly DpxRoute _routes = AutoRouteMatMulNBits ? new DpxRoute() : null;
-    public unsafe Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null)
+    public unsafe Dictionary<string, Tensor> Run(Dictionary<string, Tensor> feed, Action<NodeProto, Tensor[], Dictionary<string, Tensor>> onNode = null, DpxLayerNode[] layerNodes = null)
     {
         ActiveVerbose = Verbose;
         try
@@ -360,6 +377,10 @@ public class Dpx
                 _nodeIns = new Tensor[gnodes.Count][];
                 for (int i = 0; i < gnodes.Count; i++) _nodeIns[i] = new Tensor[gnodes[i].Input.Count];
             }
+            if (layerNodes != null)
+            {
+                foreach (var ln in layerNodes) ln?.ResetSubAlloc();
+            }
             // env holds feed + per-run intermediates only; weights resolve through _winit (a per-token
             // dictionary copy of the whole weight map bought nothing - kernels never mutate weights).
             var env = new Dictionary<string, Tensor>(feed);
@@ -374,24 +395,89 @@ public class Dpx
                     var nm = node.Input[i];
                     ins[i] = string.IsNullOrEmpty(nm) ? null : (env.TryGetValue(nm, out var tv) ? tv : _winit[nm]);
                 }
+                DpxLayerNode layerNode = null;
+                if (layerNodes != null && layerNodes.Length > 0 && !string.IsNullOrEmpty(node.Name))
+                {
+                    int idx1 = node.Name.IndexOf("layers.");
+                    if (idx1 >= 0)
+                    {
+                        int idx2 = node.Name.IndexOf('/', idx1 + 7);
+                        if (idx2 > idx1 + 7 && int.TryParse(node.Name.Substring(idx1 + 7, idx2 - (idx1 + 7)), out int lIdx) && lIdx >= 0 && lIdx < layerNodes.Length)
+                        {
+                            layerNode = layerNodes[lIdx];
+                        }
+                    }
+                }
                 Tensor[] outs;
                 try
                 {
                     if (Profile)
                     {
                         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                        outs = Dispatch(node, ins, _routes);
+                        outs = Dispatch(node, ins, _routes, layerNode);
                         double dt = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                         var e = Prof.GetValueOrDefault(node.OpType); Prof = Prof.SetItem(node.OpType, (e.ms + dt, e.n + 1));
                     }
                     else
                     {
-                        outs = Dispatch(node, ins, _routes);
+                        outs = Dispatch(node, ins, _routes, layerNode);
                     }
                 }
                 catch (Exception ex)
                 {
                     throw new Exception($"Error executing node '{node.Name}' (op={node.OpType}): {ex.Message}", ex);
+                }
+                // GPU bisection: if any output is VRAM-resident, download it, re-dispatch on CPU, compare.
+                // Skip ops with side effects (GQA modifies KV cache). Log first divergence per op type.
+                if (ValidateGpu && _validateDivergences < 50 && outs.Length > 0 && outs[0] != null && outs[0].GpuVA != 0
+                    && node.OpType != "GroupQueryAttention")
+                {
+                    try
+                    {
+                        // Materialize CPU copies of inputs (some may themselves be VRAM)
+                        var cpuIns = new Tensor[ins.Length];
+                        for (int ci = 0; ci < ins.Length; ci++)
+                        {
+                            if (ins[ci] == null) { cpuIns[ci] = null; continue; }
+                            if (ins[ci].GpuVA != 0 && ins[ci].Fp == null)
+                                cpuIns[ci] = Tensor.F(GpuD3D12.DownloadFromVram(ins[ci].GpuBuf, ins[ci].VramOffset, (ulong)ins[ci].Count * 4), ins[ci].Shape);
+                            else
+                                cpuIns[ci] = ins[ci];
+                        }
+                        var cpuOuts = Dispatch(node, cpuIns, _routes, null);
+                        for (int oi = 0; oi < outs.Length && oi < cpuOuts.Length; oi++)
+                        {
+                            if (outs[oi] == null || cpuOuts[oi] == null || outs[oi].GpuVA == 0) continue;
+                            var gpuData = GpuD3D12.DownloadFromVram(outs[oi].GpuBuf, outs[oi].VramOffset, (ulong)outs[oi].Count * 4);
+                            var cpuData = cpuOuts[oi].AsF();
+                            if (gpuData.Length != cpuData.Length) { Console.Error.WriteLine($"  [BISECT] {node.OpType} '{node.Name}' output[{oi}] SIZE MISMATCH gpu={gpuData.Length} cpu={cpuData.Length}"); _validateDivergences++; continue; }
+                            float maxErr = 0; int maxIdx = 0;
+                            for (int vi = 0; vi < gpuData.Length; vi++)
+                            {
+                                float err = MathF.Abs(gpuData[vi] - cpuData[vi]);
+                                if (err > maxErr) { maxErr = err; maxIdx = vi; }
+                            }
+                            string key = $"{node.OpType}:{node.Name}:{oi}";
+                            if (maxErr > 1e-3f && !_validateReported.Contains(key))
+                            {
+                                _validateReported.Add(key);
+                                _validateDivergences++;
+                                Console.Error.WriteLine($"  [BISECT] DIVERGE {node.OpType} '{node.Name}' out[{oi}] maxErr={maxErr:E3} at [{maxIdx}]: gpu={gpuData[maxIdx]:E6} cpu={cpuData[maxIdx]:E6} (count={gpuData.Length})");
+                                int shown = 0;
+                                for (int vi = 0; vi < gpuData.Length && shown < 6; vi++)
+                                {
+                                    float e2 = MathF.Abs(gpuData[vi] - cpuData[vi]);
+                                    if (e2 > 1e-3f) { Console.Error.WriteLine($"    [{vi}] gpu={gpuData[vi]:E6} cpu={cpuData[vi]:E6} err={e2:E3}"); shown++; }
+                                }
+                            }
+                            else if (maxErr <= 1e-3f && !_validateReported.Contains(key))
+                            {
+                                _validateReported.Add(key);
+                                Console.Error.WriteLine($"  [BISECT] OK {node.OpType} '{node.Name}' out[{oi}] maxErr={maxErr:E6} (count={gpuData.Length})");
+                            }
+                        }
+                    }
+                    catch (Exception vex) { Console.Error.WriteLine($"  [BISECT] ERROR validating {node.OpType} '{node.Name}': {vex.Message}"); }
                 }
                 // stale-read model: with prob p, a residual merge's second-branch transfer is "skipped" -> the residual carries (drop-path).
                 if (DropP > 0 && node.OpType == "Add" && (DropScope.Length == 0 || node.Name.Contains(DropScope)) && outs.Length > 0 && outs[0] != null && !outs[0].IsInt
@@ -431,34 +517,28 @@ public class Dpx
 
     // route: the per-model MatMulNBits route table (CRQ190 R0) - null (every bare caller) routes nothing
     // and preserves the standing knob behavior exactly. Only Run passes its per-model table through.
-    public static Tensor[] Dispatch(NodeProto n, Tensor[] x, DpxRoute route = null)
+    public static Tensor[] Dispatch(NodeProto n, Tensor[] x, DpxRoute route = null, DpxLayerNode layerNode = null)
     {
         switch (n.OpType)
         {
             case "Add":
-                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && x[0].Count == x[1].Count)
+                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && x[0].Count == x[1].Count && layerNode != null)
                 {
                     var addDxil = ReadDxilResource("add.dxil");
                     if (addDxil.Length > 0)
                     {
-                        var yGpu = new float[x[0].Count];
-                        int rc = GpuD3D12.DispatchAdd(x[0].AsF().ToArray(), x[1].AsF().ToArray(), yGpu, (uint)x[0].Count, addDxil);
-                        if (rc == 0) return One(Tensor.F(yGpu, x[0].Shape));
+                        long va0 = x[0].GpuVA, va1 = x[1].GpuVA;
+                        if (va0 == 0) { var (v, b, o) = layerNode.AllocSub((ulong)x[0].Count * 4); va0 = v; GpuD3D12.UploadToVram(b, o, x[0].AsF().ToArray()); }
+                        if (va1 == 0) { var (v, b, o) = layerNode.AllocSub((ulong)x[1].Count * 4); va1 = v; GpuD3D12.UploadToVram(b, o, x[1].AsF().ToArray()); }
+
+                        var (outVA, outBuf, outOff) = layerNode.AllocSub((ulong)x[0].Count * 4);
+                        int rc = GpuD3D12.DispatchAddVram(va0, va1, outVA, (uint)x[0].Count, addDxil);
+                        if (rc == 0) return One(Tensor.Vram(outVA, outBuf, outOff, x[0].Shape));
                     }
                 }
                 return One(BcastV(x[0], x[1], BinOp.Add));
             case "Sub": return One(BcastV(x[0], x[1], BinOp.Sub));
             case "Mul":
-                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && x[0].Count == x[1].Count)
-                {
-                    var swigluDxil = ReadDxilResource("swiglu.dxil");
-                    if (swigluDxil.Length > 0)
-                    {
-                        var yGpu = new float[x[0].Count];
-                        int rc = GpuD3D12.DispatchSwiGLU(x[0].AsF().ToArray(), x[1].AsF().ToArray(), yGpu, (uint)x[0].Count, swigluDxil);
-                        if (rc == 0) return One(Tensor.F(yGpu, x[0].Shape));
-                    }
-                }
                 return One(BcastV(x[0], x[1], BinOp.Mul));
             case "Div": return One(BcastV(x[0], x[1], BinOp.Div));
             case "Pow": return One(Bcast(x[0], x[1], (a, b) => MathF.Pow(a, b)));
@@ -482,6 +562,51 @@ public class Dpx
                            return One(Un(x[0], a => MathF.Min(hi, MathF.Max(lo, a)))); }
             case "MatMul":
                 if (x[1].IsQuant) return One(QGemm(x[0], x[1], transB: false, 1.0f, null, 0.0f));
+                
+                if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && layerNode != null && (x[0].GpuVA != 0 || x[1].GpuVA != 0))
+                {
+                    var mmDxil = ReadDxilResource("gemm.dxil");
+                    if (mmDxil.Length > 0)
+                    {
+                        int rA = x[0].Shape.Length, rB = x[1].Shape.Length;
+                        int M = x[0].Shape[rA - 2], K = x[0].Shape[rA - 1], N = x[1].Shape[rB - 1];
+                        var outShape = (int[])x[0].Shape.Clone();
+                        outShape[outShape.Length - 1] = N;
+                        
+                        long outBatch = 1;
+                        for (int i = 0; i < outShape.Length - 2; i++) outBatch *= outShape[i];
+
+                        long inputVA0 = x[0].GpuVA;
+                        if (inputVA0 == 0)
+                        {
+                            var (inVA0, inBuf0, inOff0) = layerNode.AllocSub((ulong)x[0].Count * 4);
+                            inputVA0 = inVA0;
+                            GpuD3D12.UploadToVram(inBuf0, inOff0, x[0].AsF().ToArray());
+                        }
+
+                        long inputVA1 = x[1].GpuVA;
+                        if (inputVA1 == 0)
+                        {
+                            var (inVA1, inBuf1, inOff1) = layerNode.AllocSub((ulong)x[1].Count * 4);
+                            inputVA1 = inVA1;
+                            GpuD3D12.UploadToVram(inBuf1, inOff1, x[1].AsF().ToArray());
+                        }
+
+                        ulong totalCount = (ulong)(outBatch * M * N);
+                        var (outVA, outBuf, outOff) = layerNode.AllocSub(totalCount * 4);
+
+                        for (long b = 0; b < outBatch; b++)
+                        {
+                            long curAVA = inputVA0 + b * M * K * 4;
+                            long curBVA = inputVA1 + b * K * N * 4;
+                            long curCVA = outVA + b * M * N * 4;
+                            int rc = GpuD3D12.DispatchMatMulVram(curAVA, curBVA, curCVA, (uint)M, (uint)N, (uint)K, mmDxil);
+                            if (rc != 0) return One(UseGpuMatMul ? GpuMatMul(x[0], x[1]) : MatMul(x[0], x[1]));
+                        }
+                        return One(Tensor.Vram(outVA, outBuf, outOff, outShape));
+                    }
+                }
+                
                 return One(UseGpuMatMul ? GpuMatMul(x[0], x[1]) : MatMul(x[0], x[1]));
             case "Gemm": return One(Gemm(n, x));
             case "Identity": return One(x[0].Clone());
@@ -544,11 +669,11 @@ public class Dpx
             case "Pack": return One(PackOp(x, n));
             case "Fill": return One(FillOp(x, n));
             // ---- Gemma-3n E2B q4 ONNX contrib ops (com.microsoft), grounded against the q4 .db export ----
-            case "MatMulNBits": { var r = ResolveMatMulNBits(x, n, route); DpxExperiments.RecordLogits(n, r); return One(r); }
+            case "MatMulNBits": { var r = ResolveMatMulNBits(x, n, route, layerNode); DpxExperiments.RecordLogits(n, r); return One(r); }
             case "GatherBlockQuantized": return One(GatherBlockQuantized(x, n));
-            case "RotaryEmbedding": return One(RotaryEmbedding(x, n));
-            case "SimplifiedLayerNormalization": return One(SimplifiedLayerNorm(x, n));
-            case "GroupQueryAttention": return GroupQueryAttention(x, n);
+            case "RotaryEmbedding": return One(RotaryEmbedding(x, n, layerNode));
+            case "SimplifiedLayerNormalization": return One(SimplifiedLayerNorm(x, n, layerNode));
+            case "GroupQueryAttention": return GroupQueryAttention(x, n, layerNode);
             default: throw new NotImplementedException($"node #?: {n.OpType} (name={n.Name})");
         }
     }
@@ -930,6 +1055,9 @@ public class Dpx
     // quirks beyond what MatMulNBits itself already assumes); any GPU fault latches _gpuQ4Dead and degrades to the
     // CPU scalar path (the oracle), once, logged — same inv-9 shape as GpuMatMul.
     public static bool UseGpuMatMulNBits = false;
+    public static bool ValidateGpu = false;
+    static int _validateDivergences = 0;
+    static readonly HashSet<string> _validateReported = new(StringComparer.Ordinal);
     static bool _gpuQ4Dead = false;
     // Presence-flow (re-landed once AHB residency deleted the per-call upload churn that killed the razr):
     // q4 GEMMs flow to the GPU whenever the seam initializes — no switch, no env var. A seam-init fault or
@@ -1048,17 +1176,15 @@ public class Dpx
     // Routed entry for the Dispatch MatMulNBits case. With no route table (auto mode off, or a bare
     // static Dispatch caller) or with any explicit knob engaged, this IS the standing MatMulNBits call.
     // Routing engages only for the SIMD-comparable fast shape (bits=4, block_size=32).
-    static Tensor ResolveMatMulNBits(Tensor[] x, NodeProto n, DpxRoute route)
+    static Tensor ResolveMatMulNBits(Tensor[] x, NodeProto n, DpxRoute route, DpxLayerNode layerNode = null)
     {
         if (route == null || UseGpuMatMulNBits || ForceScalarMatMulNBits || _gpuQ4Dead || !Vector128.IsHardwareAccelerated)
-            return MatMulNBits(x, n);
+            return MatMulNBits(x, n, layerNode);
         int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
         if (bits != 4 || bs != 32 || K <= 0 || (K % bs) != 0)
-            return MatMulNBits(x, n);
+            return MatMulNBits(x, n, layerNode);
         int M = (int)(x[0].Count / K);
-        if (!route.Query(M, N, K, bs, out bool gpuWins))
-            return ResolveMatMulNBitsWinner(x, n, route, M, N, K, bs);
-        if (gpuWins)
+        if (route.Query(M, N, K, bs, out bool gpuWins) && gpuWins)
         {
             if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);
             try { return GpuMatMulNBitsResident(x, n, K, N, bs, M); }
@@ -1068,80 +1194,71 @@ public class Dpx
                 Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
             }
         }
-        return MatMulNBits(x, n);   // CPU side: the standing knob-free path (SIMD here; scalar oracle untouched)
+        return MatMulNBits(x, n, layerNode);   // CPU side: the standing knob-free path (SIMD here; scalar oracle untouched)
     }
 
-    // First sight of a shape under auto-route: a direct timed comparison, winner cached for the model's
-    // lifetime. One untimed warmup per lane (GPU warmup pays PSO compile + weight residency, CPU warmup
-    // pays JIT/page-in), then two timed reps each; min wins - min is the steady-state signal a dispatch-
-    // time race can afford on a shared box. A GPU fault latches _gpuQ4Dead (inv-9) and every later shape
-    // resolves CPU through the gate above. Returns the winner's LAST output; discarded CPU outputs are
-    // FreeNative'd (they never enter Run's liveness map).
-    static unsafe Tensor ResolveMatMulNBitsWinner(Tensor[] x, NodeProto n, DpxRoute route, int M, int N, int K, int bs)
+    static unsafe Tensor MatMulNBits(Tensor[] x, NodeProto n, DpxLayerNode layerNode = null)
     {
         if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);
-        const int REPS = 2;
-        double freq = System.Diagnostics.Stopwatch.Frequency;
-        Tensor gpuOut = null; double gpuMs = double.MaxValue;
-        try
-        {
-            GpuMatMulNBitsResident(x, n, K, N, bs, M);   // warmup: PSO + weight upload
-            for (int r = 0; r < REPS; r++)
-            {
-                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                gpuOut = GpuMatMulNBitsResident(x, n, K, N, bs, M);
-                double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / freq;
-                if (ms < gpuMs) gpuMs = ms;
-            }
-        }
-        catch (Exception ex)
-        {
-            _gpuQ4Dead = true;
-            Console.Error.WriteLine($"GPU MatMulNBits unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
-            gpuOut = null;
-        }
-        // CPU lane: the same prep MatMulNBits does, the SIMD kernel called knob-free (DpxRace.CpuLane's shape).
-        int nBlk = K / bs, rowBytes = nBlk * (bs * 4 / 8), zpRowBytes = (nBlk * 4 + 7) / 8, defZp = 8;
-        var a = x[0].AsF(); var scsp = x[2].AsF(); int scLen = scsp.Length;
-        var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        Tensor cpuOut = null; double cpuMs = double.MaxValue;
-        MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen).FreeNative();   // warmup
-        for (int r = 0; r < REPS; r++)
-        {
-            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            var o = MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
-            double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / freq;
-            if (ms < cpuMs) cpuMs = ms;
-            if (r < REPS - 1) o.FreeNative(); else cpuOut = o;
-        }
-        bool gpuWins = gpuOut != null && gpuMs < cpuMs;
-        if (gpuOut != null)
-        {
-            route.Register(M, N, K, bs, gpuWins, cpuMs, gpuMs);
-            Console.Error.WriteLine($"[DPX route] M={M} N={N} K={K} bs={bs} -> {(gpuWins ? "gpu" : "cpu")} (cpu {cpuMs:F3} ms, gpu {gpuMs:F3} ms)");
-        }
-        if (gpuWins) { cpuOut.FreeNative(); return gpuOut; }
-        return cpuOut;
-    }
-
-    // MatMulNBits: Y = A @ dequant(B)^T. B is uint8 [N, K/bs, bs*bits/8] (k-major nibbles, byte=k/2). scale/zp are
-    // per (output-row n, block b=k/bs); 4-bit unsigned, dequant = (q - zp)·scale. zp defaults to 2^(bits-1) when absent.
-    static unsafe Tensor MatMulNBits(Tensor[] x, NodeProto n)
-    {
-        if (DpxExperiments.ShouldDrop(n)) return DpxExperiments.AllocZeros(x, n);   // deadline-drop hook: this correction missed its deadline -> residual carries forward with zeros
         int K = (int)L(n, "K", 0), N = (int)L(n, "N", 0), bits = (int)L(n, "bits", 4), bs = (int)L(n, "block_size", 32);
         int nBlk = K / bs, rowBytes = nBlk * (bs * bits / 8), zpRowBytes = (nBlk * bits + 7) / 8, defZp = 1 << (bits - 1);
-        var a = x[0].AsF(); var scsp = x[2].AsF(); int M = (int)(x[0].Count / K), scLen = scsp.Length;
-        var bSpan = x[1].ReadRawb(); bool hasZp = x.Length > 3 && x[3] != null; var zpSpan = hasZp ? x[3].ReadRawb() : default;
-        // GPU q4 engagement is OPT-IN on Android until the Vulkan q4 shader + AHB import are parity-verified
-        // ON THE ADRENO (the RTX proved D3D12+Vulkan; the phone's first turn hung — unvalidated on that GPU).
-        // The AHB residency machinery below is fully built and validated-at-alloc; a single-GEMM on-device
-        // parity+timing harness is the gate before presence-flow re-lands. UseGpuMatMulNBits forces it on.
+        int M = (int)(x[0].Count / K);
+        bool hasZp = x.Length > 3 && x[3] != null;
+        if (bits == 4 && !_gpuQ4Dead && UseGpuMatMulNBits && OperatingSystem.IsWindows() && layerNode != null)
+        {
+            try
+            {
+                var targetShape = (int[])x[0].Shape.Clone(); targetShape[targetShape.Length - 1] = N;
+                long aVA = x[0].GpuVA;
+                if (aVA == 0)
+                {
+                    var (inVA, inBuf, inOff) = layerNode.AllocSub((ulong)x[0].Count * 4UL);
+                    aVA = inVA;
+                    GpuD3D12.UploadToVram(inBuf, inOff, x[0].AsF().ToArray());
+                }
+
+                var (outVA, outBuf, outOff) = layerNode.AllocSub((ulong)M * (ulong)N * 4UL);
+                long weightKey = GpuWeightKey(x[1], rowBytes * N);
+
+                byte[] dxil = GemmDxilQ4(); int tileN = 16, tileM = 16;
+                if (bs == 32)
+                {
+                    if (M == 1 && N % 8 == 0 && (long)N <= 8L * 65535)
+                    {
+                        var v = Q4Dxil(1);
+                        if (v.Length > 0) { dxil = v; tileN = 8; tileM = 1; }
+                    }
+                    else if (M > 1)
+                    {
+                        var v = Q4Dxil(2);
+                        if (v.Length > 0) { dxil = v; tileN = 16; tileM = 16; }
+                    }
+                }
+
+                bool resident = Gpu.QueryResidentQ4(weightKey);
+                int rc = GpuD3D12.DispatchVramResidentGemmQ4(
+                    aVA,
+                    resident ? Array.Empty<byte>() : x[1].ReadRawb().ToArray(),
+                    resident ? Array.Empty<float>() : x[2].AsF().ToArray(),
+                    resident || !hasZp ? Array.Empty<byte>() : x[3].ReadRawb().ToArray(),
+                    outVA, (uint)M, (uint)N, (uint)K, (uint)bs, hasZp,
+                    dxil, dxil.Length, weightKey, tileN, tileM);
+
+                if (rc == 0) return Tensor.Vram(outVA, outBuf, outOff, targetShape);
+            }
+            catch (Exception ex)
+            {
+                _gpuQ4Dead = true;
+                Console.Error.WriteLine($"GPU MatMulNBits VRAM-resident dispatch unavailable ({ex.GetType().Name}: {ex.Message}); falling back to CPU.");
+            }
+        }
+        var a = x[0].AsF(); var scsp = x[2].AsF(); int scLen = scsp.Length;
+        var bSpan = x[1].ReadRawb(); var zpSpan = hasZp ? x[3].ReadRawb() : default;
         if (bits == 4 && !_gpuQ4Dead && UseGpuMatMulNBits)
         {
             try
             {
-                return GpuMatMulNBitsResident(x, n, K, N, bs, M);   // skips the weight re-copies once resident
+                return GpuMatMulNBitsResident(x, n, K, N, bs, M);
             }
             catch (Exception ex)
             {
@@ -1152,19 +1269,11 @@ public class Dpx
         if (!ForceScalarMatMulNBits && bits == 4 && bs == 32 && Vector128.IsHardwareAccelerated)
             return MatMulNBitsSimd(x, a, scsp, bSpan, zpSpan, K, N, M, nBlk, rowBytes, zpRowBytes, defZp, scLen);
         var y = TensorArena.AllocSpan((long)M * N);
-        // pin: Span can't cross the lambda boundary (CS8175) - `fixed` transparently pins a managed
-        // array OR no-ops over already-stable VOM-region memory, so B/zp being weight-load-time VOM
-        // handles or legacy GC arrays needs no branch here (CRQ164 handle-indirection payoff).
         fixed (float* p_y = y) fixed (float* p_a = a) fixed (float* p_sc = scsp)
         fixed (byte* p_b = bSpan) fixed (byte* p_zp = zpSpan)
         {
             float* py = p_y; float* pa = p_a; float* psc = p_sc; int yl = y.Length, al = a.Length;
             byte* pB = p_b; byte* pZp = p_zp;
-            // Scalar per-N fan-out over DpxMultiplexer lanes (CRQ195), gated by Fence.WaitAll - node-local
-            // synchrony (scratch -> blit loop), no Task/ThreadPool. The pinned pointers above stay valid for the whole call
-            // because WaitAll blocks the `fixed` block's exit until every lane's phase-1 LaneWork has
-            // returned. Each lane owns a static, disjoint [lo,hi) row range; the per-row math below is
-            // unchanged from the sequential form.
             DpMultiplexerForEachN(N, nn =>
             {
                 var sy = new Span<float>(py, yl); var sa = new Span<float>(pa, al); var sc = new Span<float>(psc, scLen);
@@ -1178,7 +1287,7 @@ public class Dpx
                         float aq = 0f, asum = 0f; int k0 = b * bs;
                         for (int i = 0; i < bs; i++)
                         { int k = k0 + i; int q = (pB[rb + (k >> 1)] >> ((k & 1) << 2)) & 0xF; float av = sa[ao + k]; aq += av * q; asum += av; }
-                        acc += s * (aq - zp * asum);   // int-domain accumulate, lift to real units at the block boundary
+                        acc += s * (aq - zp * asum);
                     }
                     sy[m * N + nn] = acc;
                 }
@@ -1371,7 +1480,7 @@ public class Dpx
     // RotaryEmbedding (com.microsoft): rotate-half RoPE. cos/sin caches are [maxpos, head_dim/2]; position_ids index
     // them. interleaved=0 pairs the two halves: out[i]=x[i]·cos - x[i+half]·sin; out[i+half]=x[i+half]·cos + x[i]·sin.
     // num_heads inferred from a 3D [B,S,hidden] input (head_dim = 2·cos_cols); a 4D [B,N,S,H] input is used as-is.
-    static Tensor RotaryEmbedding(Tensor[] x, NodeProto n)
+    static Tensor RotaryEmbedding(Tensor[] x, NodeProto n, DpxLayerNode layerNode = null)
     {
         var inp = x[0]; var pos = x[1].AsI(); var cos = x[2].AsF(); var sin = x[3].AsF();
         bool interleaved = L(n, "interleaved", 0) != 0;
@@ -1379,17 +1488,31 @@ public class Dpx
         int B, Nh, S, Hd;
         if (rank == 4) { B = inp.Shape[0]; Nh = inp.Shape[1]; S = inp.Shape[2]; Hd = inp.Shape[3]; }
         else { B = inp.Shape[0]; S = inp.Shape[1]; int heads = (int)L(n, "num_heads", 0); Hd = rotDim; Nh = heads > 0 ? heads : inp.Shape[2] / Hd; }
-        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits)
+        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && layerNode != null && S == 1)
         {
             var ropeDxil = ReadDxilResource("rope.dxil");
             if (ropeDxil.Length > 0)
             {
-                var oGpu = new float[inp.Count];
+                long p = pos.Length > 0 ? pos[0] : 0;
+                long cb = p * half;
+                var cosArr = cos.ToArray();
+                var sinArr = sin.ToArray();
+
                 var csCombined = new float[rotDim];
-                Array.Copy(cos.ToArray(), 0, csCombined, 0, half);
-                Array.Copy(sin.ToArray(), 0, csCombined, half, half);
-                int rc = GpuD3D12.DispatchRoPE(inp.AsF().ToArray(), csCombined, oGpu, (uint)(B * S), (uint)Nh, (uint)Hd, (uint)(pos.Length > 0 ? pos[0] : 0), ropeDxil);
-                if (rc == 0) return Tensor.F(oGpu, inp.Shape);
+                if (cb + half <= cosArr.Length) Array.Copy(cosArr, (int)cb, csCombined, 0, half);
+                if (cb + half <= sinArr.Length) Array.Copy(sinArr, (int)cb, csCombined, half, half);
+
+                long inputVA = inp.GpuVA;
+                if (inputVA == 0)
+                {
+                    var (inVA, inBuf, inOff) = layerNode.AllocSub((ulong)inp.Count * 4);
+                    inputVA = inVA;
+                    GpuD3D12.UploadToVram(inBuf, inOff, inp.AsF().ToArray());
+                }
+
+                var (outVA, outBuf, outOff) = layerNode.AllocSub((ulong)inp.Count * 4);
+                int rc = GpuD3D12.DispatchRoPEVram(inputVA, csCombined, outVA, (uint)(B * S), (uint)Nh, (uint)Hd, (uint)p, ropeDxil);
+                if (rc == 0) return Tensor.Vram(outVA, outBuf, outOff, inp.Shape);
             }
         }
         var src = inp.AsF(); var o = TensorArena.AllocSpan(src.Length); src.CopyTo(o);
@@ -1415,21 +1538,29 @@ public class Dpx
     }
 
     // SimplifiedLayerNormalization (RMSNorm): y = x / sqrt(mean(x²)+eps) · weight. No mean-subtract, no bias.
-    static Tensor SimplifiedLayerNorm(Tensor[] x, NodeProto n)
+    static Tensor SimplifiedLayerNorm(Tensor[] x, NodeProto n, DpxLayerNode layerNode = null)
     {
         var X = x[0]; var w = x[1].AsF(); var xf = X.AsF();
         int r = X.Shape.Length, axis = (int)L(n, "axis", -1); if (axis < 0) axis += r;
         float eps = F(n, "epsilon", 1e-5f);
         long inner = 1; for (int k = axis; k < r; k++) inner *= X.Shape[k];
         long outer = X.Count / inner;
-        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits)
+        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && layerNode != null)
         {
             var rmsDxil = ReadDxilResource("rmsnorm.dxil");
             if (rmsDxil.Length > 0)
             {
-                var oGpu = new float[X.Count];
-                int rc = GpuD3D12.DispatchRMSNorm(xf.ToArray(), w.ToArray(), oGpu, (uint)outer, (uint)inner, eps, rmsDxil);
-                if (rc == 0) return Tensor.F(oGpu, X.Shape);
+                long inputVA = X.GpuVA;
+                if (inputVA == 0)
+                {
+                    var (inVA, inBuf, inOff) = layerNode.AllocSub((ulong)X.Count * 4);
+                    inputVA = inVA;
+                    GpuD3D12.UploadToVram(inBuf, inOff, xf.ToArray());
+                }
+
+                var (outVA, outBuf, outOff) = layerNode.AllocSub((ulong)X.Count * 4);
+                int rc = GpuD3D12.DispatchRMSNormVram(inputVA, w.ToArray(), outVA, (uint)outer, (uint)inner, eps, rmsDxil);
+                if (rc == 0) return Tensor.Vram(outVA, outBuf, outOff, X.Shape);
             }
         }
         var o = TensorArena.AllocSpan(X.Count);
@@ -1456,7 +1587,7 @@ public class Dpx
     // GroupQueryAttention (com.microsoft): grouped MQA with KV-cache append, causal + sliding-window mask, additive
     // attention_bias[10]. do_rotary=0 here (RoPE applied by upstream RotaryEmbedding nodes). q[B,S,Nq·H]; k/v[B,S,Nkv·H];
     // past_k/v[B,Nkv,past,H]. Outputs: attn[B,S,Nq·H], present_k/v[B,Nkv,total,H] (the full cache; window only masks).
-    static unsafe Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n)
+    static unsafe Tensor[] GroupQueryAttention(Tensor[] x, NodeProto n, DpxLayerNode layerNode = null)
     {
         if (ActiveVerbose)
         {
@@ -1486,6 +1617,7 @@ public class Dpx
         {
             Console.Error.WriteLine($"  PARAMS: Nq={Nq}, Nkv={Nkv}, win={win}, scaleAttr={scaleAttr}, softcap={softcap}, B={B}, past={past}, H={H}, S={S}, total={total}, scale={scale}");
         }
+
         var qf = x[0].AsF(); var kf = x[1].AsF(); var vf = x[2].AsF();
         // KV ring lane (CRQ190): a ring-backed past (Tensor.KvCap = physical seq capacity of a persistent
         // [B,Nkv,cap,H] region) skips the O(total) re-copy - past rows are read where they already live and
@@ -1551,7 +1683,7 @@ public class Dpx
                 return scores;
             }, _ => { });
         }
-        Tensor presentK, presentV;
+        Tensor presentK = null, presentV = null;
         if (ring)
         {
             // present aliases the ring zero-copy: KvCap marks it so the decode loop knows the append
@@ -1559,8 +1691,23 @@ public class Dpx
             presentK = Tensor.F(pastK.NativePtr, B, Nkv, total, H); presentK.KvCap = pastK.KvCap;
             presentV = Tensor.F(pastV.NativePtr, B, Nkv, total, H); presentV.KvCap = pastV.KvCap;
         }
-        else { presentK = Tensor.F(pk, B, Nkv, total, H); presentV = Tensor.F(pv, B, Nkv, total, H); }
-        return new[] { Tensor.F(outp, B, S, Nq * H), presentK, presentV };
+        else
+        {
+            presentK = Tensor.F(pk, B, Nkv, total, H);
+            presentV = Tensor.F(pv, B, Nkv, total, H);
+        }
+        Tensor outTensor;
+        if (OperatingSystem.IsWindows() && UseGpuMatMulNBits && layerNode != null && (x[0].GpuVA != 0 || pastK.GpuVA != 0))
+        {
+            var (outVA, outBuf, outOff) = layerNode.AllocSub((ulong)outp.Length * 4);
+            GpuD3D12.UploadToVram(outBuf, outOff, outp.ToArray());
+            outTensor = Tensor.Vram(outVA, outBuf, outOff, B, S, Nq * H);
+        }
+        else
+        {
+            outTensor = Tensor.F(outp, B, S, Nq * H);
+        }
+        return new[] { outTensor, presentK, presentV };
     }
 
     static unsafe Tensor Reshape(Tensor a, Tensor shapeT, int flattenAxis = -1, Tensor src = null)
@@ -1574,6 +1721,7 @@ public class Dpx
             for (int k = 0; k < want.Length; k++) { if (want[k] == -1) neg = k; else if (want[k] == 0) { sh[k] = a.Shape[k]; known *= sh[k]; } else { sh[k] = (int)want[k]; known *= sh[k]; } }
             if (neg >= 0) sh[neg] = (int)(a.Count / known);
         }
+        if (a.GpuVA != 0) return Tensor.Vram(a.GpuVA, a.GpuBuf, a.VramOffset, sh);
         return a.IsInt ? Tensor.I(a.Ip, sh) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh) : Tensor.F(a.Fp, sh));
     }
 
@@ -1582,6 +1730,7 @@ public class Dpx
         var axes = axesT?.AsI()?.Select(v => (int)(v < 0 ? v + a.Shape.Length : v)).ToHashSet();
         var sh = new List<int>();
         for (int k = 0; k < a.Shape.Length; k++) if (!(a.Shape[k] == 1 && (axes == null || axes.Contains(k)))) sh.Add(a.Shape[k]);
+        if (a.GpuVA != 0) return Tensor.Vram(a.GpuVA, a.GpuBuf, a.VramOffset, sh.ToArray());
         return a.IsInt ? Tensor.I(a.Ip, sh.ToArray()) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh.ToArray()) : Tensor.F(a.Fp, sh.ToArray()));
     }
 
@@ -1592,6 +1741,7 @@ public class Dpx
         var axes = axesList.Select(v => (int)(v < 0 ? v + r : v)).ToHashSet();
         var sh = new int[r]; int si = 0;
         for (int k = 0; k < r; k++) sh[k] = axes.Contains(k) ? 1 : a.Shape[si++];
+        if (a.GpuVA != 0) return Tensor.Vram(a.GpuVA, a.GpuBuf, a.VramOffset, sh);
         return a.IsInt ? Tensor.I(a.Ip, sh) : (a.NativePtr != null ? Tensor.F(a.NativePtr, sh) : Tensor.F(a.Fp, sh));
     }
 
@@ -2196,7 +2346,11 @@ public class Dpx
         {
             var outShape = (int[])data.Shape.Clone(); outShape[axis] = splitSizes[i];
             long outRow = splitSizes[i] * innerSize; long outSize = blocks * outRow;
-            if (isInt) { var o = new long[outSize]; for (long bl = 0; bl < blocks; bl++) Array.Copy(data.Ip, bl * inRow + offAxis * innerSize, o, bl * outRow, outRow); outputs[i] = Tensor.I(o, outShape); }
+            if (data.GpuVA != 0 && blocks == 1)
+            {
+                outputs[i] = Tensor.Vram(data.GpuVA + (long)(offAxis * innerSize * 4), data.GpuBuf, data.VramOffset + (ulong)(offAxis * innerSize * 4), outShape);
+            }
+            else if (isInt) { var o = new long[outSize]; for (long bl = 0; bl < blocks; bl++) Array.Copy(data.Ip, bl * inRow + offAxis * innerSize, o, bl * outRow, outRow); outputs[i] = Tensor.I(o, outShape); }
             else
             {
                 var o = TensorArena.AllocSpan(outSize);

@@ -43,14 +43,34 @@ public sealed class DpxLayerNode
         }
     }
 
+    private long _subAllocOffset = 0;
+
+    public void ResetSubAlloc()
+    {
+        _subAllocOffset = 0;
+    }
+
+    public (long va, IntPtr buf, ulong offset) AllocSub(ulong bytes)
+    {
+        ulong aligned = (bytes + 255UL) & ~255UL;
+        if ((ulong)_subAllocOffset + aligned > ScratchBytes)
+        {
+            _subAllocOffset = 0; // wrap around pre-allocated arena
+        }
+        ulong offset = (ulong)_subAllocOffset;
+        long va = ScratchVA + (long)offset;
+        _subAllocOffset += (long)aligned;
+        return (va, ScratchBuffer, offset);
+    }
+
     public DpxLayerNode(int layerIndex, int rawWidthBytes)
     {
         LayerIndex = layerIndex;
         int alignedPitch = CalculateAlignedPitch(rawWidthBytes);
         AlignedScratchPitch = alignedPitch;
         AlignedBlitPitch = alignedPitch;
-        ScratchBytes = (ulong)alignedPitch;
-        BlitBytes = (ulong)alignedPitch;
+        ScratchBytes = Math.Max(32UL * 1024UL * 1024UL, (ulong)alignedPitch * 16UL);
+        BlitBytes = Math.Max(8UL * 1024UL * 1024UL, (ulong)alignedPitch * 4UL);
     }
 
     public static int CalculateAlignedPitch(int widthBytes)

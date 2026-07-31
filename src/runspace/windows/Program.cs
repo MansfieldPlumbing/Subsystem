@@ -64,6 +64,7 @@ public static class Program
             "cell"                                                           => Subsystem.Shell.Cell.CellShell.Run(args[1..], Shim.LoadProjectCmdlets),
             "repl"                                                           => Subsystem.Shell.Cell.Repl.Run(args[1..], Shim.LoadProjectCmdlets),
             "gateway" or "tray"                                             => SystemTray.Run(args[1..]),
+            "dpx-shader-test"                                                => DpxShaderTest.Run(args[1..]),
             _                                                                => Shim.Run(args),
         };
     }
